@@ -262,7 +262,10 @@ export component SettingsWindow inherits Window {
     min-width: 760px;
     min-height: 520px;
     // Opaque: without it the software renderer leaves the window see-through.
-    background: Ice.body-lo;
+    // `repaint` flips (a shade no eye can tell) when Windows asks for the
+    // window again, so the whole of it is redrawn (see repaint_on_expose).
+    in property <bool> repaint;
+    background: root.repaint ? Ice.body-lo : Ice.body-lo.with-alpha(0.999);
 
     in property <SettingsView> s;
     in-out property <string> page: "general";
@@ -573,7 +576,8 @@ export component Tray inherits SystemTrayIcon {
 export component ConfirmWindow inherits Window {
     title: "FubuNotch v2";
     preferred-width: 480px;
-    background: Palette.background;
+    in property <bool> repaint;
+    background: root.repaint ? Palette.background : Palette.background.with-alpha(0.999);
     in property <string> heading;
     in property <string> message;
     in property <string> confirm-label: "Confirm";

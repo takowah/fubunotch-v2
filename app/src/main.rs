@@ -269,13 +269,61 @@ const FRAME_EX_STYLES: u32 = 0x0004_0000 /* APPWINDOW */ | 0x0000_0100 /* WINDOW
 
 /// The island's native window, once the event loop has made it.
 fn island_hwnd(ui: &Island) -> Option<windows::Win32::Foundation::HWND> {
+    hwnd_of(ui.window())
+}
+
+/// A Slint window's native window, once the event loop has made it.
+fn hwnd_of(window: &slint::Window) -> Option<windows::Win32::Foundation::HWND> {
     use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    ui.window()
+    window
         .with_winit_window(|win: &winit::window::Window| match win.window_handle().ok()?.as_raw() {
             RawWindowHandle::Win32(h) => Some(windows::Win32::Foundation::HWND(h.hwnd.get() as *mut core::ffi::c_void)),
             _ => None,
         })
         .flatten()
+}
+
+thread_local! {
+    /// What to flip on each window when Windows asks to see it again.
+    static REPAINT: RefCell<HashMap<isize, Box<dyn Fn()>>> = RefCell::new(HashMap::new());
+}
+
+/// Slint's software renderer only presents what changed. When another window
+/// uncovers one of ours and Windows hasn't kept its picture (some PCs don't),
+/// nothing changed, nothing is presented, and the other window's pixels stay
+/// in ours. On WM_PAINT `flip` marks the whole window changed, so it is all
+/// drawn and presented again. Called once the window is up.
+fn repaint_on_expose(window: &slint::Window, flip: impl Fn() + 'static) {
+    let Some(hwnd) = hwnd_of(window) else { return };
+    REPAINT.with(|m| m.borrow_mut().insert(hwnd.0 as isize, Box::new(flip)));
+    unsafe {
+        let _ = windows::Win32::UI::Shell::SetWindowSubclass(hwnd, Some(on_expose), 0x5245_5041, 0);
+    }
+}
+
+unsafe extern "system" fn on_expose(
+    hwnd: windows::Win32::Foundation::HWND,
+    msg: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+    _id: usize,
+    _data: usize,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{WM_NCDESTROY, WM_PAINT};
+    // Only a real uncovering: Slint's own redraws come as an internal paint
+    // with nothing invalid, and flipping on those would loop forever.
+    let exposed = msg == WM_PAINT && unsafe { windows::Win32::Graphics::Gdi::GetUpdateRect(hwnd, None, false) }.as_bool();
+    if exposed {
+        // Take it out while it runs: flipping may reach Slint, which may paint.
+        let flip = REPAINT.with(|m| m.borrow_mut().remove(&(hwnd.0 as isize)));
+        if let Some(f) = flip {
+            f();
+            REPAINT.with(|m| m.borrow_mut().insert(hwnd.0 as isize, f));
+        }
+    } else if msg == WM_NCDESTROY {
+        REPAINT.with(|m| m.borrow_mut().remove(&(hwnd.0 as isize)));
+    }
+    unsafe { windows::Win32::UI::Shell::DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
 /// Lets title changes and activation through without the caption painting
@@ -1417,6 +1465,17 @@ fn open_settings(ui: &Island) {
         });
     });
     let _ = win.show();
+    let weak = win.as_weak();
+    Timer::single_shot(std::time::Duration::from_millis(60), move || {
+        if let Some(w) = weak.upgrade() {
+            let again = w.as_weak();
+            repaint_on_expose(w.window(), move || {
+                if let Some(w) = again.upgrade() {
+                    w.set_repaint(!w.get_repaint());
+                }
+            });
+        }
+    });
     with_state(|state| state.settings_window = Some(win));
     update_background(ui);
     start_pet();
@@ -1493,6 +1552,17 @@ fn ask_claude_hooks(ui: &Island, install: bool) {
         }
     });
     let _ = confirm.show();
+    let weak = confirm.as_weak();
+    Timer::single_shot(std::time::Duration::from_millis(60), move || {
+        if let Some(c) = weak.upgrade() {
+            let again = c.as_weak();
+            repaint_on_expose(c.window(), move || {
+                if let Some(c) = again.upgrade() {
+                    c.set_repaint(!c.get_repaint());
+                }
+            });
+        }
+    });
     with_state(|state| state.confirm = Some(confirm));
 }
 
