@@ -57,8 +57,8 @@ const COMPACT_LYRIC_TALL: f32 = 58.0;
 /// The row under Line's lyric: a notice with a message, and without.
 const LINE_NOTICE_H: f32 = 50.0;
 const LINE_NOTICE_SHORT_H: f32 = 30.0;
-/// About as many characters as fit on Line's one line at 13 px.
-const LYRIC_ONE_LINE: usize = 46;
+/// About as many characters as fit on Line's one line at 13 px (Space Mono).
+const LYRIC_ONE_LINE: usize = 44;
 const EXPANDED: (f32, f32) = (520.0, 200.0);
 /// The expanded island grows for a long list (To-do), up to this tall; the
 /// rest scrolls.

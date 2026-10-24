@@ -5,6 +5,9 @@
 // size: Rust clips it to the island with a window region, so the rest of the
 // top of the screen stays clickable.
 
+// Space Mono (SIL OFL 1.1, assets/fonts/OFL.txt), built into the app.
+import "../assets/fonts/SpaceMono-Regular.ttf";
+import "../assets/fonts/SpaceMono-Bold.ttf";
 import { Ice } from "theme.slint";
 import { Sprites } from "sprites.slint";
 export { Ice }
@@ -239,7 +242,8 @@ component Chip inherits Rectangle {
     in property <string> label;
     in property <bool> active;
     callback clicked();
-    width: t.preferred-width + 20px;
+    // Space Mono runs wide: a size smaller and less padding keep the row (and ⚙) inside.
+    width: t.preferred-width + 16px;
     height: 24px;
     border-radius: 12px;
     background: active ? Ice.glow.with-alpha(0.26) : (area.has-hover ? Ice.ink.with-alpha(0.07) : transparent);
@@ -247,7 +251,7 @@ component Chip inherits Rectangle {
     t := Text {
         text: label;
         color: active ? Ice.ink : Ice.dim;
-        font-size: 11.5px;
+        font-size: 10.5px;
         font-weight: active ? 700 : 500;
         animate color { duration: 200ms; }
     }
@@ -961,6 +965,7 @@ component NotifPage inherits VerticalLayout {
 // ── The island ───────────────────────────────────────────────────────────────
 
 export component Island inherits Window {
+    default-font-family: "Space Mono";
     title: "FubuNotch v2";
     no-frame: true;
     always-on-top: true;

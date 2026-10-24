@@ -59,6 +59,6 @@ Checks without a screen: `FUBUNOTCH_V2_SNAPSHOT=out.png` draws the island into a
 
 ## License and credits
 
-The code is MIT, see [LICENSE](LICENSE).
+The code is MIT, see [LICENSE](LICENSE). The typeface is [Space Mono](https://github.com/googlefonts/spacemono) under the SIL Open Font License 1.1 ([app/assets/fonts/OFL.txt](app/assets/fonts/OFL.txt)).
 
 This is an unofficial, non-commercial fan project. It is not affiliated with or endorsed by COVER Corporation or hololive production. Shirakami Fubuki, Ookami Mio, Tokoyami Towa, AZKi and Hoshimachi Suisei are hololive production talents; the pixel mascots are fan art drawn for this project, and the MIT license does not grant any rights to the characters. If you are a rights holder and want something changed, please open an issue.

@@ -4,6 +4,9 @@
 // sidebar of pages and cards of rows (title, hint, control), and the theme's
 // pixel mascot living on top of it all (Rust walks it around).
 
+// Space Mono (SIL OFL 1.1, assets/fonts/OFL.txt), built into the app.
+import "../assets/fonts/SpaceMono-Regular.ttf";
+import "../assets/fonts/SpaceMono-Bold.ttf";
 import { Button, Palette } from "std-widgets.slint";
 import { Ice } from "theme.slint";
 import { Sprites } from "sprites.slint";
@@ -256,6 +259,7 @@ component ThemeCard inherits Rectangle {
 // ── The window ───────────────────────────────────────────────────────────────
 
 export component SettingsWindow inherits Window {
+    default-font-family: "Space Mono";
     title: "FubuNotch v2 · Settings";
     preferred-width: 900px;
     preferred-height: 600px;
@@ -574,6 +578,7 @@ export component Tray inherits SystemTrayIcon {
 
 /// A yes/no question before something is written outside FubuNotch.
 export component ConfirmWindow inherits Window {
+    default-font-family: "Space Mono";
     title: "FubuNotch v2";
     preferred-width: 480px;
     in property <bool> repaint;
