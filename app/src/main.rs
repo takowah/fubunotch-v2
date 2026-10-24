@@ -107,6 +107,10 @@ struct State {
     line_held: bool,
     /// Counts the music's notices (song, play, pause, stop), one id each.
     music_events: u64,
+    /// Do not disturb: the island stays down for notifications (calls excepted).
+    dnd: bool,
+    /// Whether a Focus round ran at the last refresh: DND follows it.
+    last_focus_running: bool,
     /// Until when the front shows under Line's lyric (ms).
     line_notice_until: u64,
     /// What the compact island showed last (see show_changes).
@@ -569,6 +573,15 @@ fn refresh(ui: &Island) {
         // Modes: a new notice pops the hidden island up; the compact island
         // goes up hide_after() later unless someone waits for an answer.
         let front_kind = view.front.map(|a| a.kind);
+        // Do not disturb comes on with a Focus round and goes with its pause or stop.
+        let focus_running = state.focus.running();
+        if focus_running != state.last_focus_running {
+            state.last_focus_running = focus_running;
+            state.dnd = focus_running;
+        }
+        ui.set_dnd(state.dnd);
+        // Quiet: nothing pops the island but a question or a call.
+        let quiet = state.dnd && front_kind != Some(Kind::Ask) && !view.front.is_some_and(|a| a.id.starts_with("notif:") && is_call(&a.title, &a.body));
         let front_changed = front_id.is_some() && front_id != state.last_front;
         state.last_front = front_id.clone();
         if state.pinned {
@@ -576,6 +589,7 @@ fn refresh(ui: &Island) {
             state.mode = if std::env::var("FUBUNOTCH_V2_EXPANDED").is_ok_and(|v| v == "compact") { Mode::Compact } else { Mode::Expanded };
             state.hide_at = None;
         } else if front_changed
+            && !quiet
             && front_kind != Some(Kind::Ambient)
             && state.mode == Mode::Hidden
             // Settings → General → Pop up for activities; water reminders still come (v1).
@@ -586,7 +600,7 @@ fn refresh(ui: &Island) {
         }
         // A notification floats at least NOTIF_HOLD_MS, a new one again in full
         // even when the capsule is already down.
-        if front_changed && state.mode == Mode::Compact && front_id.as_deref().is_some_and(|id| id.starts_with("notif:") || id.starts_with("music:event")) {
+        if front_changed && !quiet && state.mode == Mode::Compact && front_id.as_deref().is_some_and(|id| id.starts_with("notif:") || id.starts_with("music:event")) {
             let hold = now + hide_after(&state.settings).max(NOTIF_HOLD_MS);
             state.hide_at = Some(state.hide_at.map_or(hold, |t| t.max(hold)));
         }
@@ -938,7 +952,7 @@ fn on_music(ui: &Island, snap: music::Snapshot) {
         } else {
             None
         };
-        if let Some((title, body)) = event.filter(|_| now > MUSIC_EVENTS_AFTER) {
+        if let Some((title, body)) = event.filter(|_| now > MUSIC_EVENTS_AFTER && !state.dnd) {
             state.arbiter.end(&format!("music:event:{}", state.music_events), now);
             state.music_events += 1;
             let json = serde_json::json!({
@@ -1017,7 +1031,7 @@ fn start_notifications(ui: &Island) {
                 }
             });
         },
-        // Access known: Windows' banners follow "Only on the island".
+        // Access known: Windows' banners follow the module.
         || {
             let _ = slint::invoke_from_event_loop(|| {
                 with_state(sync_banners);
@@ -1027,17 +1041,23 @@ fn start_notifications(ui: &Island) {
     with_state(|state| state.notif_watcher = Some(watcher));
 }
 
-/// Settings → Notifications → "Only on the island": Windows' pop-up banners
-/// off for every app that is on here, and back as they were for the others,
-/// when the switch is off or FubuNotch can't read notifications.
+/// While the Notifications module is on (and can read them), Windows' pop-up
+/// banners are off for every app that is on here, the Start menu's included,
+/// so even a first notification shows only on the island; back as they were
+/// for the others, when the module is off, or without access.
 fn sync_banners(state: &mut State) {
-    let want = state.settings.notifications.only_island && state.settings.is_on("notifications") && notif::has_access();
+    // A snapshot check never touches Windows' settings.
+    if snapshot_mode() {
+        return;
+    }
+    let want = state.settings.is_on("notifications") && notif::has_access();
     // The apps switched off here keep their banners: nothing would show them.
     let off: Vec<String> = state.settings.notifications.off.iter().filter_map(|name| state.data.notif_apps.get(name).cloned()).collect();
     let mut kept = std::mem::take(&mut state.data.banners);
     let mut changed = banners::give_back(banners::SETTINGS, &mut kept, |a| !want || off.iter().any(|o| o == a));
     if want {
-        let apps = banners::apps(banners::SETTINGS);
+        let mut apps = banners::apps(banners::SETTINGS);
+        apps.extend(banners::start_apps());
         changed |= banners::take(banners::SETTINGS, apps.iter().map(String::as_str).filter(|a| !off.iter().any(|o| o == a)), &mut kept);
     }
     state.data.banners = kept;
@@ -1046,11 +1066,23 @@ fn sync_banners(state: &mut State) {
     }
 }
 
+/// A call by its words (WhatsApp, Teams, Phone Link…): it comes through Do not disturb.
+fn is_call(title: &str, body: &str) -> bool {
+    let text = format!("{title} {body}").to_lowercase();
+    ["call", "panggilan", "telepon", "memanggil"].iter().any(|w| text.contains(w))
+}
+
+/// FUBUNOTCH_V2_SNAPSHOT: a picture is drawn and the app quits.
+fn snapshot_mode() -> bool {
+    std::env::var_os("FUBUNOTCH_V2_SNAPSHOT").is_some()
+}
+
 /// A new notification: into the history, and up on the island if pop-ups are on.
 fn on_notification(ui: &Island, n: notif::Notif) {
     with_state(|state| {
         let now = now_ms(state.started);
-        if state.settings.notifications.popups {
+        // Do not disturb: into the history only, unless it's a call.
+        if state.settings.notifications.popups && (!state.dnd || is_call(&n.title, &n.body)) {
             let json = serde_json::json!({
                 "id": format!("notif:{}", n.id),
                 "source": n.app,
@@ -1066,7 +1098,7 @@ fn on_notification(ui: &Island, n: notif::Notif) {
         // own AUMID, as some apps' settings sit in nested keys Windows makes
         // only then.
         let off_here = state.settings.notifications.off.iter().any(|o| o.eq_ignore_ascii_case(&n.app));
-        if state.settings.notifications.only_island && notif::has_access() && !off_here && !n.aumid.is_empty() && !state.data.banners.contains_key(&n.aumid) {
+        if !snapshot_mode() && state.settings.is_on("notifications") && notif::has_access() && !off_here && !n.aumid.is_empty() && !state.data.banners.contains_key(&n.aumid) {
             if banners::take(banners::SETTINGS, [n.aumid.as_str()], &mut state.data.banners) {
                 store::save_data(&state.data);
             }
@@ -1282,7 +1314,6 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         lyrics_youtube: s.music.lyrics_youtube,
         romaji: s.music.romaji,
         notif_popups: s.notifications.popups,
-        notif_only_island: s.notifications.only_island,
         notif_access: notif::has_access(),
         notif_list: ModelRc::new(VecModel::from(notif_list)),
         sys_volume: s.system.volume,
@@ -1355,7 +1386,6 @@ fn set_flag(s: &mut Settings, key: &str, on: bool) {
         "music.lyrics_youtube" => s.music.lyrics_youtube = on,
         "music.romaji" => s.music.romaji = on,
         "notifications.popups" => s.notifications.popups = on,
-        "notifications.only_island" => s.notifications.only_island = on,
         "system.volume" => s.system.volume = on,
         "system.caps_lock" => s.system.caps_lock = on,
         "system.keyboard_layout" => s.system.keyboard_layout = on,
@@ -1806,6 +1836,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             held: false,
             line_held: false,
             music_events: 0,
+            dnd: std::env::var_os("FUBUNOTCH_V2_DND").is_some(),
+            last_focus_running: false,
             line_notice_until: 0,
             last_shown: String::new(),
             life: mascot::Life::default(),
@@ -1892,6 +1924,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let Some(ui) = weak.upgrade() else { return };
         with_state(|state| state.active_tab = id.to_string());
         refresh(&ui);
+    });
+
+    let weak = ui.as_weak();
+    ui.on_dnd_clicked(move || {
+        if let Some(ui) = weak.upgrade() {
+            with_state(|state| state.dnd = !state.dnd);
+            refresh(&ui);
+        }
     });
 
     let weak = ui.as_weak();
@@ -2171,6 +2211,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if with_state(|s| s.settings.is_on("notifications")).unwrap_or(false) {
         *NOTIF_APPS.lock().unwrap_or_else(|e| e.into_inner()) = with_state(|s| s.settings.notifications.filter()).unwrap_or_default();
         start_notifications(&ui);
+    }
+    // A newly installed app gets a key from Windows: its banners follow too.
+    if !snapshot_mode() {
+        banners::watch(banners::SETTINGS, || {
+            let _ = slint::invoke_from_event_loop(|| {
+                with_state(sync_banners);
+            });
+        });
     }
 
     if std::env::var_os("FUBUNOTCH_V2_DEMO_WATER").is_some() {

@@ -64,9 +64,6 @@ pub struct NotificationSettings {
     /// Apps switched off one by one in Settings (their names), as in
     /// Windows' own list: every other app stays on.
     pub off: Vec<String>,
-    /// Windows' own pop-up banners off for the apps that are on: notifications
-    /// show only on the island (and still go to Windows' notification centre).
-    pub only_island: bool,
 }
 
 impl NotificationSettings {
@@ -79,7 +76,7 @@ impl NotificationSettings {
 impl Default for NotificationSettings {
     fn default() -> Self {
         // Every app, as v1 had it; the switches turn single apps off.
-        NotificationSettings { popups: true, apps: vec!["*".into()], off: Vec::new(), only_island: false }
+        NotificationSettings { popups: true, apps: vec!["*".into()], off: Vec::new() }
     }
 }
 

@@ -243,7 +243,7 @@ component Chip inherits Rectangle {
     in property <bool> active;
     callback clicked();
     // Space Mono runs wide: a size smaller and less padding keep the row (and ⚙) inside.
-    width: t.preferred-width + 16px;
+    width: t.preferred-width + 12px;
     height: 24px;
     border-radius: 12px;
     background: active ? Ice.glow.with-alpha(0.26) : (area.has-hover ? Ice.ink.with-alpha(0.07) : transparent);
@@ -281,6 +281,7 @@ global Icons {
     out property <string> next: "M 5 5 L 15 12 L 5 19 Z M 18.5 5 V 19";
     out property <string> play: "M 8 4.5 L 19.5 12 L 8 19.5 Z";
     out property <string> pause: "M 8 5 V 19 M 16 5 V 19";
+    out property <string> moon: "M 20 14.5 A 8.5 8.5 0 1 1 9.5 4 A 6.8 6.8 0 0 0 20 14.5 Z";
     out property <string> reset: "M 4.5 12 A 7.5 7.5 0 1 0 7 6.4 M 4 3.5 V 7.5 H 8";
     out property <string> like: "M 7.5 10.5 V 20 M 7.5 10.5 L 11 3.5 C 12.6 3.5 13.6 4.6 13.2 6.2 L 12.3 10 H 18.4 C 19.6 10 20.4 11.1 20.1 12.2 L 18.5 18.5 C 18.2 19.4 17.5 20 16.6 20 H 3.5 V 10.5 Z";
     out property <string> dislike: "M 7.5 13.5 V 4 M 7.5 13.5 L 11 20.5 C 12.6 20.5 13.6 19.4 13.2 17.8 L 12.3 14 H 18.4 C 19.6 14 20.4 12.9 20.1 11.8 L 18.5 5.5 C 18.2 4.6 17.5 4 16.6 4 H 3.5 V 13.5 Z";
@@ -1001,6 +1002,9 @@ export component Island inherits Window {
     in property <bool> line-notice;
     // Flipped by Rust to have the island drawn again in full (see the body).
     in property <bool> repaint;
+    // Do not disturb: the island stays down for notifications (calls excepted).
+    in property <bool> dnd;
+    callback dnd-clicked();
     in property <int> mascot-dx;
     in property <int> mascot-dy;
     in property <bool> mascot-left;
@@ -1172,7 +1176,20 @@ export component Island inherits Window {
                         wrap: word-wrap;
                         overflow: elide;
                     }
-                    if root.mascot-on : Rectangle { width: 32px; }
+                    if root.mascot-on : Rectangle {
+                        width: 32px;
+                        if root.dnd : Path {
+                            x: parent.width - self.width;
+                            y: (parent.height - self.height) / 2;
+                            width: 12px;
+                            height: 12px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            commands: Icons.moon;
+                            fill: Ice.dim;
+                            stroke: transparent;
+                        }
+                    }
                 }
                 if root.line-notice : Rectangle { height: 1px; background: Ice.glow.with-alpha(0.22); }
                 if root.line-notice : HorizontalLayout {
@@ -1253,6 +1270,16 @@ export component Island inherits Window {
                     font-weight: 700;
                     vertical-alignment: center;
                 }
+                if root.dnd : Path {
+                    width: 12px;
+                    height: 12px;
+                    y: (parent.height - self.height) / 2;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: Icons.moon;
+                    fill: Ice.dim;
+                    stroke: transparent;
+                }
             }
 
             // Expanded: tabs, then the page of the active one.
@@ -1265,14 +1292,16 @@ export component Island inherits Window {
                 spacing: 10px;
 
                 HorizontalLayout {
-                    spacing: 4px;
-                    height: 24px;
+                    spacing: 2px;
+                    height: 28px;
                     Chip { label: "Home"; active: root.active-tab == "home"; clicked => { root.tab-clicked("home"); } }
                     for t in root.tabs : Chip { label: t.label; active: root.active-tab == t.id; clicked => { root.tab-clicked(t.id); } }
                     Rectangle { horizontal-stretch: 1; }
                     Hud { text: root.clock; }
-                    Rectangle { width: 6px; }
-                    RoundButton { glyph: "⚙"; clicked => { root.open-settings(); } }
+                    Rectangle { width: 4px; }
+                    // Do not disturb, beside Settings.
+                    IconButton { icon: Icons.moon; size: 28px; icon-size: 15px; stroke-width: 1.8px; on: root.dnd; filled: root.dnd; clicked => { root.dnd-clicked(); } }
+                    RoundButton { glyph: "⚙"; size: 28px; glyph-size: 16px; clicked => { root.open-settings(); } }
                 }
 
                 Rectangle {

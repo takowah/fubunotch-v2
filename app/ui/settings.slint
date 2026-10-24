@@ -28,7 +28,6 @@ export struct SettingsView {
     lyrics-youtube: bool,
     romaji: bool,
     notif-popups: bool,
-    notif-only-island: bool,
     // Windows lets FubuNotch read notifications.
     notif-access: bool,
     notif-list: [AppSwitch],
@@ -483,14 +482,18 @@ export component SettingsWindow inherits Window {
 
                 // ── Notifications ──
                 if root.page == "notifications" : Card {
-                    SettingRow { title: "Pop up the island"; hint: "For each new notification from an app that is on."; Toggle { on: root.s.notif-popups; toggled(v) => { root.flag-changed("notifications.popups", v); } } }
                     SettingRow {
-                        title: "Only on the island";
+                        title: "Pop up the island";
                         tall: true;
-                        hint: !root.s.notif-access ? "Needs access: Windows Settings → Privacy & security → Notifications → let apps read them."
-                            : "Windows' own pop-ups off for the apps on here. Off, or quitting FubuNotch, puts them back as they were.";
+                        hint: "Windows' own pop-ups stay off while this module is on; off, or quitting FubuNotch, brings them back.";
+                        last: root.s.notif-access;
+                        Toggle { on: root.s.notif-popups; toggled(v) => { root.flag-changed("notifications.popups", v); } }
+                    }
+                    if !root.s.notif-access : SettingRow {
+                        title: "No access to notifications";
+                        tall: true;
+                        hint: "Needs access: Windows Settings → Privacy & security → Notifications → let apps read them.";
                         last: true;
-                        Toggle { on: root.s.notif-only-island; toggled(v) => { root.flag-changed("notifications.only_island", v); } }
                     }
                 }
                 if root.page == "notifications" : Heading { text: "APPS"; }

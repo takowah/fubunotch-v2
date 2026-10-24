@@ -50,9 +50,9 @@ pub struct Data {
     pub notif_apps: std::collections::BTreeMap<String, String>,
     /// Focus rounds, oldest first.
     pub focus_log: Vec<island_core::daily::FocusRound>,
-    /// The apps whose Windows banners FubuNotch turned off (AUMID → the
-    /// ShowBanner they had, none = no value): put back as they were.
-    pub banners: std::collections::BTreeMap<String, Option<u32>>,
+    /// The apps whose Windows banners FubuNotch turned off (AUMID → what
+    /// they had): put back as they were.
+    pub banners: std::collections::BTreeMap<String, crate::banners::Kept>,
 }
 
 fn data_path() -> PathBuf {
