@@ -942,6 +942,8 @@ export component Island inherits Window {
     background: transparent;
 
     in property <bool> has-front;
+    // The front is a notification with a message: the capsule becomes a small card.
+    in property <bool> notice;
     in property <Item> front;
     in property <int> waiting;
     in property <[Item]> others;
@@ -1005,7 +1007,7 @@ export component Island inherits Window {
     property <length> island-w: target-w;
     property <length> island-h: target-h;
     animate island-w, island-h { duration: Ice.morph; easing: cubic-bezier(0.22, 1.18, 0.36, 1); }
-    property <length> island-r: expanded ? 28px : self.island-h / 2;
+    property <length> island-r: expanded ? 28px : root.compact && root.notice ? 22px : self.island-h / 2;
     animate island-r { duration: Ice.morph; easing: ease-out; }
     property <length> ix: (root.width - self.island-w) / 2;
 
@@ -1061,9 +1063,41 @@ export component Island inherits Window {
         TouchArea {
             changed has-hover => { root.hover-changed(self.has-hover); }
 
+            // Compact, a notification: who, what, and the message (after v1's chip).
+            HorizontalLayout {
+                opacity: root.compact && root.notice ? 1 : 0;
+                animate opacity { duration: Ice.fade; }
+                visible: self.opacity > 0.01;
+                padding-left: 12px;
+                padding-right: 18px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 10px;
+                if root.mascot-on : Mascot {
+                    size: 32px;
+                    mood: root.mascot-mood;
+                    dy: root.mascot-dy;
+                    left: root.mascot-left;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.mascot-clicked(); }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 1px;
+                    horizontal-stretch: 1;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
+                        Text { text: root.front.source; color: Ice.dim; font-size: 10.5px; font-weight: 700; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    Text { text: root.front.title; color: Ice.ink; font-size: 12.5px; font-weight: 700; overflow: elide; }
+                    Text { text: root.front.body; color: Ice.ink.with-alpha(0.78); font-size: 11.5px; wrap: word-wrap; overflow: elide; max-height: 30px; }
+                }
+            }
+
             // Compact: one line.
             HorizontalLayout {
-                opacity: root.compact ? 1 : 0;
+                opacity: root.compact && !root.notice ? 1 : 0;
                 animate opacity { duration: Ice.fade; }
                 visible: self.opacity > 0.01;
                 padding-left: 12px;

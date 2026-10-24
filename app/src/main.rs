@@ -46,6 +46,9 @@ const HIDDEN: (f32, f32) = (64.0, 6.0);
 const HIDDEN_HOVER: (f32, f32) = (200.0, 18.0);
 const COMPACT_IDLE: (f32, f32) = (170.0, 34.0);
 const COMPACT_BUSY: (f32, f32) = (390.0, 38.0);
+/// A notification with a message: a small card showing who, what and the message.
+const COMPACT_NOTICE: (f32, f32) = (420.0, 80.0);
+const NOTICE_RADIUS: f32 = 22.0;
 const EXPANDED: (f32, f32) = (520.0, 200.0);
 /// The expanded island grows for a long list (To-do), up to this tall; the
 /// rest scrolls.
@@ -451,6 +454,9 @@ fn refresh(ui: &Island) {
         if let Some(front) = view.front {
             ui.set_front(item(front));
         }
+        // A Windows notification with a message shows it (v1's taller chip).
+        let notice = view.front.is_some_and(|a| a.id.starts_with("notif:") && !a.body.trim().is_empty());
+        ui.set_notice(notice);
         ui.set_waiting(view.waiting as i32);
         let others: Vec<Item> = state
             .arbiter
@@ -578,6 +584,7 @@ fn refresh(ui: &Island) {
             }
             Mode::Expanded => EXPANDED,
             Mode::Hidden => HIDDEN,
+            Mode::Compact if notice => COMPACT_NOTICE,
             Mode::Compact if front_id.is_some() => COMPACT_BUSY,
             Mode::Compact => COMPACT_IDLE,
         };
@@ -1272,7 +1279,7 @@ fn update_background(ui: &Island) {
         }
         let scale = ui.window().scale_factor().max(0.5);
         let (w, h) = state.size_to;
-        let r = if state.mode == Mode::Expanded { 28.0 } else { h / 2.0 };
+        let r = if state.mode == Mode::Expanded { 28.0 } else if (w, h) == COMPACT_NOTICE { NOTICE_RADIUS } else { h / 2.0 };
         let p = theme::palette(look.theme());
         let tint = ((p.body >> 16) as u8, (p.body >> 8) as u8, p.body as u8);
         let key = format!("{}|{w}x{h}|{scale}|{}|{}", look.background, look.background_dim, look.theme());
@@ -2037,6 +2044,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ] {
                 state.notifications.push_back(notif::Notif { id, app: app.into(), aumid: String::new(), title: title.into(), body: body.into(), time: time.into() });
             }
+            // the newest one up on the capsule, as a real one would be
+            upsert_json(state, serde_json::json!({ "id": "notif:3", "source": "Discord", "kind": "alert",
+                "title": "#general", "body": "The build is green, shipping tonight. Anyone up for a last look at the release notes?" }), 0);
         });
     }
     if std::env::var_os("FUBUNOTCH_V2_DEMO_MUSIC").is_some() {
