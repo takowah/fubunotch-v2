@@ -58,7 +58,7 @@ const COMPACT_LYRIC_TALL: f32 = 58.0;
 const LINE_NOTICE_H: f32 = 46.0;
 const LINE_NOTICE_SHORT_H: f32 = 30.0;
 /// About as many characters as fit on Line's one line at 13 px.
-const LYRIC_ONE_LINE: usize = 50;
+const LYRIC_ONE_LINE: usize = 46;
 const EXPANDED: (f32, f32) = (520.0, 200.0);
 /// The expanded island grows for a long list (To-do), up to this tall; the
 /// rest scrolls.
@@ -106,6 +106,8 @@ struct State {
     line_held: bool,
     /// Counts the music's notices (song, play, pause, stop), one id each.
     music_events: u64,
+    /// Until when the front shows under Line's lyric (ms).
+    line_notice_until: u64,
     /// The mascot: its mood, and the timers that blink it and end a mood.
     /// The mascot's life and its clock (running only while the island shows).
     life: mascot::Life,
@@ -548,10 +550,6 @@ fn refresh(ui: &Island) {
         }
         ui.set_line_held(state.line_held);
         let ytm = ytm_live(state, now);
-        // While Line holds, anything else up front (a notification, the volume)
-        // shows under the lyric instead of over it.
-        let line_notice = state.line_held && front_id.as_deref().is_some_and(|id| id != "music:now");
-        ui.set_line_notice(line_notice);
         let capsule_line = if state.line_held { capsule_lyric(state) } else { String::new() };
         ui.set_capsule_line(capsule_line.as_str().into());
         let capsule_long = lyric_width(&capsule_line) > LYRIC_ONE_LINE;
@@ -583,6 +581,15 @@ fn refresh(ui: &Island) {
             state.hide_at = Some(state.hide_at.map_or(hold, |t| t.max(hold)));
         }
         let asking = front_kind == Some(Kind::Ask);
+        // While Line holds, a new front (a notification, the volume) shows under
+        // the lyric instead of over it, for NOTIF_HOLD_MS; a question until answered.
+        if front_changed {
+            state.line_notice_until = now + NOTIF_HOLD_MS;
+        }
+        let line_notice = state.line_held
+            && front_id.as_deref().is_some_and(|id| id != "music:now")
+            && (asking || now < state.line_notice_until);
+        ui.set_line_notice(line_notice);
         if asking && state.mode == Mode::Hidden {
             state.mode = Mode::Compact;
         }
@@ -656,6 +663,8 @@ fn refresh(ui: &Island) {
         // The Pomodoro counts down in seconds while its page is on screen.
         let focus_tick = if expanded && state.active_tab == "focus" && state.focus.running() { 1_000 } else { u64::MAX };
         let page_tick = page_tick.min(focus_tick).min(daily_wake(state, now));
+        let under_in = if line_notice && !asking { state.line_notice_until.saturating_sub(now) } else { u64::MAX };
+        let page_tick = page_tick.min(under_in);
         let hide_in = state.hide_at.filter(|_| state.mode == Mode::Compact && !asking).map_or(u64::MAX, |t| t.saturating_sub(now));
         let delay = wake.unwrap_or(u64::MAX).min(local_time::ms_to_next_minute()).min(page_tick).min(hide_in).max(15);
         let weak = ui.as_weak();
@@ -1730,6 +1739,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             held: false,
             line_held: false,
             music_events: 0,
+            line_notice_until: 0,
             life: mascot::Life::default(),
             life_timer: Timer::default(),
             size_to: (0.0, 0.0),

@@ -1149,17 +1149,20 @@ export component Island inherits Window {
                         y: (parent.height - self.height) / 2;
                         clicked => { root.mascot-clicked(); }
                     }
-                    // A long lyric wraps to a second line rather than being cut.
+                    // A long lyric wraps to a second line rather than being cut;
+                    // centred on the capsule (the space on the right matches the mascot's).
                     Text {
                         text: root.capsule-line;
                         color: Ice.ink;
                         font-size: root.capsule-long ? 12px : 13px;
                         font-weight: 600;
+                        horizontal-alignment: center;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                         wrap: word-wrap;
                         overflow: elide;
                     }
+                    if root.mascot-on : Rectangle { width: 32px; }
                 }
                 if root.line-notice : Rectangle { height: 1px; background: Ice.glow.with-alpha(0.22); }
                 if root.line-notice : HorizontalLayout {
