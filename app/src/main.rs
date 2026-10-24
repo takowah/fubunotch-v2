@@ -54,6 +54,9 @@ const MUSIC_EVENTS_AFTER: u64 = 4_000;
 /// Line's capsule: room for a line of lyrics.
 const COMPACT_LYRIC: (f32, f32) = (480.0, 38.0);
 const COMPACT_LYRIC_TALL: f32 = 58.0;
+/// The row under Line's lyric: a notice with a message, and without.
+const LINE_NOTICE_H: f32 = 46.0;
+const LINE_NOTICE_SHORT_H: f32 = 30.0;
 /// About as many characters as fit on Line's one line at 13 px.
 const LYRIC_ONE_LINE: usize = 50;
 const EXPANDED: (f32, f32) = (520.0, 200.0);
@@ -545,6 +548,10 @@ fn refresh(ui: &Island) {
         }
         ui.set_line_held(state.line_held);
         let ytm = ytm_live(state, now);
+        // While Line holds, anything else up front (a notification, the volume)
+        // shows under the lyric instead of over it.
+        let line_notice = state.line_held && front_id.as_deref().is_some_and(|id| id != "music:now");
+        ui.set_line_notice(line_notice);
         let capsule_line = if state.line_held { capsule_lyric(state) } else { String::new() };
         ui.set_capsule_line(capsule_line.as_str().into());
         let capsule_long = lyric_width(&capsule_line) > LYRIC_ONE_LINE;
@@ -608,9 +615,17 @@ fn refresh(ui: &Island) {
             }
             Mode::Expanded => EXPANDED,
             Mode::Hidden => HIDDEN,
+            // A long lyric takes a second line, a notice a row underneath.
+            Mode::Compact if state.line_held => {
+                let lyric = if capsule_long { COMPACT_LYRIC_TALL } else { COMPACT_LYRIC.1 };
+                let under = match state.arbiter.view().front.filter(|_| line_notice) {
+                    Some(a) if !a.body.trim().is_empty() => LINE_NOTICE_H,
+                    Some(_) => LINE_NOTICE_SHORT_H,
+                    None => 0.0,
+                };
+                (COMPACT_LYRIC.0, lyric + under)
+            }
             Mode::Compact if notice => COMPACT_NOTICE,
-            // A long lyric takes a second line.
-            Mode::Compact if state.line_held => (COMPACT_LYRIC.0, if capsule_long { COMPACT_LYRIC_TALL } else { COMPACT_LYRIC.1 }),
             Mode::Compact if front_id.is_some() => COMPACT_BUSY,
             Mode::Compact => COMPACT_IDLE,
         };

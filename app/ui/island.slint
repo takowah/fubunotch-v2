@@ -992,6 +992,8 @@ export component Island inherits Window {
     in property <string> capsule-line;
     // A long one: a size smaller, on two lines.
     in property <bool> capsule-long;
+    // Something else up front while Line holds: shown under the lyric.
+    in property <bool> line-notice;
     in property <int> mascot-dx;
     in property <int> mascot-dy;
     in property <bool> mascot-left;
@@ -1037,7 +1039,7 @@ export component Island inherits Window {
     property <length> island-w: target-w;
     property <length> island-h: target-h;
     animate island-w, island-h { duration: Ice.morph; easing: cubic-bezier(0.22, 1.18, 0.36, 1); }
-    property <length> island-r: expanded ? 28px : root.compact && root.notice ? 22px : self.island-h / 2;
+    property <length> island-r: expanded ? 28px : root.compact && (root.notice || (root.line-held && (root.line-notice || root.capsule-long))) ? 22px : self.island-h / 2;
     animate island-r { duration: Ice.morph; easing: ease-out; }
     property <length> ix: (root.width - self.island-w) / 2;
 
@@ -1095,7 +1097,7 @@ export component Island inherits Window {
 
             // Compact, a notification: who, what, and the message (after v1's chip).
             HorizontalLayout {
-                opacity: root.compact && root.notice ? 1 : 0;
+                opacity: root.compact && root.notice && !root.line-held ? 1 : 0;
                 animate opacity { duration: Ice.fade; }
                 visible: self.opacity > 0.01;
                 padding-left: 12px;
@@ -1125,9 +1127,77 @@ export component Island inherits Window {
                 }
             }
 
+            // Compact, Line: the line being sung on top; a notification, the
+            // volume and the like underneath, so the lyric is never covered.
+            VerticalLayout {
+                opacity: root.compact && root.line-held ? 1 : 0;
+                animate opacity { duration: Ice.fade; }
+                visible: self.opacity > 0.01;
+                padding-left: 12px;
+                padding-right: 18px;
+                padding-top: 3px;
+                padding-bottom: 3px;
+                alignment: start;
+                HorizontalLayout {
+                    height: root.capsule-long ? 52px : 32px;
+                    spacing: 9px;
+                    if root.mascot-on : Mascot {
+                        size: 32px;
+                        mood: root.mascot-mood;
+                        dy: root.mascot-dy;
+                        left: root.mascot-left;
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.mascot-clicked(); }
+                    }
+                    // A long lyric wraps to a second line rather than being cut.
+                    Text {
+                        text: root.capsule-line;
+                        color: Ice.ink;
+                        font-size: root.capsule-long ? 12px : 13px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        wrap: word-wrap;
+                        overflow: elide;
+                    }
+                }
+                if root.line-notice : Rectangle { height: 1px; background: Ice.glow.with-alpha(0.22); }
+                if root.line-notice : HorizontalLayout {
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    padding-left: root.mascot-on ? 41px : 0px;
+                    spacing: 8px;
+                    if root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
+                    if root.front.icon == "" : Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 1px;
+                        horizontal-stretch: 1;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            if root.front.icon == "" : Text { text: root.front.source; color: Ice.dim; font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
+                            Text { text: root.front.title; color: Ice.ink; font-size: 12px; font-weight: 700; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                        }
+                        if root.front.body != "" : Text { text: root.front.body; color: Ice.ink.with-alpha(0.78); font-size: 11.5px; overflow: elide; }
+                    }
+                    if root.front.has-progress : Bar {
+                        width: 70px;
+                        value: root.front.progress;
+                        y: (parent.height - self.height) / 2;
+                    }
+                    if root.waiting > 0 : Text {
+                        text: "+" + root.waiting;
+                        color: Ice.glow;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
             // Compact: one line.
             HorizontalLayout {
-                opacity: root.compact && !root.notice ? 1 : 0;
+                opacity: root.compact && !root.notice && !root.line-held ? 1 : 0;
                 animate opacity { duration: Ice.fade; }
                 visible: self.opacity > 0.01;
                 padding-left: 12px;
@@ -1144,16 +1214,13 @@ export component Island inherits Window {
                     clicked => { root.mascot-clicked(); }
                 }
                 if root.has-front && root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
-                if root.has-front && root.front.icon == "" && root.capsule-line == "" : Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
-                // Line's lyric wraps to a second line rather than being cut.
+                if root.has-front && root.front.icon == "" : Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
                 Text {
-                    text: root.capsule-line != "" ? root.capsule-line : root.has-front ? root.front.title : root.clock;
+                    text: root.has-front ? root.front.title : root.clock;
                     color: Ice.ink;
-                    font-size: root.capsule-long ? 12px : 13px;
+                    font-size: 13px;
                     font-weight: 600;
                     vertical-alignment: center;
-                    horizontal-stretch: 1;
-                    wrap: root.capsule-line != "" ? word-wrap : no-wrap;
                     overflow: elide;
                 }
                 if root.has-front && root.front.has-progress : Bar {
