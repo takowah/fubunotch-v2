@@ -55,7 +55,7 @@ const MUSIC_EVENTS_AFTER: u64 = 4_000;
 const COMPACT_LYRIC: (f32, f32) = (480.0, 38.0);
 const COMPACT_LYRIC_TALL: f32 = 58.0;
 /// The row under Line's lyric: a notice with a message, and without.
-const LINE_NOTICE_H: f32 = 50.0;
+const LINE_NOTICE_H: f32 = 54.0;
 const LINE_NOTICE_SHORT_H: f32 = 30.0;
 /// About as many characters as fit on Line's one line at 13 px (Space Mono).
 const LYRIC_ONE_LINE: usize = 44;
@@ -1095,7 +1095,7 @@ fn water_view(state: &State) -> WaterView {
         hours_text: if plan.every_min == 0 {
             format!("Active {}–{}", local_time::hh_mm(plan.from_min), local_time::hh_mm(plan.until_min))
         } else {
-            format!("Every {} min · {}–{}", plan.every_min, local_time::hh_mm(plan.from_min), local_time::hh_mm(plan.until_min))
+            format!("{} min · {}–{}", plan.every_min, local_time::hh_mm(plan.from_min), local_time::hh_mm(plan.until_min))
         }
         .into(),
         hours: ModelRc::new(VecModel::from(hours)),

@@ -70,7 +70,7 @@ export struct WaterView {
     drinks: int,
     // "Next reminder 14:30", "Reminders off", "Goal reached"...
     next: string,
-    // "Every 60 min · 09:00–21:00".
+    // "60 min · 09:00–21:00": how often, between when.
     hours-text: string,
     hours: [HourBar],
     // A reminder is due now.
@@ -200,7 +200,7 @@ component Dot inherits Rectangle {
 // A small uppercase label, in the way of a HUD.
 component Hud inherits Text {
     color: Ice.glow.with-alpha(0.85);
-    font-size: 9.5px;
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 1.4px;
     vertical-alignment: center;
@@ -346,7 +346,7 @@ component HoldChip inherits Rectangle {
             stroke-width: 1.6px;
             fill: root.filled && root.on ? Ice.glow : transparent;
         }
-        Text { text: root.label; color: root.on ? Ice.ink : Ice.dim; font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
+        Text { text: root.label; color: root.on ? Ice.ink : Ice.dim; font-size: 12px; font-weight: 700; vertical-alignment: center; }
     }
     area := TouchArea { clicked => { root.clicked(); } }
 }
@@ -361,7 +361,7 @@ component Pill inherits Rectangle {
     background: !enabled ? Ice.ink.with-alpha(0.04)
         : area.has-hover ? Ice.glow.with-alpha(0.40) : Ice.glow.with-alpha(0.22);
     animate background { duration: 150ms; }
-    t := Text { text: label; color: enabled ? Ice.ink : Ice.dim; font-size: 12px; font-weight: 600; }
+    t := Text { text: label; color: enabled ? Ice.ink : Ice.dim; font-size: 13px; font-weight: 600; }
     area := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
@@ -416,7 +416,7 @@ component MusicPage inherits HorizontalLayout {
         alignment: center;
         Hud { text: "NOW PLAYING"; }
         Text { text: "Nothing playing"; color: Ice.ink; font-size: 16px; font-weight: 700; }
-        Text { text: "Play something in Spotify, a browser or any player."; color: Ice.dim; font-size: 11.5px; }
+        Text { text: "Play something in Spotify, a browser or any player."; color: Ice.dim; font-size: 12.5px; }
     }
 
     // The player, after YouTube Music's: title between dislike and like, the
@@ -447,16 +447,16 @@ component MusicPage inherits HorizontalLayout {
                     Rectangle { horizontal-stretch: 1; }
                 }
                 Text { text: music.title; color: Ice.ink; font-size: 14.5px; font-weight: 700; overflow: elide; }
-                Text { text: music.artist; color: Ice.dim; font-size: 11.5px; overflow: elide; }
+                Text { text: music.artist; color: Ice.dim; font-size: 12.5px; overflow: elide; }
             }
             IconButton { icon: Icons.dislike; size: 32px; icon-size: 19px; stroke-width: 1.6px; on: music.rating < 0; filled: music.rating < 0; y: (parent.height - self.height) / 2; clicked => { root.command("dislike"); } }
             IconButton { icon: Icons.like; size: 32px; icon-size: 19px; stroke-width: 1.6px; on: music.rating > 0; filled: music.rating > 0; y: (parent.height - self.height) / 2; clicked => { root.command("like"); } }
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { text: music.elapsed; color: Ice.dim; font-size: 10.5px; vertical-alignment: center; }
+            Text { text: music.elapsed; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
             Bar { value: music.position; y: (parent.height - self.height) / 2; }
-            Text { text: music.remaining; color: Ice.dim; font-size: 10.5px; vertical-alignment: center; }
+            Text { text: music.remaining; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
         }
         HorizontalLayout {
             alignment: space-between;
@@ -477,7 +477,7 @@ component MusicPage inherits HorizontalLayout {
                 height: 34px;
                 y: (parent.height - self.height) / 2;
                 IconButton { icon: Icons.repeat; enabled: music.can-repeat; on: music.repeat > 0; clicked => { root.command("repeat"); } }
-                if music.repeat == 2 : Text { text: "1"; color: Ice.glow; font-size: 8px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                if music.repeat == 2 : Text { text: "1"; color: Ice.glow; font-size: 10px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
             }
         }
     }
@@ -546,7 +546,7 @@ component MusicPage inherits HorizontalLayout {
         if !music.has-lyrics : VerticalLayout {
             vertical-stretch: 1;
             alignment: center;
-            Text { text: music.lyrics-note == "" ? "Lyrics are off (Settings → Music)" : music.lyrics-note; color: Ice.dim; font-size: 11px; wrap: word-wrap; horizontal-alignment: center; }
+            Text { text: music.lyrics-note == "" ? "Lyrics are off (Settings → Music)" : music.lyrics-note; color: Ice.dim; font-size: 12px; wrap: word-wrap; horizontal-alignment: center; }
         }
     }
 }
@@ -565,7 +565,7 @@ component FocusPage inherits HorizontalLayout {
         VerticalLayout {
             alignment: center;
             Text { text: pomodoro.left; color: Ice.ink; font-size: 24px; font-weight: 800; horizontal-alignment: center; }
-            Text { text: pomodoro.rounds; color: Ice.dim; font-size: 9.5px; horizontal-alignment: center; }
+            Text { text: pomodoro.rounds; color: Ice.dim; font-size: 11px; horizontal-alignment: center; }
         }
     }
     VerticalLayout {
@@ -600,8 +600,8 @@ component FocusPage inherits HorizontalLayout {
                 border-radius: 3px;
                 background: r.full ? Ice.glow : Ice.dim;
             }
-            Text { text: r.time; color: Ice.soft; font-size: 11px; horizontal-stretch: 1; }
-            Text { text: r.length; color: r.full ? Ice.glow : Ice.dim; font-size: 11px; }
+            Text { text: r.time; color: Ice.soft; font-size: 12px; horizontal-stretch: 1; }
+            Text { text: r.length; color: r.full ? Ice.glow : Ice.dim; font-size: 12px; }
         }
     }
 }
@@ -620,7 +620,7 @@ component WaterPage inherits HorizontalLayout {
         VerticalLayout {
             alignment: center;
             Text { text: root.water.percent; color: Ice.ink; font-size: 22px; font-weight: 800; horizontal-alignment: center; }
-            Text { text: root.water.total + " ml"; color: Ice.dim; font-size: 10px; horizontal-alignment: center; }
+            Text { text: root.water.total + " ml"; color: Ice.dim; font-size: 11.5px; horizontal-alignment: center; }
         }
     }
     VerticalLayout {
@@ -631,11 +631,11 @@ component WaterPage inherits HorizontalLayout {
         HorizontalLayout {
             spacing: 6px;
             Text { text: root.water.total; color: Ice.ink; font-size: 26px; font-weight: 800; vertical-alignment: bottom; }
-            Text { text: "/ " + root.water.goal; color: Ice.dim; font-size: 12px; vertical-alignment: bottom; }
+            Text { text: "/ " + root.water.goal; color: Ice.dim; font-size: 13px; vertical-alignment: bottom; }
             Rectangle { horizontal-stretch: 1; }
         }
-        Text { text: root.water.next; color: root.water.due ? Ice.glow : Ice.soft; font-size: 11.5px; font-weight: root.water.due ? 700 : 400; }
-        Text { text: root.water.hours-text; color: Ice.dim; font-size: 10.5px; }
+        Text { text: root.water.next; color: root.water.due ? Ice.glow : Ice.soft; font-size: 12.5px; font-weight: root.water.due ? 700 : 400; }
+        Text { text: root.water.hours-text; color: Ice.dim; font-size: 12px; }
         HorizontalLayout {
             spacing: 8px;
             alignment: start;
@@ -645,7 +645,7 @@ component WaterPage inherits HorizontalLayout {
                 border-radius: 16px;
                 background: a.has-hover ? Ice.frost : Ice.glow;
                 animate background { duration: 150ms; }
-                t := Text { text: "+ " + root.water.glass; color: Ice.body-lo; font-size: 12.5px; font-weight: 800; }
+                t := Text { text: "+ " + root.water.glass; color: Ice.body-lo; font-size: 13.5px; font-weight: 800; }
                 a := TouchArea { clicked => { root.command("drink"); } }
             }
             Pill { label: "Undo"; enabled: root.water.drinks > 0; y: (parent.height - self.height) / 2; clicked => { root.command("undo"); } }
@@ -669,7 +669,7 @@ component WaterPage inherits HorizontalLayout {
                     border-radius: 2px;
                     background: b.now ? Ice.glow : b.fraction > 0 ? Ice.glow.with-alpha(0.55) : Ice.ink.with-alpha(0.08);
                 }
-                Text { text: b.label; color: b.now ? Ice.glow : Ice.dim; font-size: 8.5px; horizontal-alignment: center; }
+                Text { text: b.label; color: b.now ? Ice.glow : Ice.dim; font-size: 10px; horizontal-alignment: center; }
             }
         }
     }
@@ -698,7 +698,7 @@ component ShelfPage inherits VerticalLayout {
     if !drop-hover && items.length == 0 : Text {
         text: "Drag a file onto the island to keep it here. Nothing is copied: the shelf remembers where it is.";
         color: Ice.dim;
-        font-size: 12px;
+        font-size: 13px;
         wrap: word-wrap;
     }
     if !drop-hover : Flickable {
@@ -722,8 +722,8 @@ component ShelfPage inherits VerticalLayout {
                         border-radius: 3px;
                         background: f.detail == "Folder" ? Ice.frost.with-alpha(0.7) : Ice.glow.with-alpha(0.7);
                     }
-                    Text { text: f.name; color: Ice.ink; font-size: 12.5px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                    Text { text: f.detail; color: Ice.dim; font-size: 10.5px; vertical-alignment: center; }
+                    Text { text: f.name; color: Ice.ink; font-size: 13.5px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: f.detail; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
                     Pill { label: "Copy"; y: (parent.height - self.height) / 2; clicked => { root.copy(i); } }
                     Text {
                         text: "×";
@@ -820,7 +820,7 @@ component TodoRow inherits Rectangle {
                     width: parent.width;
                     text: root.task.text;
                     color: root.task.done ? Ice.dim : Ice.ink;
-                    font-size: 12.5px;
+                    font-size: 13.5px;
                     vertical-alignment: center;
                     overflow: elide;
                     animate color { duration: 200ms; }
@@ -868,7 +868,7 @@ component TodoPage inherits VerticalLayout {
                 x: 12px;
                 width: parent.width - 24px;
                 color: Ice.ink;
-                font-size: 12.5px;
+                font-size: 13.5px;
                 vertical-alignment: center;
                 single-line: true;
                 accepted => {
@@ -880,7 +880,7 @@ component TodoPage inherits VerticalLayout {
                 x: 12px;
                 text: "Add a task, then Enter";
                 color: Ice.dim;
-                font-size: 12.5px;
+                font-size: 13.5px;
                 vertical-alignment: center;
             }
         }
@@ -893,7 +893,7 @@ component TodoPage inherits VerticalLayout {
     if root.tasks.length == 0 : Text {
         text: "Nothing to do. Type above; drag the dots to move a task up.";
         color: Ice.dim;
-        font-size: 12px;
+        font-size: 13px;
         wrap: word-wrap;
     }
     Flickable {
@@ -928,7 +928,7 @@ component NotifPage inherits VerticalLayout {
     if items.length == 0 : Text {
         text: "Notifications from the apps you allow show up here.";
         color: Ice.dim;
-        font-size: 12px;
+        font-size: 13px;
         wrap: word-wrap;
     }
     Flickable {
@@ -945,16 +945,16 @@ component NotifPage inherits VerticalLayout {
                     padding-right: 8px;
                     spacing: 8px;
                     Dot { accent: n.accent; y: (parent.height - self.height) / 2; }
-                    Text { text: n.app; color: Ice.ink; font-size: 12px; font-weight: 700; vertical-alignment: center; overflow: elide; max-width: 90px; }
+                    Text { text: n.app; color: Ice.ink; font-size: 13px; font-weight: 700; vertical-alignment: center; overflow: elide; max-width: 90px; }
                     Text {
                         text: n.body == "" ? n.title : n.title + " · " + n.body;
                         color: Ice.soft;
-                        font-size: 12px;
+                        font-size: 13px;
                         vertical-alignment: center;
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
-                    Text { text: n.time; color: Ice.dim; font-size: 10.5px; vertical-alignment: center; }
+                    Text { text: n.time; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
                 }
                 row := TouchArea { clicked => { root.clicked(i); } }
             }
@@ -1125,10 +1125,10 @@ export component Island inherits Window {
                     HorizontalLayout {
                         spacing: 6px;
                         Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
-                        Text { text: root.front.source; color: Ice.dim; font-size: 10.5px; font-weight: 700; overflow: elide; horizontal-stretch: 1; }
+                        Text { text: root.front.source; color: Ice.dim; font-size: 12px; font-weight: 700; overflow: elide; horizontal-stretch: 1; }
                     }
-                    Text { text: root.front.title; color: Ice.ink; font-size: 12.5px; font-weight: 700; overflow: elide; }
-                    Text { text: root.front.body; color: Ice.soft; font-size: 11.5px; wrap: word-wrap; overflow: elide; max-height: 30px; }
+                    Text { text: root.front.title; color: Ice.ink; font-size: 13.5px; font-weight: 700; overflow: elide; }
+                    Text { text: root.front.body; color: Ice.soft; font-size: 12.5px; wrap: word-wrap; overflow: elide; max-height: 30px; }
                 }
             }
 
@@ -1183,10 +1183,10 @@ export component Island inherits Window {
                         horizontal-stretch: 1;
                         HorizontalLayout {
                             spacing: 6px;
-                            if root.front.icon == "" : Text { text: root.front.source; color: Ice.dim; font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
-                            Text { text: root.front.title; color: Ice.ink; font-size: 12px; font-weight: 700; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                            if root.front.icon == "" : Text { text: root.front.source; color: Ice.dim; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                            Text { text: root.front.title; color: Ice.ink; font-size: 13px; font-weight: 700; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
                         }
-                        if root.front.body != "" : Text { text: root.front.body; color: Ice.soft; font-size: 11.5px; overflow: elide; }
+                        if root.front.body != "" : Text { text: root.front.body; color: Ice.soft; font-size: 12.5px; overflow: elide; }
                     }
                     if root.front.has-progress : Bar {
                         width: 70px;
@@ -1196,7 +1196,7 @@ export component Island inherits Window {
                     if root.waiting > 0 : Text {
                         text: "+" + root.waiting;
                         color: Ice.glow;
-                        font-size: 11px;
+                        font-size: 12px;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
@@ -1244,7 +1244,7 @@ export component Island inherits Window {
                 if root.waiting > 0 : Text {
                     text: "+" + root.waiting;
                     color: Ice.glow;
-                    font-size: 11px;
+                    font-size: 12px;
                     font-weight: 700;
                     vertical-alignment: center;
                 }
@@ -1293,11 +1293,11 @@ export component Island inherits Window {
                                 spacing: 2px;
                                 Hud { text: root.date; }
                                 Text { text: root.clock; color: Ice.ink; font-size: 48px; font-weight: 800; }
-                                if !root.has-front : Text { text: "All quiet. Pick a tab, or drop a file here."; color: Ice.dim; font-size: 11.5px; }
+                                if !root.has-front : Text { text: "All quiet. Pick a tab, or drop a file here."; color: Ice.dim; font-size: 12.5px; }
                                 if root.has-front : HorizontalLayout {
                                     spacing: 8px;
                                     Equalizer { playing: root.music.playing; height: 12px; }
-                                    Text { text: root.front.title + "  ·  " + root.front.body; color: Ice.soft; font-size: 12px; overflow: elide; }
+                                    Text { text: root.front.title + "  ·  " + root.front.body; color: Ice.soft; font-size: 13px; overflow: elide; }
                                 }
                             }
                         }
@@ -1326,7 +1326,7 @@ export component Island inherits Window {
                             if root.front.body != "" : Text {
                                 text: root.front.body;
                                 color: Ice.soft;
-                                font-size: 12.5px;
+                                font-size: 13.5px;
                                 wrap: word-wrap;
                                 overflow: elide;
                                 max-height: 54px;
@@ -1341,7 +1341,7 @@ export component Island inherits Window {
                                 spacing: 8px;
                                 height: 18px;
                                 Dot { accent: item.accent; y: (parent.height - self.height) / 2; }
-                                Text { text: item.title; color: Ice.dim; font-size: 11.5px; vertical-alignment: center; overflow: elide; }
+                                Text { text: item.title; color: Ice.dim; font-size: 12.5px; vertical-alignment: center; overflow: elide; }
                             }
                             Rectangle { }
                         }
