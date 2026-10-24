@@ -105,6 +105,8 @@ struct State {
     /// The lyric lines as the UI's list, made once a song (and kept, so the
     /// list slides instead of being rebuilt every tick), and what it was made from.
     lyrics_model: Option<(String, ModelRc<LyricLine>)>,
+    /// YouTube Music's shuffle/repeat from the browser extension, and when it said so.
+    ytm: Option<(island_webhook::YtmState, u64)>,
     /// The user's nudge of the lyrics for this song, seconds (later: positive).
     lyrics_nudge: f64,
     /// The Notifications module: its watcher while on, and the newest first.
@@ -468,7 +470,8 @@ fn refresh(ui: &Island) {
             state.held = false;
         }
         ui.set_held(state.held);
-        ui.set_music(music_view(&state.music, &state.music_art, &state.lyrics, lines, lyrics_on, state.lyrics_nudge, rating));
+        let ytm = ytm_live(state, now);
+        ui.set_music(music_view(&state.music, &state.music_art, &state.lyrics, lines, lyrics_on, state.lyrics_nudge, rating, ytm.as_ref()));
 
         // Modes: a new notice pops the hidden island up; the compact island
         // goes up hide_after() later unless someone waits for an answer.
@@ -592,6 +595,7 @@ fn apply(ui: &Island, event: Event) {
                 state.arbiter.end(&id, now);
             }
             Event::Claude { event, payload, reply } => on_claude(state, &event, &payload, reply, now),
+            Event::Ytm(ytm) => state.ytm = Some((ytm, now)),
         }
     });
     refresh(ui);
@@ -670,6 +674,14 @@ fn lyric_lines(state: &mut State) -> Option<ModelRc<LyricLine>> {
     Some(model)
 }
 
+/// The extension's report, while it is fresh (it repeats every 15 s) and the
+/// music is playing in a browser.
+fn ytm_live(state: &State, now: u64) -> Option<island_webhook::YtmState> {
+    let (ytm, at) = state.ytm.as_ref()?;
+    let browser = matches!(state.music.app.as_str(), "Chrome" | "Edge" | "Brave" | "Opera") || state.music.app.to_lowercase().contains("chrome");
+    (browser && now.saturating_sub(*at) < 40_000).then(|| ytm.clone())
+}
+
 fn music_view(
     snap: &music::Snapshot,
     art: &Option<slint::Image>,
@@ -678,6 +690,7 @@ fn music_view(
     lyrics_on: bool,
     nudge: f64,
     rating: i8,
+    ytm: Option<&island_webhook::YtmState>,
 ) -> Music {
     let position = snap.position_now();
     // The lines are timed for the recording they came from: an MV's intro
@@ -711,12 +724,16 @@ fn music_view(
         lyric_center: at.unwrap_or(0) as i32,
         lyrics_note: note.into(),
         lyrics_shift: if shift.abs() >= 0.05 { format!("{shift:+.1} s").into() } else { SharedString::default() },
-        can_shuffle: snap.shuffle.is_some(),
-        shuffle: snap.shuffle == Some(true),
-        can_repeat: snap.repeat.is_some(),
-        repeat: match snap.repeat {
-            Some(music::Repeat::All) => 1,
-            Some(music::Repeat::One) => 2,
+        // The player's own say first; YouTube Music in a browser through the extension.
+        can_shuffle: snap.shuffle.is_some() || ytm.is_some(),
+        shuffle: snap.shuffle.map_or(ytm.is_some_and(|y| y.shuffle), |s| s),
+        can_repeat: snap.repeat.is_some() || ytm.is_some(),
+        repeat: match (snap.repeat, ytm.map(|y| y.repeat.as_str())) {
+            (Some(music::Repeat::All), _) => 1,
+            (Some(music::Repeat::One), _) => 2,
+            (Some(music::Repeat::Off), _) => 0,
+            (None, Some("all")) => 1,
+            (None, Some("one")) => 2,
             _ => 0,
         },
         rating: rating as i32,
@@ -1551,6 +1568,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             lyrics_key: String::new(),
             lyrics: None,
             lyrics_model: None,
+            ytm: None,
             lyrics_nudge: 0.0,
             notif_watcher: None,
             notifications: VecDeque::new(),
@@ -1635,6 +1653,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let weak = ui.as_weak();
     ui.on_music_command(move |command| {
         let Some(ui) = weak.upgrade() else { return };
+        // Shuffle and repeat go to the extension when Windows can't reach them.
+        if matches!(command.as_str(), "shuffle" | "repeat") {
+            let via_extension = with_state(|state| {
+                let now = now_ms(state.started);
+                let can = if command.as_str() == "shuffle" { state.music.shuffle.is_none() } else { state.music.repeat.is_none() };
+                can && ytm_live(state, now).is_some()
+            })
+            .unwrap_or(false);
+            if via_extension {
+                island_webhook::ytm_command(&command);
+                return;
+            }
+        }
         if command.as_str() == "hold" {
             with_state(|state| state.held = !state.held);
             return refresh(&ui);

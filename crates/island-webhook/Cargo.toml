@@ -10,3 +10,4 @@ island-core = { path = "../island-core" }
 tiny_http = "0.12"
 getrandom = "0.3"
 serde_json.workspace = true
+serde.workspace = true

@@ -27,6 +27,43 @@ impl std::fmt::Debug for Reply {
     }
 }
 
+/// YouTube Music's own shuffle and repeat, reported by the browser extension
+/// (extension/ytm): Windows' media controls don't carry them for a browser.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct YtmState {
+    pub shuffle: bool,
+    /// "none", "all" or "one".
+    pub repeat: String,
+    #[serde(default)]
+    pub title: String,
+}
+
+/// Commands waiting for the extension ("shuffle", "repeat"); it collects them
+/// with a long poll on /ytm/command.
+static YTM_COMMANDS: (std::sync::Mutex<std::collections::VecDeque<String>>, std::sync::Condvar) =
+    (std::sync::Mutex::new(std::collections::VecDeque::new()), std::sync::Condvar::new());
+/// How long /ytm/command waits for a command before answering "none" (204).
+pub const YTM_POLL: Duration = Duration::from_secs(20);
+
+/// Queues a command for the YouTube Music extension.
+pub fn ytm_command(command: &str) {
+    let (lock, ready) = &YTM_COMMANDS;
+    let mut q = lock.lock().unwrap_or_else(|e| e.into_inner());
+    q.push_back(command.to_string());
+    while q.len() > 4 {
+        q.pop_front();
+    }
+    ready.notify_all();
+}
+
+/// The next command, waiting up to `wait` for one.
+fn ytm_next(wait: Duration) -> Option<String> {
+    let (lock, ready) = &YTM_COMMANDS;
+    let q = lock.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut q, _) = ready.wait_timeout_while(q, wait, |q| q.is_empty()).unwrap_or_else(|e| e.into_inner());
+    q.pop_front()
+}
+
 /// What a request asks of the island.
 #[derive(Debug)]
 pub enum Event {
@@ -36,6 +73,8 @@ pub enum Event {
     /// A Claude Code hook (relayed by fubunotch-v2-hook): its event name and
     /// payload; a permission request also carries where its answer goes.
     Claude { event: String, payload: serde_json::Value, reply: Option<Reply> },
+    /// The YouTube Music extension's report.
+    Ytm(YtmState),
 }
 
 impl PartialEq for Event {
@@ -44,6 +83,7 @@ impl PartialEq for Event {
             (Event::Upsert(a), Event::Upsert(b)) => a == b,
             (Event::End(a), Event::End(b)) => a == b,
             (Event::Claude { event: a, payload: pa, .. }, Event::Claude { event: b, payload: pb, .. }) => a == b && pa == pb,
+            (Event::Ytm(a), Event::Ytm(b)) => a == b,
             _ => false,
         }
     }
@@ -51,6 +91,8 @@ impl PartialEq for Event {
 
 /// A request, reduced to what the protocol looks at.
 pub struct Request<'a> {
+    /// The Origin header: /ytm/ answers browser extensions only.
+    pub origin: Option<&'a str>,
     pub method: &'a str,
     pub path: &'a str,
     pub authorization: Option<&'a str>,
@@ -77,6 +119,27 @@ fn same(a: &[u8], b: &[u8]) -> bool {
 pub fn handle(req: &Request, token: &str) -> (Response, Option<Event>) {
     if req.method == "GET" && req.path == "/health" {
         return reply(200, "ok");
+    }
+    // The YouTube Music extension has no token: it is told apart by its
+    // Origin, which no web page can claim.
+    if let Some(rest) = req.path.strip_prefix("/ytm/") {
+        if !req.origin.is_some_and(|o| o.starts_with("chrome-extension://")) {
+            return reply(403, "extensions only");
+        }
+        return match (req.method, rest) {
+            ("POST", "state") => {
+                if req.body.len() > BODY_LIMIT {
+                    return reply(413, "body over 64 KB");
+                }
+                match serde_json::from_slice::<YtmState>(req.body) {
+                    Ok(state) => (Response { status: 200, body: "ok".into() }, Some(Event::Ytm(state))),
+                    Err(err) => reply(400, err.to_string()),
+                }
+            }
+            // Answered by `spawn` after a wait (a long poll).
+            ("GET", "command") => reply(204, ""),
+            _ => reply(404, "not found"),
+        };
     }
     let presented = req.authorization.and_then(|h| h.strip_prefix("Bearer ")).unwrap_or("");
     if token.is_empty() || !same(presented.trim().as_bytes(), token.as_bytes()) {
@@ -169,11 +232,14 @@ pub fn spawn(port: u16, token: String, on_event: impl Fn(Event) + Send + 'static
         for mut request in server.incoming_requests() {
             let mut authorization = None;
             let mut content_type = None;
+            let mut origin = None;
             for h in request.headers() {
                 if h.field.equiv("Authorization") {
                     authorization = Some(h.value.as_str().to_string());
                 } else if h.field.equiv("Content-Type") {
                     content_type = Some(h.value.as_str().to_string());
+                } else if h.field.equiv("Origin") {
+                    origin = Some(h.value.as_str().to_string());
                 }
             }
             let mut body = Vec::new();
@@ -184,10 +250,22 @@ pub fn spawn(port: u16, token: String, on_event: impl Fn(Event) + Send + 'static
                 reply(400, "unreadable body")
             } else {
                 handle(
-                    &Request { method: &method, path: &path, authorization: authorization.as_deref(), content_type: content_type.as_deref(), body: &body },
+                    &Request { origin: origin.as_deref(), method: &method, path: &path, authorization: authorization.as_deref(), content_type: content_type.as_deref(), body: &body },
                     &token,
                 )
             };
+            // The extension's long poll: answered when a command comes, or
+            // empty after YTM_POLL, on a thread of its own.
+            if method == "GET" && path == "/ytm/command" && response.status == 204 {
+                std::thread::spawn(move || {
+                    let answer = match ytm_next(YTM_POLL) {
+                        Some(c) => tiny_http::Response::from_string(serde_json::json!({ "command": c }).to_string()).with_status_code(200),
+                        None => tiny_http::Response::from_string(String::new()).with_status_code(204),
+                    };
+                    let _ = request.respond(answer);
+                });
+                continue;
+            }
             // A permission request is answered when the island decides, on a
             // thread of its own, so other requests are never held up.
             if let Some(Event::Claude { event: name, payload, .. }) = event.as_ref().filter(|e| matches!(e, Event::Claude { event, .. } if event == "PermissionRequest")) {
@@ -214,7 +292,7 @@ mod tests {
     const TOKEN: &str = "0123456789abcdef0123456789abcdef";
 
     fn post(body: &str, auth: Option<&str>, ctype: Option<&str>) -> (Response, Option<Event>) {
-        handle(&Request { method: "POST", path: "/activity", authorization: auth, content_type: ctype, body: body.as_bytes() }, TOKEN)
+        handle(&Request { origin: None, method: "POST", path: "/activity", authorization: auth, content_type: ctype, body: body.as_bytes() }, TOKEN)
     }
 
     fn bearer() -> String {
@@ -222,8 +300,26 @@ mod tests {
     }
 
     #[test]
+    fn ytm_is_for_extensions_only() {
+        let body = br#"{"shuffle":true,"repeat":"all","title":"x"}"#;
+        let page = Request { origin: Some("https://evil.example"), method: "POST", path: "/ytm/state", authorization: None, content_type: Some("application/json"), body };
+        assert_eq!(handle(&page, TOKEN).0.status, 403, "a web page can't");
+        let ext = Request { origin: Some("chrome-extension://abc"), method: "POST", path: "/ytm/state", authorization: None, content_type: Some("application/json"), body };
+        let (r, e) = handle(&ext, TOKEN);
+        assert_eq!(r.status, 200);
+        assert_eq!(e, Some(Event::Ytm(YtmState { shuffle: true, repeat: "all".into(), title: "x".into() })));
+    }
+
+    #[test]
+    fn ytm_commands_wait_in_line() {
+        ytm_command("shuffle");
+        assert_eq!(ytm_next(Duration::from_millis(10)).as_deref(), Some("shuffle"));
+        assert_eq!(ytm_next(Duration::from_millis(10)), None, "nothing more: an empty answer after the wait");
+    }
+
+    #[test]
     fn health_needs_no_token() {
-        let (r, e) = handle(&Request { method: "GET", path: "/health", authorization: None, content_type: None, body: b"" }, TOKEN);
+        let (r, e) = handle(&Request { origin: None, method: "GET", path: "/health", authorization: None, content_type: None, body: b"" }, TOKEN);
         assert_eq!((r.status, e), (200, None));
     }
 
@@ -240,7 +336,7 @@ mod tests {
         assert_eq!(post(body, None, Some("application/json")).0.status, 401);
         assert_eq!(post(body, Some("Bearer nope"), Some("application/json")).0.status, 401);
         assert_eq!(post(body, Some(&bearer()), Some("text/plain")).0.status, 415, "what a browser could send without preflight");
-        assert_eq!(handle(&Request { method: "POST", path: "/activity", authorization: Some(&bearer()), content_type: Some("application/json"), body: b"" }, "").0.status, 401, "no token configured: nothing gets in");
+        assert_eq!(handle(&Request { origin: None, method: "POST", path: "/activity", authorization: Some(&bearer()), content_type: Some("application/json"), body: b"" }, "").0.status, 401, "no token configured: nothing gets in");
     }
 
     #[test]
@@ -259,16 +355,16 @@ mod tests {
     #[test]
     fn a_claude_hook_becomes_a_claude_event() {
         let body = br#"{"hook_event_name":"Stop","session_id":"s1"}"#;
-        let (r, e) = handle(&Request { method: "POST", path: "/claude/Stop", authorization: Some(&bearer()), content_type: Some("application/json"), body }, TOKEN);
+        let (r, e) = handle(&Request { origin: None, method: "POST", path: "/claude/Stop", authorization: Some(&bearer()), content_type: Some("application/json"), body }, TOKEN);
         assert_eq!(r.status, 200);
         assert!(matches!(e, Some(Event::Claude { event, payload, reply: None }) if event == "Stop" && payload["session_id"] == "s1"));
-        let (r, _) = handle(&Request { method: "POST", path: "/claude/../x", authorization: Some(&bearer()), content_type: Some("application/json"), body }, TOKEN);
+        let (r, _) = handle(&Request { origin: None, method: "POST", path: "/claude/../x", authorization: Some(&bearer()), content_type: Some("application/json"), body }, TOKEN);
         assert_eq!(r.status, 400);
     }
 
     #[test]
     fn delete_ends_by_id_decoded() {
-        let (r, e) = handle(&Request { method: "DELETE", path: "/activity/claude%2Fs1", authorization: Some(&bearer()), content_type: None, body: b"" }, TOKEN);
+        let (r, e) = handle(&Request { origin: None, method: "DELETE", path: "/activity/claude%2Fs1", authorization: Some(&bearer()), content_type: None, body: b"" }, TOKEN);
         assert_eq!((r.status, e), (200, Some(Event::End("claude/s1".into()))));
     }
 
