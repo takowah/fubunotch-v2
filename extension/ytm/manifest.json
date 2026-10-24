@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FubuNotch v2 · YouTube",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Lets FubuNotch v2's island change YouTube Music's shuffle and repeat, and watch a YouTube video in a small window under the island. Talks only to FubuNotch on this PC (127.0.0.1).",
   "host_permissions": ["http://127.0.0.1:47821/*"],
   "background": { "service_worker": "background.js" },

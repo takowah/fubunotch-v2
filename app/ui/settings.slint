@@ -479,6 +479,15 @@ export component SettingsWindow inherits Window {
                     SettingRow { title: "Lyrics from YouTube Music"; hint: "When LRCLIB has none. Unofficial endpoints: may stop working."; Toggle { on: root.s.lyrics-youtube; toggled(v) => { root.flag-changed("music.lyrics_youtube", v); } } }
                     SettingRow { title: "Japanese lyrics in romaji"; hint: ""; last: true; Toggle { on: root.s.romaji; toggled(v) => { root.flag-changed("music.romaji", v); } } }
                 }
+                if root.page == "music" : Heading { text: "WATCH IN ISLAND"; }
+                if root.page == "music" : Card {
+                    SettingRow {
+                        title: "Picture-in-picture docks under the island";
+                        hint: "In Chrome or Edge: YouTube's PiP button, right-click a video twice, or the PiP button in Chrome's media controls.";
+                        tall: true;
+                        last: true;
+                    }
+                }
 
                 // ── Notifications ──
                 if root.page == "notifications" : Card {

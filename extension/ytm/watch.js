@@ -16,9 +16,15 @@
   const videoTitle = () =>
     (document.querySelector("h1.ytd-watch-metadata yt-formatted-string")?.textContent || document.title.replace(/^\(\d+\)\s*/, "").replace(/\s*-\s*YouTube$/, "")).trim();
 
-  function report(open) {
-    window.postMessage({ fubunotch: "watch", state: { open, window: open ? MARKER : "", title: open ? videoTitle() : "" } }, location.origin);
+  function report(open, window_ = MARKER) {
+    window.postMessage({ fubunotch: "watch", state: { open, window: open ? window_ : "", title: open ? videoTitle() : "" } }, location.origin);
   }
+
+  // Chrome's own picture-in-picture (YouTube's button, a right-click, the
+  // media controls): FubuNotch docks that window by itself; telling it lets
+  // the island's "back to tab" leave PiP without stopping the video.
+  document.addEventListener("enterpictureinpicture", () => report(true, "Picture in picture"), true);
+  document.addEventListener("leavepictureinpicture", () => report(false), true);
 
   function putBack() {
     if (!home) return;
@@ -57,22 +63,25 @@
   // The island's "back to tab".
   window.addEventListener("message", (e) => {
     if (e.source !== window || !e.data || e.data.fubunotch !== "command") return;
-    if (e.data.command === "watch-back" && pip) pip.close();
+    if (e.data.command !== "watch-back") return;
+    if (pip) pip.close();
+    else if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
   });
 
   // Built node by node: YouTube's pages refuse innerHTML (Trusted Types).
+  // The island (a cyan pill) over a small screen: unlike YouTube's own icons.
   function icon() {
     const NS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("viewBox", "0 0 36 36");
-    svg.setAttribute("width", "100%");
     svg.setAttribute("height", "100%");
-    const path = document.createElementNS(NS, "path");
-    path.setAttribute("fill", "none");
-    path.setAttribute("stroke", "#fff");
-    path.setAttribute("stroke-width", "2");
-    path.setAttribute("d", "M8 12h20v13H8z M14 8l4 4 4-4 M12 29h12");
-    svg.appendChild(path);
+    svg.setAttribute("width", "100%");
+    svg.style.display = "block";
+    const island = document.createElementNS(NS, "rect");
+    for (const [k, v] of Object.entries({ x: 11, y: 7, width: 14, height: 5, rx: 2.5, fill: "#5fd4ff" })) island.setAttribute(k, v);
+    const screen = document.createElementNS(NS, "rect");
+    for (const [k, v] of Object.entries({ x: 9, y: 15, width: 18, height: 12, rx: 2, fill: "none", stroke: "#fff", "stroke-width": 2 })) screen.setAttribute(k, v);
+    svg.append(island, screen);
     return svg;
   }
 
@@ -81,7 +90,7 @@
     if (!bar || bar.querySelector(".fubunotch-watch")) return;
     const b = document.createElement("button");
     b.className = "ytp-button fubunotch-watch";
-    b.title = "Watch in FubuNotch's island";
+    b.title = "Watch in FubuNotch island";
     b.setAttribute("aria-label", b.title);
     b.appendChild(icon());
     b.addEventListener("click", (e) => {
