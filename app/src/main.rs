@@ -53,6 +53,9 @@ const EXPANDED_MAX_H: f32 = 362.0;
 /// One to-do row, and how many fit the regular height.
 const TODO_PITCH: f32 = 27.0;
 const TODO_ROWS_FIT: usize = 4;
+/// How long a Windows notification floats on the capsule, at least.
+const NOTIF_HOLD_MS: u64 = 5_000;
+
 /// The compact island goes up this long after the pointer left (or a notice
 /// came): Settings → General.
 fn hide_after(s: &Settings) -> u64 {
@@ -538,6 +541,12 @@ fn refresh(ui: &Island) {
         {
             state.mode = Mode::Compact;
             state.hide_at = Some(now + hide_after(&state.settings));
+        }
+        // A notification floats at least NOTIF_HOLD_MS, a new one again in full
+        // even when the capsule is already down.
+        if front_changed && state.mode == Mode::Compact && front_id.as_deref().is_some_and(|id| id.starts_with("notif:")) {
+            let hold = now + hide_after(&state.settings).max(NOTIF_HOLD_MS);
+            state.hide_at = Some(state.hide_at.map_or(hold, |t| t.max(hold)));
         }
         let asking = front_kind == Some(Kind::Ask);
         if asking && state.mode == Mode::Hidden {
