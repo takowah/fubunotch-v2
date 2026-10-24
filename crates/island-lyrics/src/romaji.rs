@@ -38,8 +38,9 @@ pub fn line_to_romaji(text: &str) -> String {
     if !is_japanese(text) {
         return text.to_string();
     }
+    let text = &strip_readings(text);
     let Some(segmenter) = segmenter() else { return text.to_string() };
-    let Ok(mut tokens) = segmenter.segment(Cow::Borrowed(text)) else { return text.to_string() };
+    let Ok(mut tokens) = segmenter.segment(Cow::Borrowed(text.as_str())) else { return text.to_string() };
     let mut words: Vec<Word> = Vec::with_capacity(tokens.len());
     // A word ending in a small tsu doubles the next word's consonant (連れてって: tsurete + tte).
     let mut tsu = false;
@@ -54,6 +55,34 @@ pub fn line_to_romaji(text: &str) -> String {
         words.push(word);
     }
     join(&words)
+}
+
+/// Drops the kana readings some lyrics put in brackets after a word
+/// (箱の（ばこの）): romanised, they read twice ("hako no (bako no)"). A sung
+/// echo stays: its brackets repeat what came just before
+/// (されなくても（されなくても）).
+fn strip_readings(text: &str) -> String {
+    let kana_only = |s: &str| !s.trim().is_empty() && s.chars().all(|c| matches!(c, '\u{3040}'..='\u{30FF}' | ' ' | '\u{3000}'));
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find(['(', '（']) {
+        let (before, from) = rest.split_at(open);
+        out.push_str(before);
+        let inner_at = from.chars().next().map_or(1, char::len_utf8);
+        let Some(close) = from[inner_at..].find([')', '）']) else {
+            out.push_str(from);
+            return out;
+        };
+        let inner = &from[inner_at..inner_at + close];
+        let end = inner_at + close + from[inner_at + close..].chars().next().map_or(1, char::len_utf8);
+        let echo = out.trim_end().ends_with(inner.trim());
+        if !kana_only(inner) || echo {
+            out.push_str(&from[..end]);
+        }
+        rest = &from[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 struct Word {
@@ -263,6 +292,16 @@ mod tests {
         assert_eq!(line_to_romaji("私は東京に行きます"), "watashi wa toukyou ni ikimasu");
         assert_eq!(line_to_romaji("君を愛している"), "kimi o aishiteiru");
         assert_eq!(line_to_romaji("知らない世界へ連れてって"), "shiranai sekai e tsuretette");
+        assert_eq!(line_to_romaji("箱の（ばこの）中で（ちゅうで）"), "hako no naka de");
+    }
+
+    #[test]
+    fn readings_in_brackets_go_echoes_stay() {
+        assert_eq!(strip_readings("箱の（ばこの）中で（ちゅうで）"), "箱の中で");
+        assert_eq!(strip_readings("箱の(ばこの)中で"), "箱の中で");
+        assert_eq!(strip_readings("見向きさえされなくても（されなくても）"), "見向きさえされなくても（されなくても）");
+        assert_eq!(strip_readings("君と(Hey!)行こう"), "君と(Hey!)行こう");
+        assert_eq!(strip_readings("開いたまま(ひら"), "開いたまま(ひら");
     }
 
     /// Prints a few lines of real lyrics: `cargo test -p fubunotch -- --ignored --nocapture romaji_samples`
