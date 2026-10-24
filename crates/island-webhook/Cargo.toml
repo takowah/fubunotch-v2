@@ -1,0 +1,12 @@
+[package]
+name = "island-webhook"
+description = "FubuNotch v2: the local webhook (127.0.0.1) that turns HTTP into activities"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+island-core = { path = "../island-core" }
+tiny_http = "0.12"
+getrandom = "0.3"
+serde_json.workspace = true

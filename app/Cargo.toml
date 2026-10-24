@@ -1,0 +1,56 @@
+[package]
+name = "fubunotch-v2"
+description = "FubuNotch v2: a modular dynamic island for Windows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+island-core = { path = "../crates/island-core" }
+island-webhook = { path = "../crates/island-webhook" }
+island-lyrics = { path = "../crates/island-lyrics" }
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "unstable-winit-030", "system-tray"] }
+
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Registry",
+  "Win32_System_SystemInformation",
+  "Foundation",
+  "Media",
+  "Media_Control",
+  "Storage_Streams",
+  "Graphics_Imaging",
+  "ApplicationModel",
+  "UI_Notifications",
+  "UI_Notifications_Management",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+  "Networking_Connectivity",
+  "System_Power",
+  "Win32_Globalization",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Variant",
+  "Win32_System_Threading",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_Devices_FunctionDiscovery",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_Graphics_Gdi",
+  "Storage",
+  "Devices_Enumeration",
+  "Win32_UI_Shell_Common",
+] }
+windows-core = "0.61"
+windows-collections = "0.2"
+png = "0.18"
+serde_json.workspace = true
+serde.workspace = true
+
+[build-dependencies]
+slint-build = "1.18"

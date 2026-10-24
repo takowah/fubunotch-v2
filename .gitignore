@@ -1,0 +1,4 @@
+/target
+*.log
+scripts/pixel/.cache/
+__pycache__/

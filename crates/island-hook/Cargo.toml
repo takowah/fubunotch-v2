@@ -1,0 +1,13 @@
+[package]
+name = "island-hook"
+description = "FubuNotch v2's Claude Code hook relay: stdin to the local webhook, the island's decision back"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fubunotch-v2-hook"
+path = "src/main.rs"
+
+# std only: it starts on every Claude Code event and must be instant.
+[dependencies]

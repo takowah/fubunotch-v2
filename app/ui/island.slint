@@ -1,0 +1,1253 @@
+// The island. "Fubuki icy": deep navy body, ice-white text, a cyan → ice →
+// blue gradient frame. One shape that morphs: a thin glowing bar (hidden), a
+// capsule (compact), a card (expanded). Its size and radius spring between
+// modes; pages and contents fade and slide. The window itself never changes
+// size: Rust clips it to the island with a window region, so the rest of the
+// top of the screen stays clickable.
+
+import { Ice } from "theme.slint";
+import { Sprites } from "sprites.slint";
+export { Ice }
+
+export struct ActionInfo {
+    id: string,
+    label: string,
+}
+
+export struct Item {
+    actions: [ActionInfo],
+    source: string,
+    // A system notice's icon (SysIcon), else "".
+    icon: string,
+    title: string,
+    body: string,
+    kind: string,
+    progress: float,
+    has-progress: bool,
+    accent: color,
+}
+
+export struct TabInfo {
+    id: string,
+    label: string,
+}
+
+export struct RoundRow {
+    time: string,
+    length: string,
+    full: bool,
+}
+
+export struct FocusView {
+    phase: string,
+    left: string,
+    rounds: string,
+    running: bool,
+    fraction: float,
+    on-break: bool,
+    // "3 rounds · 1 h 15 m".
+    today: string,
+    // Today's latest rounds, newest first.
+    log: [RoundRow],
+}
+
+export struct HourBar {
+    label: string,
+    fraction: float,
+    now: bool,
+}
+
+export struct WaterView {
+    // Ml drunk today, a bare number.
+    total: string,
+    goal: string,
+    glass: string,
+    percent: string,
+    fraction: float,
+    drinks: int,
+    // "Next reminder 14:30", "Reminders off", "Goal reached"...
+    next: string,
+    // "Every 60 min · 09:00–21:00".
+    hours-text: string,
+    hours: [HourBar],
+    // A reminder is due now.
+    due: bool,
+}
+
+export struct TaskRow {
+    id: int,
+    text: string,
+    done: bool,
+}
+
+export struct ShelfRow {
+    name: string,
+    detail: string,
+}
+
+export struct NotifRow {
+    app: string,
+    title: string,
+    body: string,
+    time: string,
+    accent: color,
+}
+
+export struct LyricLine {
+    text: string,
+    current: bool,
+}
+
+export struct Music {
+    has-session: bool,
+    title: string,
+    artist: string,
+    app: string,
+    playing: bool,
+    position: float,
+    elapsed: string,
+    remaining: string,
+    has-art: bool,
+    art: image,
+    has-lyrics: bool,
+    // Every line of the song; the one being sung (-1: not yet) and the one
+    // the list centres on.
+    lyrics: [LyricLine],
+    lyric-index: int,
+    lyric-center: int,
+    lyrics-note: string,
+    // "+2.0 s" when the lines are shifted (an intro, or the user's nudge).
+    lyrics-shift: string,
+    can-shuffle: bool,
+    shuffle: bool,
+    can-repeat: bool,
+    // 0 off, 1 all, 2 one.
+    repeat: int,
+    // 1 liked, -1 disliked, 0 neither.
+    rating: int,
+}
+
+// ── Small parts ──────────────────────────────────────────────────────────────
+
+// The mascot: the theme's 32 x 32 pixel chibi, drawn crisp at any size.
+component Mascot inherits Rectangle {
+    // A frame: idle, idle2, blink, twitch, wag1, wag2, happy, sleep, walk1-4, climb1-2, sit.
+    in property <string> mood: "idle";
+    // Where it stands and hops, in sprite pixels (a 32-px grid: size / 32 each).
+    in property <int> dx;
+    in property <int> dy;
+    in property <bool> left;
+    in property <length> size: 24px;
+    // A soft disc behind: dark-haired members stay visible on a dark island.
+    in property <bool> halo;
+    callback clicked();
+    width: size;
+    height: size;
+    if root.halo : Rectangle {
+        width: parent.width * 0.86;
+        height: self.width;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2 + parent.height * 0.04;
+        border-radius: self.width / 2;
+        background: Ice.frost.with-alpha(0.16);
+    }
+    Image {
+        width: parent.width;
+        height: parent.height;
+        image-rendering: pixelated;
+        source: Sprites.pick(Ice.theme, root.mood, root.left);
+        x: root.dx * root.size / 32;
+        y: root.dy * root.size / 32;
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+// The icon of a system notice in the capsule, after v1's overlay chip:
+// headphones, the charger's bolt (green), Caps Lock (amber when on), a
+// device that went away dimmed.
+component SysIcon inherits Path {
+    in property <string> name;
+    width: 16px;
+    height: 16px;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke-width: 1.8px;
+    stroke: name == "bolt" ? #34d399 : name == "caps-on" ? #fbbf24
+        : (name == "headphones-off" || name == "wifi-off" || name == "volume-off" || name == "caps-off") ? Ice.dim : Ice.ink;
+    commands: name == "headphones" ? "M 4 15 V 12 A 8 8 0 0 1 20 12 V 15 M 4 15 H 7 V 20 H 4 Z M 20 15 H 17 V 20 H 20 Z"
+        : name == "headphones-off" ? "M 4 15 V 12 A 8 8 0 0 1 20 12 V 15 M 4 15 H 7 V 20 H 4 Z M 20 15 H 17 V 20 H 20 Z M 3 3 L 21 21"
+        : name == "bolt" ? "M 13 2 L 5 13 H 11 L 10 22 L 19 10 H 13 Z"
+        : name == "battery" ? "M 3 8 H 18 V 16 H 3 Z M 21 11 V 13 M 6 11 V 13"
+        : name == "wifi" ? "M 2 9 A 15 15 0 0 1 22 9 M 5 12.5 A 10 10 0 0 1 19 12.5 M 8.5 16 A 5 5 0 0 1 15.5 16 M 12 19.5 V 20"
+        : name == "wifi-off" ? "M 2 9 A 15 15 0 0 1 22 9 M 5 12.5 A 10 10 0 0 1 19 12.5 M 8.5 16 A 5 5 0 0 1 15.5 16 M 3 3 L 21 21"
+        : name == "keyboard" ? "M 3 6 H 21 V 18 H 3 Z M 7 10 H 8 M 11 10 H 12 M 15 10 H 16 M 8 14 H 16"
+        : name == "caps-on" || name == "caps-off" ? "M 12 4 L 4 13 H 8 V 19 H 16 V 13 H 20 Z"
+        : name == "volume-off" ? "M 4 9 H 8 L 13 5 V 19 L 8 15 H 4 Z M 16 9 L 21 14 M 21 9 L 16 14"
+        : "M 4 9 H 8 L 13 5 V 19 L 8 15 H 4 Z M 16 9 A 4 4 0 0 1 16 15 M 18.5 6.5 A 7.5 7.5 0 0 1 18.5 17.5";
+}
+
+component Dot inherits Rectangle {
+    in property <color> accent;
+    width: 7px;
+    height: 7px;
+    border-radius: 3.5px;
+    background: accent;
+}
+
+// A small uppercase label, in the way of a HUD.
+component Hud inherits Text {
+    color: Ice.glow.with-alpha(0.85);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    vertical-alignment: center;
+}
+
+component Bar inherits Rectangle {
+    in property <float> value;
+    in property <color> from: Ice.frost;
+    in property <color> to: Ice.glow;
+    height: 5px;
+    border-radius: 2.5px;
+    background: Ice.ink.with-alpha(0.08);
+    Rectangle {
+        x: 0;
+        width: max(parent.height, parent.width * clamp(value, 0, 1));
+        height: parent.height;
+        border-radius: parent.border-radius;
+        background: @linear-gradient(90deg, root.from 0%, root.to 100%);
+        animate width { duration: 300ms; easing: ease-out; }
+    }
+}
+
+// Four bars that dance while music plays (redrawn only while on screen).
+component Equalizer inherits HorizontalLayout {
+    in property <bool> playing;
+    in property <color> tint: Ice.glow;
+    spacing: 2px;
+    alignment: center;
+    for i in [0, 1, 2, 3] : Rectangle {
+        width: 3px;
+        height: root.playing ? 3px + 9px * abs(sin((animation-tick() / 1ms) * 0.36deg + i * 70deg)) : 3px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 1.5px;
+        background: root.tint;
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+    width: t.preferred-width + 20px;
+    height: 24px;
+    border-radius: 12px;
+    background: active ? Ice.glow.with-alpha(0.26) : (area.has-hover ? Ice.ink.with-alpha(0.07) : transparent);
+    animate background { duration: 200ms; }
+    t := Text {
+        text: label;
+        color: active ? Ice.ink : Ice.dim;
+        font-size: 11.5px;
+        font-weight: active ? 700 : 500;
+        animate color { duration: 200ms; }
+    }
+    area := TouchArea { clicked => { root.clicked(); } }
+}
+
+component RoundButton inherits Rectangle {
+    in property <string> glyph;
+    in property <length> size: 24px;
+    in property <length> glyph-size: 12px;
+    in property <bool> primary;
+    callback clicked();
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    background: primary ? (area.has-hover ? Ice.frost : Ice.glow) : (area.has-hover ? Ice.ink.with-alpha(0.16) : Ice.ink.with-alpha(0.08));
+    animate background { duration: 150ms; }
+    Text { text: glyph; color: primary ? Ice.body-lo : Ice.ink; font-size: glyph-size; horizontal-alignment: center; vertical-alignment: center; }
+    area := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Icons drawn as paths on a 24 × 24 grid: the system font lacks most media glyphs.
+global Icons {
+    out property <string> shuffle: "M 3 7 H 6 C 10 7 13 17 17 17 H 21 M 18 14 L 21 17 L 18 20 M 3 17 H 6 C 8 17 9.5 15.5 10.5 13.5 M 13.5 10.5 C 14.5 8.5 15.5 7 17 7 H 21 M 18 4 L 21 7 L 18 10";
+    out property <string> repeat: "M 4 12 V 10 C 4 8 5.5 6.5 7.5 6.5 H 20 M 17 3.5 L 20 6.5 L 17 9.5 M 20 12 V 14 C 20 16 18.5 17.5 16.5 17.5 H 4 M 7 20.5 L 4 17.5 L 7 14.5";
+    out property <string> previous: "M 19 5 L 9 12 L 19 19 Z M 5.5 5 V 19";
+    out property <string> next: "M 5 5 L 15 12 L 5 19 Z M 18.5 5 V 19";
+    out property <string> play: "M 8 4.5 L 19.5 12 L 8 19.5 Z";
+    out property <string> pause: "M 8 5 V 19 M 16 5 V 19";
+    out property <string> reset: "M 4.5 12 A 7.5 7.5 0 1 0 7 6.4 M 4 3.5 V 7.5 H 8";
+    out property <string> like: "M 7.5 10.5 V 20 M 7.5 10.5 L 11 3.5 C 12.6 3.5 13.6 4.6 13.2 6.2 L 12.3 10 H 18.4 C 19.6 10 20.4 11.1 20.1 12.2 L 18.5 18.5 C 18.2 19.4 17.5 20 16.6 20 H 3.5 V 10.5 Z";
+    out property <string> dislike: "M 7.5 13.5 V 4 M 7.5 13.5 L 11 20.5 C 12.6 20.5 13.6 19.4 13.2 17.8 L 12.3 14 H 18.4 C 19.6 14 20.4 12.9 20.1 11.8 L 18.5 5.5 C 18.2 4.6 17.5 4 16.6 4 H 3.5 V 13.5 Z";
+}
+
+// A round button with a drawn icon. `on`: a toggle that is active (glows).
+component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <length> size: 34px;
+    in property <length> icon-size: 18px;
+    in property <bool> primary;
+    in property <bool> on;
+    in property <bool> filled;
+    in property <bool> enabled: true;
+    in property <length> stroke-width: 2px;
+    callback clicked();
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    background: primary ? (area.has-hover ? Ice.frost : Ice.glow)
+        : on ? Ice.glow.with-alpha(area.has-hover ? 0.30 : 0.20)
+        : area.has-hover && enabled ? Ice.ink.with-alpha(0.12) : transparent;
+    animate background { duration: 150ms; }
+    property <color> ink: primary ? Ice.body-lo : !enabled ? Ice.dim.with-alpha(0.4) : on ? Ice.glow : Ice.ink;
+    Path {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.icon-size;
+        height: root.icon-size;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.icon;
+        stroke: root.ink;
+        stroke-width: root.stroke-width;
+        fill: root.filled ? root.ink : transparent;
+    }
+    area := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+component Pill inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback clicked();
+    width: t.preferred-width + 26px;
+    height: 28px;
+    border-radius: 14px;
+    background: !enabled ? Ice.ink.with-alpha(0.04)
+        : area.has-hover ? Ice.glow.with-alpha(0.40) : Ice.glow.with-alpha(0.22);
+    animate background { duration: 150ms; }
+    t := Text { text: label; color: enabled ? Ice.ink : Ice.dim; font-size: 12px; font-weight: 600; }
+    area := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+// A progress ring, drawn with a path (0..1).
+component Ring inherits Rectangle {
+    in property <float> value;
+    in property <length> thickness: 6px;
+    property <float> v: clamp(value, 0.001, 0.999);
+    property <angle> a: 360deg * v;
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        stroke: Ice.ink.with-alpha(0.08);
+        stroke-width: root.thickness;
+        commands: "M 50 6 A 44 44 0 1 1 49.99 6";
+    }
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        stroke: @linear-gradient(135deg, Ice.frost 0%, Ice.glow 50%, Ice.deep 100%);
+        stroke-width: root.thickness;
+        commands: "M 50 6 A 44 44 0 " + (root.v > 0.5 ? "1" : "0") + " 1 " + (50 + 44 * sin(root.a)) + " " + (50 - 44 * cos(root.a));
+    }
+}
+
+// A page that fades and slides in when its tab is chosen.
+component Page inherits Rectangle {
+    in property <bool> shown;
+    opacity: shown ? 1 : 0;
+    animate opacity { duration: Ice.fade; easing: ease-out; }
+    visible: self.opacity > 0.01;
+    y: shown ? 0px : 8px;
+    animate y { duration: Ice.fade; easing: ease-out; }
+}
+
+// ── Pages ────────────────────────────────────────────────────────────────────
+
+component MusicPage inherits HorizontalLayout {
+    in property <Music> music;
+    in property <bool> held;
+    callback command(string);
+    // Moves the lyrics by this many seconds (later: positive).
+    callback nudge(float);
+    spacing: 14px;
+
+    if !music.has-session : VerticalLayout {
+        alignment: center;
+        Hud { text: "NOW PLAYING"; }
+        Text { text: "Nothing playing"; color: Ice.ink; font-size: 16px; font-weight: 700; }
+        Text { text: "Play something in Spotify, a browser or any player."; color: Ice.dim; font-size: 11.5px; }
+    }
+
+    // The player, after YouTube Music's: title between dislike and like, the
+    // bar, then five even controls with play in the middle.
+    if music.has-session : VerticalLayout {
+        spacing: 8px;
+        alignment: center;
+        width: music.has-lyrics ? 244px : self.preferred-width;
+        horizontal-stretch: music.has-lyrics ? 0 : 1;
+        HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: 52px;
+                height: 52px;
+                border-radius: 12px;
+                background: Ice.body-hi;
+                clip: true;
+                if music.has-art : Image { source: music.art; width: parent.width; height: parent.height; image-fit: cover; }
+                if !music.has-art : Text { text: "♪"; color: Ice.glow; font-size: 22px; horizontal-alignment: center; vertical-alignment: center; }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Hud { text: music.app == "" ? "NOW PLAYING" : music.app; }
+                    Equalizer { playing: music.playing; height: 10px; }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                Text { text: music.title; color: Ice.ink; font-size: 14.5px; font-weight: 700; overflow: elide; }
+                Text { text: music.artist; color: Ice.dim; font-size: 11.5px; overflow: elide; }
+            }
+            IconButton { icon: Icons.dislike; size: 32px; icon-size: 19px; stroke-width: 1.6px; on: music.rating < 0; filled: music.rating < 0; y: (parent.height - self.height) / 2; clicked => { root.command("dislike"); } }
+            IconButton { icon: Icons.like; size: 32px; icon-size: 19px; stroke-width: 1.6px; on: music.rating > 0; filled: music.rating > 0; y: (parent.height - self.height) / 2; clicked => { root.command("like"); } }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: music.elapsed; color: Ice.dim; font-size: 10.5px; vertical-alignment: center; }
+            Bar { value: music.position; y: (parent.height - self.height) / 2; }
+            Text { text: music.remaining; color: Ice.dim; font-size: 10.5px; vertical-alignment: center; }
+        }
+        HorizontalLayout {
+            alignment: space-between;
+            IconButton {
+                icon: Icons.shuffle; enabled: music.can-shuffle; on: music.shuffle;
+                y: (parent.height - self.height) / 2;
+                clicked => { root.command("shuffle"); }
+            }
+            IconButton { icon: Icons.previous; filled: true; y: (parent.height - self.height) / 2; clicked => { root.command("previous"); } }
+            IconButton {
+                icon: music.playing ? Icons.pause : Icons.play;
+                primary: true; filled: !music.playing; size: 44px; icon-size: 20px; stroke-width: music.playing ? 3.2px : 1.5px;
+                clicked => { root.command("play-pause"); }
+            }
+            IconButton { icon: Icons.next; filled: true; y: (parent.height - self.height) / 2; clicked => { root.command("next"); } }
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                y: (parent.height - self.height) / 2;
+                IconButton { icon: Icons.repeat; enabled: music.can-repeat; on: music.repeat > 0; clicked => { root.command("repeat"); } }
+                if music.repeat == 2 : Text { text: "1"; color: Ice.glow; font-size: 8px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+            }
+        }
+    }
+
+    // Lyrics, after v1: the whole song as one list, five rows in view, the line
+    // being sung in the middle row. The list slides up a row at a time; the
+    // lines only change their look, so nothing jumps.
+    if music.has-session && music.has-lyrics : VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 2px;
+        HorizontalLayout {
+            spacing: 6px;
+            Hud { text: "LYRICS"; horizontal-stretch: 1; vertical-alignment: center; }
+            // Hold: the island stays open while you read along.
+            Rectangle {
+                width: hold-row.preferred-width + 16px;
+                height: 20px;
+                border-radius: 10px;
+                background: root.held ? Ice.glow.with-alpha(hold.has-hover ? 0.42 : 0.30) : hold.has-hover ? Ice.ink.with-alpha(0.14) : Ice.ink.with-alpha(0.07);
+                animate background { duration: 150ms; }
+                hold-row := HorizontalLayout {
+                    x: 8px;
+                    spacing: 4px;
+                    Path {
+                        width: 10px;
+                        height: 10px;
+                        y: (parent.height - self.height) / 2;
+                        viewbox-width: 24;
+                        viewbox-height: 24;
+                        commands: "M 9 3 H 15 L 14 10 L 18 14 H 6 L 10 10 Z M 12 14 V 21";
+                        stroke: root.held ? Ice.glow : Ice.dim;
+                        stroke-width: 2.4px;
+                        fill: root.held ? Ice.glow : transparent;
+                    }
+                    Text { text: "Hold"; color: root.held ? Ice.ink : Ice.dim; font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
+                }
+                hold := TouchArea { clicked => { root.command("hold"); } }
+            }
+        }
+        view := Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+            // Long lines wrap (never cut): each line is as tall as its text,
+            // and the list centres the sung line by its own place and height,
+            // read from the layout.
+            list := VerticalLayout {
+                property <length> sung-y;
+                property <length> sung-h: 18px;
+                x: 0;
+                width: view.width;
+                y: (view.height - self.sung-h) / 2 - self.sung-y;
+                animate y { duration: 350ms; easing: cubic-bezier(0.3, 0.9, 0.4, 1); }
+                spacing: 3px;
+                for line[i] in music.lyrics : Text {
+                    property <bool> now: i == music.lyric-center;
+                    property <bool> sung: i == music.lyric-index;
+                    property <int> away: abs(i - music.lyric-center);
+                    text: line.text;
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                    font-size: self.sung ? 13px : 11.5px;
+                    font-weight: self.sung ? 700 : 400;
+                    color: self.sung ? Ice.ink : i < music.lyric-index ? Ice.dim.with-alpha(0.7) : Ice.ink.with-alpha(0.55);
+                    opacity: self.away <= 1 ? 1 : self.away == 2 ? 0.45 : 0;
+                    animate color, opacity { duration: 250ms; easing: ease-out; }
+                    init => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
+                    changed now => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
+                    changed y => { if self.now { list.sung-y = self.y; } }
+                    changed height => { if self.now { list.sung-h = self.height; } }
+                }
+            }
+        }
+    }
+    if music.has-session && !music.has-lyrics && music.lyrics-note != "" : VerticalLayout {
+        alignment: center;
+        width: 120px;
+        Text { text: music.lyrics-note; color: Ice.dim; font-size: 11px; wrap: word-wrap; horizontal-alignment: center; }
+    }
+}
+
+// Focus (Pomodoro): the ring and the time, the controls laid out like the
+// Music player's, and today's log of rounds.
+component FocusPage inherits HorizontalLayout {
+    in property <FocusView> pomodoro;
+    callback command(string);
+    spacing: 18px;
+    Rectangle {
+        width: 104px;
+        height: 104px;
+        y: (parent.height - self.height) / 2;
+        Ring { width: parent.width; height: parent.height; value: pomodoro.fraction; thickness: 7px; }
+        VerticalLayout {
+            alignment: center;
+            Text { text: pomodoro.left; color: Ice.ink; font-size: 24px; font-weight: 800; horizontal-alignment: center; }
+            Text { text: pomodoro.rounds; color: Ice.dim; font-size: 9.5px; horizontal-alignment: center; }
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        spacing: 12px;
+        width: 168px;
+        Hud { text: "POMODORO · " + pomodoro.phase; color: pomodoro.on-break ? Ice.frost : Ice.glow; }
+        HorizontalLayout {
+            alignment: space-between;
+            IconButton { icon: Icons.reset; y: (parent.height - self.height) / 2; clicked => { root.command("reset"); } }
+            IconButton {
+                icon: pomodoro.running ? Icons.pause : Icons.play;
+                primary: true; filled: !pomodoro.running; size: 48px; icon-size: 22px; stroke-width: pomodoro.running ? 3.2px : 1.5px;
+                clicked => { root.command(pomodoro.running ? "pause" : "start"); }
+            }
+            IconButton { icon: Icons.next; filled: true; y: (parent.height - self.height) / 2; clicked => { root.command("skip"); } }
+        }
+    }
+    // Today's rounds: how long each one really was.
+    VerticalLayout {
+        horizontal-stretch: 1;
+        alignment: center;
+        spacing: 4px;
+        Hud { text: "TODAY"; }
+        Text { text: pomodoro.today; color: Ice.ink; font-size: 13px; font-weight: 700; }
+        for r in pomodoro.log : HorizontalLayout {
+            spacing: 6px;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 3px;
+                background: r.full ? Ice.glow : Ice.dim;
+            }
+            Text { text: r.time; color: Ice.ink.with-alpha(0.8); font-size: 11px; horizontal-stretch: 1; }
+            Text { text: r.length; color: r.full ? Ice.glow : Ice.dim; font-size: 11px; }
+        }
+    }
+}
+
+// Water, after v1: a ring toward the day's goal, the next reminder and the
+// active hours, a glass at a time, and today by the hour.
+component WaterPage inherits HorizontalLayout {
+    in property <WaterView> water;
+    callback command(string);
+    spacing: 18px;
+    Rectangle {
+        width: 104px;
+        height: 104px;
+        y: (parent.height - self.height) / 2;
+        Ring { width: parent.width; height: parent.height; value: root.water.fraction; thickness: 7px; }
+        VerticalLayout {
+            alignment: center;
+            Text { text: root.water.percent; color: Ice.ink; font-size: 22px; font-weight: 800; horizontal-alignment: center; }
+            Text { text: root.water.total + " ml"; color: Ice.dim; font-size: 10px; horizontal-alignment: center; }
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        spacing: 6px;
+        width: 170px;
+        Hud { text: "HYDRATION · TODAY"; }
+        HorizontalLayout {
+            spacing: 6px;
+            Text { text: root.water.total; color: Ice.ink; font-size: 26px; font-weight: 800; vertical-alignment: bottom; }
+            Text { text: "/ " + root.water.goal; color: Ice.dim; font-size: 12px; vertical-alignment: bottom; }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        Text { text: root.water.next; color: root.water.due ? Ice.glow : Ice.ink.with-alpha(0.8); font-size: 11.5px; font-weight: root.water.due ? 700 : 400; }
+        Text { text: root.water.hours-text; color: Ice.dim; font-size: 10.5px; }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Rectangle {
+                width: t.preferred-width + 30px;
+                height: 32px;
+                border-radius: 16px;
+                background: a.has-hover ? Ice.frost : Ice.glow;
+                animate background { duration: 150ms; }
+                t := Text { text: "+ " + root.water.glass; color: Ice.body-lo; font-size: 12.5px; font-weight: 800; }
+                a := TouchArea { clicked => { root.command("drink"); } }
+            }
+            Pill { label: "Undo"; enabled: root.water.drinks > 0; y: (parent.height - self.height) / 2; clicked => { root.command("undo"); } }
+        }
+    }
+    // Today by the hour, over the active hours (the hour now in light).
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 4px;
+        alignment: center;
+        Hud { text: "BY THE HOUR"; }
+        HorizontalLayout {
+            height: 78px;
+            alignment: space-between;
+            for b in root.water.hours : VerticalLayout {
+                width: 13px;
+                alignment: end;
+                spacing: 3px;
+                Rectangle {
+                    height: max(3px, 60px * b.fraction);
+                    border-radius: 2px;
+                    background: b.now ? Ice.glow : b.fraction > 0 ? Ice.glow.with-alpha(0.55) : Ice.ink.with-alpha(0.08);
+                }
+                Text { text: b.label; color: b.now ? Ice.glow : Ice.dim; font-size: 8.5px; horizontal-alignment: center; }
+            }
+        }
+    }
+}
+
+component ShelfPage inherits VerticalLayout {
+    in property <[ShelfRow]> items;
+    in property <bool> drop-hover;
+    callback open(int);
+    callback copy(int);
+    callback remove(int);
+    callback clear();
+    spacing: 6px;
+    if drop-hover : Rectangle {
+        vertical-stretch: 1;
+        border-radius: 14px;
+        background: Ice.glow.with-alpha(0.18);
+        border-width: 1px;
+        border-color: Ice.glow.with-alpha(0.6);
+        Text { text: "Drop to keep it here"; color: Ice.ink; font-size: 15px; font-weight: 800; }
+    }
+    if !drop-hover : HorizontalLayout {
+        Hud { text: items.length == 0 ? "SHELF" : "SHELF · " + items.length; horizontal-stretch: 1; }
+        if items.length > 0 : Pill { label: "Clear"; clicked => { root.clear(); } }
+    }
+    if !drop-hover && items.length == 0 : Text {
+        text: "Drag a file onto the island to keep it here. Nothing is copied: the shelf remembers where it is.";
+        color: Ice.dim;
+        font-size: 12px;
+        wrap: word-wrap;
+    }
+    if !drop-hover : Flickable {
+        content-height: rows.preferred-height;
+        rows := VerticalLayout {
+            spacing: 2px;
+            for f[i] in root.items : Rectangle {
+                height: 32px;
+                border-radius: 10px;
+                background: row.has-hover ? Ice.ink.with-alpha(0.07) : transparent;
+                animate background { duration: 120ms; }
+                row := TouchArea { clicked => { root.open(i); } }
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 4px;
+                    spacing: 8px;
+                    Rectangle {
+                        width: 12px;
+                        height: 14px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 3px;
+                        background: f.detail == "Folder" ? Ice.frost.with-alpha(0.7) : Ice.glow.with-alpha(0.7);
+                    }
+                    Text { text: f.name; color: Ice.ink; font-size: 12.5px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: f.detail; color: Ice.dim; font-size: 10.5px; vertical-alignment: center; }
+                    Pill { label: "Copy"; y: (parent.height - self.height) / 2; clicked => { root.copy(i); } }
+                    Text {
+                        text: "×";
+                        color: rm.has-hover ? Ice.ink : Ice.dim;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        rm := TouchArea { clicked => { root.remove(i); } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// The to-do list: open tasks on top in the user's order (drag the grip),
+// done ones struck through and sunk to the bottom. Rows are short and the
+// list scrolls, so twenty tasks stay easy to scan.
+component TodoRow inherits Rectangle {
+    in property <TaskRow> task;
+    in property <int> index;
+    in property <int> open-count;
+    in property <length> pitch;
+    callback toggle();
+    callback remove();
+    callback move(int);
+    property <length> drag-dy;
+    // Where the row lands: a whole number of rows away, never among the done ones.
+    property <int> target: clamp(index + round(drag-dy / pitch), 0, open-count - 1);
+    height: pitch - 1px;
+    z: grip.pressed ? 10 : 0;
+    Rectangle {
+        y: grip.pressed ? root.drag-dy : 0px;
+        width: parent.width;
+        height: parent.height;
+        border-radius: 8px;
+        background: grip.pressed ? Ice.body-hi : row.has-hover ? Ice.ink.with-alpha(0.06) : transparent;
+        border-width: grip.pressed ? 1px : 0px;
+        border-color: Ice.glow.with-alpha(0.5);
+        animate background { duration: 120ms; }
+        row := TouchArea { clicked => { root.toggle(); } }
+        HorizontalLayout {
+            padding-left: 2px;
+            padding-right: 6px;
+            spacing: 8px;
+            // The grip: six dots, on open tasks only.
+            Rectangle {
+                width: 14px;
+                opacity: root.task.done ? 0 : (grip.has-hover || grip.pressed ? 1 : 0.45);
+                for d in [0, 1, 2, 3, 4, 5] : Rectangle {
+                    x: d < 3 ? 4px : 8px;
+                    y: parent.height / 2 - 6px + mod(d, 3) * 5px;
+                    width: 2px;
+                    height: 2px;
+                    background: Ice.dim;
+                }
+                grip := TouchArea {
+                    enabled: !root.task.done;
+                    mouse-cursor: self.pressed ? grabbing : grab;
+                    moved => { root.drag-dy = self.mouse-y - self.pressed-y; }
+                    changed pressed => {
+                        if !self.pressed {
+                            if root.target != root.index { root.move(root.target); }
+                            root.drag-dy = 0px;
+                        }
+                    }
+                }
+            }
+            // The checkbox.
+            Rectangle {
+                width: 16px;
+                height: 16px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 8px;
+                background: root.task.done ? Ice.glow : transparent;
+                border-width: root.task.done ? 0px : 1.5px;
+                border-color: row.has-hover ? Ice.glow : Ice.dim;
+                animate background { duration: 150ms; }
+                if root.task.done : Path {
+                    width: 10px;
+                    height: 10px;
+                    x: 3px;
+                    y: 3px;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M 4 12.5 L 9.5 18 L 20 6";
+                    stroke: Ice.body-lo;
+                    stroke-width: 2.5px;
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                label := Text {
+                    x: 0;
+                    width: parent.width;
+                    text: root.task.text;
+                    color: root.task.done ? Ice.dim : Ice.ink;
+                    font-size: 12.5px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    animate color { duration: 200ms; }
+                }
+                // The strike-through, drawn: it grows across when a task is done.
+                Rectangle {
+                    x: 0;
+                    y: parent.height / 2;
+                    height: 1.2px;
+                    width: root.task.done ? min(label.preferred-width, parent.width) : 0px;
+                    background: Ice.dim;
+                    animate width { duration: 220ms; easing: ease-out; }
+                }
+            }
+            Text {
+                text: "×";
+                color: rm.has-hover ? Ice.ink : Ice.dim;
+                opacity: row.has-hover || rm.has-hover ? 1 : 0;
+                font-size: 14px;
+                vertical-alignment: center;
+                rm := TouchArea { clicked => { root.remove(); } }
+            }
+        }
+    }
+}
+
+component TodoPage inherits VerticalLayout {
+    in property <[TaskRow]> tasks;
+    in property <int> open-count;
+    callback add(string);
+    callback toggle(int);
+    callback remove(int);
+    callback move(int, int);
+    callback clear-done();
+    spacing: 6px;
+    HorizontalLayout {
+        spacing: 8px;
+        Rectangle {
+            height: 30px;
+            horizontal-stretch: 1;
+            border-radius: 10px;
+            background: input.has-focus ? Ice.glow.with-alpha(0.12) : Ice.ink.with-alpha(0.06);
+            animate background { duration: 150ms; }
+            input := TextInput {
+                x: 12px;
+                width: parent.width - 24px;
+                color: Ice.ink;
+                font-size: 12.5px;
+                vertical-alignment: center;
+                single-line: true;
+                accepted => {
+                    root.add(self.text);
+                    self.text = "";
+                }
+            }
+            if input.text == "" : Text {
+                x: 12px;
+                text: "Add a task, then Enter";
+                color: Ice.dim;
+                font-size: 12.5px;
+                vertical-alignment: center;
+            }
+        }
+        if root.tasks.length > 0 : Hud {
+            text: root.open-count == 0 ? "ALL DONE" : root.open-count + " OPEN";
+            vertical-alignment: center;
+        }
+        if root.tasks.length > root.open-count : Pill { label: "Clear done"; y: (parent.height - self.height) / 2; clicked => { root.clear-done(); } }
+    }
+    if root.tasks.length == 0 : Text {
+        text: "Nothing to do. Type above; drag the dots to move a task up.";
+        color: Ice.dim;
+        font-size: 12px;
+        wrap: word-wrap;
+    }
+    Flickable {
+        content-height: rows.preferred-height;
+        rows := VerticalLayout {
+            spacing: 1px;
+            for t[i] in root.tasks : TodoRow {
+                task: t;
+                index: i;
+                open-count: root.open-count;
+                pitch: 27px;
+                toggle => { root.toggle(t.id); }
+                remove => { root.remove(t.id); }
+                move(to) => { root.move(t.id, to); }
+            }
+        }
+    }
+}
+
+// The history, after v1: one line a notification (its app, title · body,
+// when), newest first; a click brings its app forward.
+component NotifPage inherits VerticalLayout {
+    in property <[NotifRow]> items;
+    callback clicked(int);
+    callback clear();
+    spacing: 4px;
+    HorizontalLayout {
+        spacing: 8px;
+        Hud { text: items.length == 0 ? "NOTIFICATIONS" : "NOTIFICATIONS · " + items.length; horizontal-stretch: 1; vertical-alignment: center; }
+        if items.length > 0 : Pill { label: "Clear"; clicked => { root.clear(); } }
+    }
+    if items.length == 0 : Text {
+        text: "Notifications from the apps you allow show up here.";
+        color: Ice.dim;
+        font-size: 12px;
+        wrap: word-wrap;
+    }
+    Flickable {
+        content-height: list.preferred-height;
+        list := VerticalLayout {
+            spacing: 1px;
+            for n[i] in root.items : Rectangle {
+                height: 28px;
+                border-radius: 8px;
+                background: row.has-hover ? Ice.ink.with-alpha(0.07) : transparent;
+                animate background { duration: 120ms; }
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    Dot { accent: n.accent; y: (parent.height - self.height) / 2; }
+                    Text { text: n.app; color: Ice.ink; font-size: 12px; font-weight: 700; vertical-alignment: center; overflow: elide; max-width: 90px; }
+                    Text {
+                        text: n.body == "" ? n.title : n.title + " · " + n.body;
+                        color: Ice.ink.with-alpha(0.72);
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    Text { text: n.time; color: Ice.dim; font-size: 10.5px; vertical-alignment: center; }
+                }
+                row := TouchArea { clicked => { root.clicked(i); } }
+            }
+        }
+    }
+}
+
+// ── The island ───────────────────────────────────────────────────────────────
+
+export component Island inherits Window {
+    title: "FubuNotch v2";
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+
+    in property <bool> has-front;
+    in property <Item> front;
+    in property <int> waiting;
+    in property <[Item]> others;
+    in property <string> clock;
+    in property <string> date;
+    in property <[TabInfo]> tabs;
+    in property <string> active-tab: "home";
+    in property <Music> music;
+    in property <[NotifRow]> notifications;
+    in property <FocusView> pomodoro;
+    in property <WaterView> water;
+    in property <[TaskRow]> tasks;
+    in property <[ShelfRow]> shelf;
+    in property <bool> drop-hover;
+    // "hidden", "compact", "expanded".
+    in property <string> mode: "compact";
+    in property <string> mascot-mood: "idle";
+    in property <bool> held;
+    in property <int> mascot-dx;
+    in property <int> mascot-dy;
+    in property <bool> mascot-left;
+    in property <bool> mascot-on: true;
+    // The user's picture behind the island, already cut to its size and corners.
+    in property <bool> has-bg;
+    in property <image> bg;
+    // The island's size for the mode (Rust): it springs there.
+    in property <length> target-w: 170px;
+    in property <length> target-h: 34px;
+
+    callback shelf-open(int);
+    callback shelf-copy(int);
+    callback shelf-remove(int);
+    callback shelf-clear();
+    // "start", "pause", "skip", "reset".
+    callback focus-command(string);
+    // "drink", "undo".
+    callback water-command(string);
+    callback todo-add(string);
+    callback todo-toggle(int);
+    callback todo-remove(int);
+    callback todo-move(int, int);
+    callback todo-clear-done();
+    in property <int> todo-open;
+    callback mascot-clicked();
+    callback hover-changed(bool);
+    callback front-clicked();
+    callback notif-clicked(int);
+    callback notif-clear();
+    callback action-clicked(string);
+    callback dismiss();
+    callback tab-clicked(string);
+    callback open-settings();
+    // "play-pause", "next", "previous".
+    callback music-command(string);
+    callback lyrics-nudge(float);
+
+    property <bool> hidden: mode == "hidden";
+    property <bool> compact: mode == "compact";
+    property <bool> expanded: mode == "expanded";
+    // Springs: the size, and the radius (a capsule until expanded).
+    property <length> island-w: target-w;
+    property <length> island-h: target-h;
+    animate island-w, island-h { duration: Ice.morph; easing: cubic-bezier(0.22, 1.18, 0.36, 1); }
+    property <length> island-r: expanded ? 28px : self.island-h / 2;
+    animate island-r { duration: Ice.morph; easing: ease-out; }
+    property <length> ix: (root.width - self.island-w) / 2;
+
+    // Hidden: a wider strip than the bar, so it is easy to point at.
+    if hidden : TouchArea {
+        x: (root.width - 200px) / 2;
+        y: 0;
+        width: 200px;
+        height: 18px;
+        changed has-hover => { root.hover-changed(self.has-hover); }
+    }
+
+    // A soft glow, one layer.
+    Rectangle {
+        x: root.ix - 4px;
+        y: Ice.top - 4px;
+        width: root.island-w + 8px;
+        height: root.island-h + 8px;
+        border-radius: root.island-r + 4px;
+        background: Ice.glow.with-alpha(root.hidden ? 0.20 : 0.07);
+        animate background { duration: Ice.fade; }
+    }
+    // The body: one shape with its own 1 px edge (stacked rounded layers
+    // left halos at the edges with the software renderer), and a faint
+    // sheen on its upper half.
+    Rectangle {
+        x: root.ix;
+        y: Ice.top;
+        width: root.island-w;
+        height: root.island-h;
+        border-radius: root.island-r;
+        border-width: 1px;
+        border-color: root.hidden ? Ice.glow : Ice.glow.with-alpha(0.55);
+        // Solid: the software renderer doesn't round gradients.
+        background: root.hidden ? Ice.frost : Ice.body;
+        clip: true;
+
+        // Shown once the spring has settled at the size it was cut for.
+        // 1 px in, so the island's edge stays drawn around it.
+        if root.has-bg : Image {
+            x: 1px;
+            y: 1px;
+            width: parent.width - 2px;
+            height: parent.height - 2px;
+            source: root.bg;
+            image-fit: fill;
+            opacity: !root.hidden && abs(root.island-w - root.target-w) < 1px && abs(root.island-h - root.target-h) < 1px ? 1 : 0;
+            animate opacity { duration: 240ms; }
+        }
+
+        // Everything inside the hover area, so pointing at a button still
+        // counts as being over the island.
+        TouchArea {
+            changed has-hover => { root.hover-changed(self.has-hover); }
+
+            // Compact: one line.
+            HorizontalLayout {
+                opacity: root.compact ? 1 : 0;
+                animate opacity { duration: Ice.fade; }
+                visible: self.opacity > 0.01;
+                padding-left: 12px;
+                padding-right: 16px;
+                spacing: 9px;
+                alignment: center;
+                if root.mascot-on : Mascot {
+                    // the tiny sprite at 1x in the capsule
+                    size: 32px;
+                    mood: root.mascot-mood;
+                    dy: root.mascot-dy;
+                    left: root.mascot-left;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.mascot-clicked(); }
+                }
+                if root.has-front && root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
+                if root.has-front && root.front.icon == "" : Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
+                Text {
+                    text: root.has-front ? root.front.title : root.clock;
+                    color: Ice.ink;
+                    font-size: 13px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                if root.has-front && root.front.has-progress : Bar {
+                    width: 70px;
+                    value: root.front.progress;
+                    y: (parent.height - self.height) / 2;
+                }
+                if root.has-front && root.front.kind == "ambient" && root.music.playing : Equalizer {
+                    playing: true;
+                    height: 14px;
+                    y: (parent.height - self.height) / 2;
+                }
+                if root.waiting > 0 : Text {
+                    text: "+" + root.waiting;
+                    color: Ice.glow;
+                    font-size: 11px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Expanded: tabs, then the page of the active one.
+            VerticalLayout {
+                opacity: root.expanded ? 1 : 0;
+                animate opacity { duration: Ice.fade; easing: ease-out; }
+                visible: self.opacity > 0.01;
+                padding: 14px;
+                padding-top: 10px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    spacing: 4px;
+                    height: 24px;
+                    Chip { label: "Home"; active: root.active-tab == "home"; clicked => { root.tab-clicked("home"); } }
+                    for t in root.tabs : Chip { label: t.label; active: root.active-tab == t.id; clicked => { root.tab-clicked(t.id); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    Hud { text: root.clock; }
+                    Rectangle { width: 6px; }
+                    RoundButton { glyph: "⚙"; clicked => { root.open-settings(); } }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+
+                    // Home with nothing (or only music): the mascot, a big clock.
+                    Page {
+                        shown: root.active-tab == "home" && (!root.has-front || root.front.kind == "ambient");
+                        HorizontalLayout {
+                            spacing: 18px;
+                            alignment: start;
+                            if root.mascot-on : Mascot {
+                                size: 128px;
+                                mood: root.mascot-mood;
+                                dx: root.mascot-dx;
+                                dy: root.mascot-dy;
+                                left: root.mascot-left;
+                                y: (parent.height - self.height) / 2;
+                                clicked => { root.mascot-clicked(); }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                Hud { text: root.date; }
+                                Text { text: root.clock; color: Ice.ink; font-size: 48px; font-weight: 800; }
+                                if !root.has-front : Text { text: "All quiet. Pick a tab, or drop a file here."; color: Ice.dim; font-size: 11.5px; }
+                                if root.has-front : HorizontalLayout {
+                                    spacing: 8px;
+                                    Equalizer { playing: root.music.playing; height: 12px; }
+                                    Text { text: root.front.title + "  ·  " + root.front.body; color: Ice.ink.with-alpha(0.8); font-size: 12px; overflow: elide; }
+                                }
+                            }
+                        }
+                    }
+
+                    // Home with something going on: it in full, then who waits.
+                    Page {
+                        shown: root.active-tab == "home" && root.has-front && root.front.kind != "ambient";
+                        VerticalLayout {
+                            spacing: 6px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
+                                Hud { text: root.front.source; horizontal-stretch: 1; }
+                                RoundButton { glyph: "×"; size: 22px; clicked => { root.dismiss(); } }
+                            }
+                            Text {
+                                text: root.front.title;
+                                color: front-area.has-hover ? Ice.glow : Ice.ink;
+                                font-size: 17px;
+                                font-weight: 800;
+                                overflow: elide;
+                                animate color { duration: 120ms; }
+                                front-area := TouchArea { clicked => { root.front-clicked(); } }
+                            }
+                            if root.front.body != "" : Text {
+                                text: root.front.body;
+                                color: Ice.ink.with-alpha(0.75);
+                                font-size: 12.5px;
+                                wrap: word-wrap;
+                                overflow: elide;
+                                max-height: 54px;
+                            }
+                            if root.front.has-progress : Bar { value: root.front.progress; }
+                            if root.front.actions.length > 0 : HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+                                for a in root.front.actions : Pill { label: a.label; clicked => { root.action-clicked(a.id); } }
+                            }
+                            for item in root.others : HorizontalLayout {
+                                spacing: 8px;
+                                height: 18px;
+                                Dot { accent: item.accent; y: (parent.height - self.height) / 2; }
+                                Text { text: item.title; color: Ice.dim; font-size: 11.5px; vertical-alignment: center; overflow: elide; }
+                            }
+                            Rectangle { }
+                        }
+                    }
+
+                    Page {
+                        shown: root.active-tab == "music";
+                        MusicPage { music: root.music; held: root.held; command(c) => { root.music-command(c); } nudge(d) => { root.lyrics-nudge(d); } }
+                    }
+                    Page {
+                        shown: root.active-tab == "focus";
+                        FocusPage { pomodoro: root.pomodoro; command(c) => { root.focus-command(c); } }
+                    }
+                    Page {
+                        shown: root.active-tab == "water";
+                        WaterPage { water: root.water; command(c) => { root.water-command(c); } }
+                    }
+                    Page {
+                        shown: root.active-tab == "todo";
+                        TodoPage {
+                            tasks: root.tasks;
+                            add(t) => { root.todo-add(t); }
+                            toggle(id) => { root.todo-toggle(id); }
+                            remove(id) => { root.todo-remove(id); }
+                            move(id, to) => { root.todo-move(id, to); }
+                            clear-done => { root.todo-clear-done(); }
+                            open-count: root.todo-open;
+                        }
+                    }
+                    Page {
+                        shown: root.active-tab == "shelf";
+                        ShelfPage {
+                            items: root.shelf;
+                            drop-hover: root.drop-hover;
+                            open(i) => { root.shelf-open(i); }
+                            copy(i) => { root.shelf-copy(i); }
+                            remove(i) => { root.shelf-remove(i); }
+                            clear => { root.shelf-clear(); }
+                        }
+                    }
+                    Page {
+                        shown: root.active-tab == "notifications";
+                        NotifPage { items: root.notifications; clicked(i) => { root.notif-clicked(i); } clear => { root.notif-clear(); } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export { SettingsWindow, Tray, ModuleRow, ConfirmWindow, SettingsView, AppSwitch } from "settings.slint";

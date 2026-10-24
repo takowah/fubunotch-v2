@@ -1,0 +1,20 @@
+// The look every window shares. Rust sets the colours from the chosen theme
+// (a hololive member's: Fubuki icy by default) on each window, so a change in
+// Settings shows at once everywhere.
+
+export global Ice {
+    in-out property <string> theme: "fubuki";
+    in-out property <color> body: #0b1424;
+    in-out property <color> body-lo: #091020;
+    in-out property <color> body-hi: #12203a;
+    in-out property <color> ink: #e8f6ff;
+    in-out property <color> dim: #8fa7bd;
+    in-out property <color> glow: #5fd4ff;
+    in-out property <color> frost: #b8e8ff;
+    in-out property <color> deep: #3d74e0;
+    // The gap between the screen's top edge and the island.
+    out property <length> top: 6px;
+    // Motion: a spring-like ease with a small overshoot, and a soft ease.
+    out property <duration> morph: 420ms;
+    out property <duration> fade: 220ms;
+}

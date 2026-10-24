@@ -1,0 +1,20 @@
+[workspace]
+members = ["crates/island-core", "crates/island-webhook", "crates/island-lyrics", "crates/island-hook", "app"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+# Small and fast: the island must stay light.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
