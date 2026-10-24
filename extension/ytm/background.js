@@ -46,7 +46,7 @@ async function poll() {
     while (musicTab !== null || watchTab !== null) {
       let r;
       try {
-        r = await fetch(`${BASE}/ytm/command`, { cache: "no-store" });
+        r = await fetch(`${BASE}/ytm/command`, { method: "POST", cache: "no-store" }); // a GET would go without the Origin the island checks
       } catch {
         await sleep(5000); // FubuNotch isn't running
         continue;

@@ -161,8 +161,9 @@ pub fn handle(req: &Request, token: &str) -> (Response, Option<Event>) {
                     Err(err) => reply(400, err.to_string()),
                 }
             }
-            // Answered by `spawn` after a wait (a long poll).
-            ("GET", "command") => reply(204, ""),
+            // Answered by `spawn` after a wait (a long poll). A POST: Chrome
+            // leaves the Origin off an extension's GET, so a GET can't pass.
+            ("POST", "command") => reply(204, ""),
             _ => reply(404, "not found"),
         };
     }
@@ -281,7 +282,7 @@ pub fn spawn(port: u16, token: String, on_event: impl Fn(Event) + Send + 'static
             };
             // The extension's long poll: answered when a command comes, or
             // empty after YTM_POLL, on a thread of its own.
-            if method == "GET" && path == "/ytm/command" && response.status == 204 {
+            if method == "POST" && path == "/ytm/command" && response.status == 204 {
                 std::thread::spawn(move || {
                     let answer = match ytm_next(YTM_POLL) {
                         Some(c) => tiny_http::Response::from_string(serde_json::json!({ "command": c }).to_string()).with_status_code(200),
@@ -333,6 +334,15 @@ mod tests {
         let (r, e) = handle(&ext, TOKEN);
         assert_eq!(r.status, 200);
         assert_eq!(e, Some(Event::Ytm(YtmState { shuffle: true, repeat: "all".into(), title: "x".into() })));
+    }
+
+    #[test]
+    fn the_command_poll_is_a_post() {
+        // Chrome sends no Origin with an extension's GET: the poll is a POST.
+        let poll = |origin, method| handle(&Request { origin, method, path: "/ytm/command", authorization: None, content_type: None, body: b"" }, TOKEN).0.status;
+        assert_eq!(poll(Some("chrome-extension://abc"), "POST"), 204, "waits, answered by spawn");
+        assert_eq!(poll(None, "POST"), 403);
+        assert_eq!(poll(Some("https://evil.example"), "POST"), 403);
     }
 
     #[test]
