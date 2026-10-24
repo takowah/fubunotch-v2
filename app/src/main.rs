@@ -1062,9 +1062,14 @@ fn on_notification(ui: &Island, n: notif::Notif) {
                 state.arbiter.upsert(a, now);
             }
         }
-        // A new app's banners follow too (this first one already showed).
-        if state.settings.notifications.only_island && !n.aumid.is_empty() && !state.data.banners.contains_key(&n.aumid) {
-            sync_banners(state);
+        // A new app's banners go too (this first one already showed): by its
+        // own AUMID, as some apps' settings sit in nested keys Windows makes
+        // only then.
+        let off_here = state.settings.notifications.off.iter().any(|o| o.eq_ignore_ascii_case(&n.app));
+        if state.settings.notifications.only_island && notif::has_access() && !off_here && !n.aumid.is_empty() && !state.data.banners.contains_key(&n.aumid) {
+            if banners::take(banners::SETTINGS, [n.aumid.as_str()], &mut state.data.banners) {
+                store::save_data(&state.data);
+            }
         }
         state.notifications.retain(|old| old.id != n.id);
         state.notifications.push_front(n);
