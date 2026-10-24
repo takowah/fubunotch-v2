@@ -55,7 +55,7 @@ const MUSIC_EVENTS_AFTER: u64 = 4_000;
 const COMPACT_LYRIC: (f32, f32) = (480.0, 38.0);
 const COMPACT_LYRIC_TALL: f32 = 58.0;
 /// The row under Line's lyric: a notice with a message, and without.
-const LINE_NOTICE_H: f32 = 46.0;
+const LINE_NOTICE_H: f32 = 50.0;
 const LINE_NOTICE_SHORT_H: f32 = 30.0;
 /// About as many characters as fit on Line's one line at 13 px.
 const LYRIC_ONE_LINE: usize = 46;
@@ -544,13 +544,12 @@ fn refresh(ui: &Island) {
             state.held = false;
         }
         ui.set_held(state.held);
-        // Line ends with the music.
-        if !state.music.has_session {
-            state.line_held = false;
-        }
-        ui.set_line_held(state.line_held);
+        // Line stays switched on, but shows only while there is music (a
+        // browser's session drops out for a moment between songs).
+        let line = state.line_held && state.music.has_session;
+        ui.set_line_held(line);
         let ytm = ytm_live(state, now);
-        let capsule_line = if state.line_held { capsule_lyric(state) } else { String::new() };
+        let capsule_line = if line { capsule_lyric(state) } else { String::new() };
         ui.set_capsule_line(capsule_line.as_str().into());
         let capsule_long = lyric_width(&capsule_line) > LYRIC_ONE_LINE;
         ui.set_capsule_long(capsule_long);
@@ -586,17 +585,26 @@ fn refresh(ui: &Island) {
         if front_changed {
             state.line_notice_until = now + NOTIF_HOLD_MS;
         }
-        let line_notice = state.line_held
+        let line_notice = line
             && front_id.as_deref().is_some_and(|id| id != "music:now")
             && (asking || now < state.line_notice_until);
         ui.set_line_notice(line_notice);
         if asking && state.mode == Mode::Hidden {
             state.mode = Mode::Compact;
         }
-        if state.line_held && state.mode == Mode::Hidden {
+        if line && state.mode == Mode::Hidden {
             state.mode = Mode::Compact;
         }
-        if state.mode == Mode::Compact && !asking && !state.line_held && state.hide_at.is_some_and(|t| now >= t) {
+        // Line never hides: no hiding time either (one left in the past made
+        // the timer fire every 15 ms, and the busy loop starved the painting).
+        if line {
+            state.hide_at = None;
+        }
+        // Line just went (or the music did): the capsule goes up as usual.
+        if !line && !state.pinned && state.mode == Mode::Compact && !asking && state.hide_at.is_none() {
+            state.hide_at = Some(now + hide_after(&state.settings));
+        }
+        if state.mode == Mode::Compact && !asking && !line && state.hide_at.is_some_and(|t| now >= t) {
             state.mode = Mode::Hidden;
             state.hide_at = None;
         }
@@ -623,7 +631,7 @@ fn refresh(ui: &Island) {
             Mode::Expanded => EXPANDED,
             Mode::Hidden => HIDDEN,
             // A long lyric takes a second line, a notice a row underneath.
-            Mode::Compact if state.line_held => {
+            Mode::Compact if line => {
                 let lyric = if capsule_long { COMPACT_LYRIC_TALL } else { COMPACT_LYRIC.1 };
                 let under = match state.arbiter.view().front.filter(|_| line_notice) {
                     Some(a) if !a.body.trim().is_empty() => LINE_NOTICE_H,
@@ -653,7 +661,7 @@ fn refresh(ui: &Island) {
 
         // One timer: the arbiter's next wake, else the clock's next minute.
         let wake = state.arbiter.next_wake(now).map(|t| t.saturating_sub(now));
-        let music_on_screen = (expanded && state.active_tab == "music" || state.line_held && state.mode == Mode::Compact) && state.music.playing;
+        let music_on_screen = (expanded && state.active_tab == "music" || line && state.mode == Mode::Compact) && state.music.playing;
         // The lyrics move on more often than the progress bar.
         let page_tick = match (music_on_screen, state.lyrics.as_ref().is_some_and(|l| !l.lines.is_empty())) {
             (true, true) => 250,
@@ -2189,6 +2197,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         });
     } else if with_state(|s| s.settings.is_on("music")).unwrap_or(false) {
+        with_state(|s| s.line_held = std::env::var_os("FUBUNOTCH_V2_LINE").is_some());
         start_music(&ui);
     }
 
