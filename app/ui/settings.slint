@@ -28,6 +28,9 @@ export struct SettingsView {
     lyrics-youtube: bool,
     romaji: bool,
     notif-popups: bool,
+    notif-only-island: bool,
+    // Windows lets FubuNotch read notifications.
+    notif-access: bool,
     notif-list: [AppSwitch],
     sys-volume: bool,
     sys-caps: bool,
@@ -138,7 +141,9 @@ component SettingRow inherits Rectangle {
     in property <string> title;
     in property <string> hint;
     in property <bool> last;
-    min-height: 56px;
+    // A hint on two lines: the layout doesn't grow for wrapped text by itself.
+    in property <bool> tall;
+    min-height: root.tall ? 76px : 56px;
     HorizontalLayout {
         padding-left: 16px;
         padding-right: 16px;
@@ -382,9 +387,10 @@ export component SettingsWindow inherits Window {
                 // ── General ──
                 if root.page == "general" : Card {
                     SettingRow { title: "Start with Windows"; hint: "The island comes up when you sign in."; Toggle { on: root.s.autostart; toggled(v) => { root.flag-changed("autostart", v); } } }
-                    SettingRow { title: "Pop up for activities"; hint: "The island drops down for new things. Questions from Claude Code always show."; Toggle { on: root.s.popups; toggled(v) => { root.flag-changed("general.popups", v); } } }
+                    SettingRow { title: "Pop up for activities"; tall: true; hint: "The island drops down for new things. Questions from Claude Code always show."; Toggle { on: root.s.popups; toggled(v) => { root.flag-changed("general.popups", v); } } }
                     SettingRow {
                         title: "Hide when idle";
+                        tall: true;
                         hint: "Seconds after the pointer leaves before the island goes back up.";
                         last: true;
                         Stepper { value: root.s.hide-after; minimum: 2; maximum: 60; unit: "s"; changed(v) => { root.number-changed("general.hide_after_s", v); } }
@@ -477,7 +483,15 @@ export component SettingsWindow inherits Window {
 
                 // ── Notifications ──
                 if root.page == "notifications" : Card {
-                    SettingRow { title: "Pop up the island"; hint: "For each new notification from an app that is on."; last: true; Toggle { on: root.s.notif-popups; toggled(v) => { root.flag-changed("notifications.popups", v); } } }
+                    SettingRow { title: "Pop up the island"; hint: "For each new notification from an app that is on."; Toggle { on: root.s.notif-popups; toggled(v) => { root.flag-changed("notifications.popups", v); } } }
+                    SettingRow {
+                        title: "Only on the island";
+                        tall: true;
+                        hint: !root.s.notif-access ? "Needs access: Windows Settings → Privacy & security → Notifications → let apps read them."
+                            : "Windows' own pop-ups off for the apps on here. Off, or quitting FubuNotch, puts them back as they were.";
+                        last: true;
+                        Toggle { on: root.s.notif-only-island; toggled(v) => { root.flag-changed("notifications.only_island", v); } }
+                    }
                 }
                 if root.page == "notifications" : Heading { text: "APPS"; }
                 if root.page == "notifications" : Card {

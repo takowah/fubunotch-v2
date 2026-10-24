@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod autostart;
+mod banners;
 mod mascot;
 mod bg;
 mod pet;
@@ -1016,8 +1017,33 @@ fn start_notifications(ui: &Island) {
                 }
             });
         },
+        // Access known: Windows' banners follow "Only on the island".
+        || {
+            let _ = slint::invoke_from_event_loop(|| {
+                with_state(sync_banners);
+            });
+        },
     );
     with_state(|state| state.notif_watcher = Some(watcher));
+}
+
+/// Settings → Notifications → "Only on the island": Windows' pop-up banners
+/// off for every app that is on here, and back as they were for the others,
+/// when the switch is off or FubuNotch can't read notifications.
+fn sync_banners(state: &mut State) {
+    let want = state.settings.notifications.only_island && state.settings.is_on("notifications") && notif::has_access();
+    // The apps switched off here keep their banners: nothing would show them.
+    let off: Vec<String> = state.settings.notifications.off.iter().filter_map(|name| state.data.notif_apps.get(name).cloned()).collect();
+    let mut kept = std::mem::take(&mut state.data.banners);
+    let mut changed = banners::give_back(banners::SETTINGS, &mut kept, |a| !want || off.iter().any(|o| o == a));
+    if want {
+        let apps = banners::apps(banners::SETTINGS);
+        changed |= banners::take(banners::SETTINGS, apps.iter().map(String::as_str).filter(|a| !off.iter().any(|o| o == a)), &mut kept);
+    }
+    state.data.banners = kept;
+    if changed {
+        store::save_data(&state.data);
+    }
 }
 
 /// A new notification: into the history, and up on the island if pop-ups are on.
@@ -1035,6 +1061,10 @@ fn on_notification(ui: &Island, n: notif::Notif) {
             if let Ok(a) = island_core::Incoming::parse(json.to_string().as_bytes()).and_then(|i| i.into_activity(now)) {
                 state.arbiter.upsert(a, now);
             }
+        }
+        // A new app's banners follow too (this first one already showed).
+        if state.settings.notifications.only_island && !n.aumid.is_empty() && !state.data.banners.contains_key(&n.aumid) {
+            sync_banners(state);
         }
         state.notifications.retain(|old| old.id != n.id);
         state.notifications.push_front(n);
@@ -1247,6 +1277,8 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         lyrics_youtube: s.music.lyrics_youtube,
         romaji: s.music.romaji,
         notif_popups: s.notifications.popups,
+        notif_only_island: s.notifications.only_island,
+        notif_access: notif::has_access(),
         notif_list: ModelRc::new(VecModel::from(notif_list)),
         sys_volume: s.system.volume,
         sys_caps: s.system.caps_lock,
@@ -1296,6 +1328,7 @@ fn change_settings(ui: &Island, f: impl FnOnce(&mut Settings)) {
         if let Err(err) = store::save(&state.settings) {
             eprintln!("settings not saved: {err}");
         }
+        sync_banners(state);
         // The mascot cheers each change.
         if let Some(p) = state.pet.as_mut() {
             p.cheer();
@@ -1317,6 +1350,7 @@ fn set_flag(s: &mut Settings, key: &str, on: bool) {
         "music.lyrics_youtube" => s.music.lyrics_youtube = on,
         "music.romaji" => s.music.romaji = on,
         "notifications.popups" => s.notifications.popups = on,
+        "notifications.only_island" => s.notifications.only_island = on,
         "system.volume" => s.system.volume = on,
         "system.caps_lock" => s.system.caps_lock = on,
         "system.keyboard_layout" => s.system.keyboard_layout = on,
@@ -2262,6 +2296,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     tray.on_quit(|| {
+        // Closed, FubuNotch can't show notifications: Windows' banners come
+        // back as they were (and go again at the next start).
+        with_state(|state| {
+            if banners::give_back(banners::SETTINGS, &mut state.data.banners, |_| true) {
+                store::save_data(&state.data);
+            }
+        });
         let _ = slint::quit_event_loop();
     });
 

@@ -127,9 +127,17 @@ fn read(n: &UserNotification) -> Option<Notif> {
 
 /// Starts watching; `allowed_now` is asked for the current app list each time,
 /// `sink` gets each new allowed notification. Dropping the Watcher stops it.
+/// Whether Windows lets FubuNotch read notifications (known once the watcher ran).
+pub fn has_access() -> bool {
+    ACCESS.load(Ordering::Relaxed)
+}
+static ACCESS: AtomicBool = AtomicBool::new(false);
+
+/// `ready`: called once the watcher reads notifications (access granted).
 pub fn start(
     allowed_now: impl Fn() -> Vec<String> + Send + 'static,
     sink: impl Fn(Notif) + Send + 'static,
+    ready: impl Fn() + Send + 'static,
 ) -> Watcher {
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
@@ -137,7 +145,7 @@ pub fn start(
         .name("fubunotch-notifications".into())
         .spawn(move || {
             let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-            run(&flag, allowed_now, sink);
+            run(&flag, allowed_now, sink, ready);
             if com.is_ok() {
                 unsafe { CoUninitialize() };
             }
@@ -146,7 +154,7 @@ pub fn start(
     Watcher { stop }
 }
 
-fn run(stop: &AtomicBool, allowed_now: impl Fn() -> Vec<String>, sink: impl Fn(Notif)) {
+fn run(stop: &AtomicBool, allowed_now: impl Fn() -> Vec<String>, sink: impl Fn(Notif), ready: impl Fn()) {
     let Ok(listener) = UserNotificationListener::Current() else { return };
     let access = listener.GetAccessStatus().unwrap_or(UserNotificationListenerAccessStatus::Unspecified);
     if access != UserNotificationListenerAccessStatus::Allowed {
@@ -154,9 +162,12 @@ fn run(stop: &AtomicBool, allowed_now: impl Fn() -> Vec<String>, sink: impl Fn(N
         let asked = listener.RequestAccessAsync().and_then(|op| op.get());
         if asked != Ok(UserNotificationListenerAccessStatus::Allowed) {
             crate::store::log("notifications: no access (Settings → Privacy → Notifications)");
+            ACCESS.store(false, Ordering::Relaxed);
             return;
         }
     }
+    ACCESS.store(true, Ordering::Relaxed);
+    ready();
     let first = toasts(&listener).unwrap_or_default();
     for n in &first {
         if let Some(x) = read(n) {
