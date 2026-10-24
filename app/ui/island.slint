@@ -316,6 +316,37 @@ component IconButton inherits Rectangle {
     area := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
+// A small toggle chip with an icon (the lyrics header's Line and Hold).
+component HoldChip inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <bool> on;
+    in property <bool> filled;
+    callback clicked();
+    width: chip-row.preferred-width + 16px;
+    height: 20px;
+    border-radius: 10px;
+    background: root.on ? Ice.glow.with-alpha(area.has-hover ? 0.42 : 0.30) : area.has-hover ? Ice.ink.with-alpha(0.14) : Ice.ink.with-alpha(0.07);
+    animate background { duration: 150ms; }
+    chip-row := HorizontalLayout {
+        x: 8px;
+        spacing: 4px;
+        Path {
+            width: 13px;
+            height: 13px;
+            y: (parent.height - self.height) / 2;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: root.icon;
+            stroke: root.on ? Ice.glow : Ice.dim;
+            stroke-width: 1.6px;
+            fill: root.filled && root.on ? Ice.glow : transparent;
+        }
+        Text { text: root.label; color: root.on ? Ice.ink : Ice.dim; font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
+    }
+    area := TouchArea { clicked => { root.clicked(); } }
+}
+
 component Pill inherits Rectangle {
     in property <string> label;
     in property <bool> enabled: true;
@@ -371,6 +402,7 @@ component Page inherits Rectangle {
 component MusicPage inherits HorizontalLayout {
     in property <Music> music;
     in property <bool> held;
+    in property <bool> line-held;
     callback command(string);
     // Moves the lyrics by this many seconds (later: positive).
     callback nudge(float);
@@ -388,8 +420,8 @@ component MusicPage inherits HorizontalLayout {
     if music.has-session : VerticalLayout {
         spacing: 8px;
         alignment: center;
-        width: music.has-lyrics ? 244px : self.preferred-width;
-        horizontal-stretch: music.has-lyrics ? 0 : 1;
+        width: 244px;
+        horizontal-stretch: 0;
         HorizontalLayout {
             spacing: 10px;
             Rectangle {
@@ -449,76 +481,69 @@ component MusicPage inherits HorizontalLayout {
     // Lyrics, after v1: the whole song as one list, five rows in view, the line
     // being sung in the middle row. The list slides up a row at a time; the
     // lines only change their look, so nothing jumps.
-    if music.has-session && music.has-lyrics : VerticalLayout {
+    // The lyrics column: its header (Line and Hold) stays whether or not the
+    // song has lyrics; below it the lyrics, or why there are none.
+    if music.has-session : VerticalLayout {
         horizontal-stretch: 1;
         spacing: 2px;
         HorizontalLayout {
             spacing: 6px;
             Hud { text: "LYRICS"; horizontal-stretch: 1; vertical-alignment: center; }
+            // Line: the island stays a capsule showing the line being sung.
+            HoldChip {
+                label: "Line";
+                icon: "M 4 7 H 20 M 4 12 H 15 M 4 17 H 18";
+                on: root.line-held;
+                clicked => { root.command("line-hold"); }
+            }
             // Hold: the island stays open while you read along.
-            Rectangle {
-                width: hold-row.preferred-width + 16px;
-                height: 20px;
-                border-radius: 10px;
-                background: root.held ? Ice.glow.with-alpha(hold.has-hover ? 0.42 : 0.30) : hold.has-hover ? Ice.ink.with-alpha(0.14) : Ice.ink.with-alpha(0.07);
-                animate background { duration: 150ms; }
-                hold-row := HorizontalLayout {
-                    x: 8px;
-                    spacing: 4px;
-                    Path {
-                        width: 10px;
-                        height: 10px;
-                        y: (parent.height - self.height) / 2;
-                        viewbox-width: 24;
-                        viewbox-height: 24;
-                        commands: "M 9 3 H 15 L 14 10 L 18 14 H 6 L 10 10 Z M 12 14 V 21";
-                        stroke: root.held ? Ice.glow : Ice.dim;
-                        stroke-width: 2.4px;
-                        fill: root.held ? Ice.glow : transparent;
-                    }
-                    Text { text: "Hold"; color: root.held ? Ice.ink : Ice.dim; font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
-                }
-                hold := TouchArea { clicked => { root.command("hold"); } }
+            HoldChip {
+                label: "Hold";
+                icon: "M 9 3 H 15 L 14 10 L 18 14 H 6 L 10 10 Z M 12 14 V 21";
+                filled: true;
+                on: root.held;
+                clicked => { root.command("hold"); }
             }
         }
-        view := Rectangle {
+        if music.has-lyrics : view := Rectangle {
             vertical-stretch: 1;
-            clip: true;
-            // Long lines wrap (never cut): each line is as tall as its text,
-            // and the list centres the sung line by its own place and height,
-            // read from the layout.
-            list := VerticalLayout {
-                property <length> sung-y;
-                property <length> sung-h: 18px;
-                x: 0;
-                width: view.width;
-                y: (view.height - self.sung-h) / 2 - self.sung-y;
-                animate y { duration: 350ms; easing: cubic-bezier(0.3, 0.9, 0.4, 1); }
-                spacing: 3px;
-                for line[i] in music.lyrics : Text {
-                    property <bool> now: i == music.lyric-center;
-                    property <bool> sung: i == music.lyric-index;
-                    property <int> away: abs(i - music.lyric-center);
-                    text: line.text;
-                    wrap: word-wrap;
-                    horizontal-alignment: center;
-                    font-size: self.sung ? 13px : 11.5px;
-                    font-weight: self.sung ? 700 : 400;
-                    color: self.sung ? Ice.ink : i < music.lyric-index ? Ice.dim.with-alpha(0.7) : Ice.ink.with-alpha(0.55);
-                    opacity: self.away <= 1 ? 1 : self.away == 2 ? 0.45 : 0;
-                    animate color, opacity { duration: 250ms; easing: ease-out; }
-                    init => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
-                    changed now => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
-                    changed y => { if self.now { list.sung-y = self.y; } }
-                    changed height => { if self.now { list.sung-h = self.height; } }
+                clip: true;
+                // Long lines wrap (never cut): each line is as tall as its text,
+                // and the list centres the sung line by its own place and height,
+                // read from the layout.
+                list := VerticalLayout {
+                    property <length> sung-y;
+                    property <length> sung-h: 18px;
+                    x: 0;
+                    width: view.width;
+                    y: (view.height - self.sung-h) / 2 - self.sung-y;
+                    animate y { duration: 350ms; easing: cubic-bezier(0.3, 0.9, 0.4, 1); }
+                    spacing: 3px;
+                    for line[i] in music.lyrics : Text {
+                        property <bool> now: i == music.lyric-center;
+                        property <bool> sung: i == music.lyric-index;
+                        property <int> away: abs(i - music.lyric-center);
+                        text: line.text;
+                        wrap: word-wrap;
+                        horizontal-alignment: center;
+                        font-size: self.sung ? 13px : 11.5px;
+                        font-weight: self.sung ? 700 : 400;
+                        color: self.sung ? Ice.ink : i < music.lyric-index ? Ice.dim.with-alpha(0.7) : Ice.ink.with-alpha(0.55);
+                        opacity: self.away <= 1 ? 1 : self.away == 2 ? 0.45 : 0;
+                        animate color, opacity { duration: 250ms; easing: ease-out; }
+                        init => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
+                        changed now => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
+                        changed y => { if self.now { list.sung-y = self.y; } }
+                        changed height => { if self.now { list.sung-h = self.height; } }
+                    }
                 }
             }
+    
+        if !music.has-lyrics : VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            Text { text: music.lyrics-note == "" ? "Lyrics are off (Settings → Music)" : music.lyrics-note; color: Ice.dim; font-size: 11px; wrap: word-wrap; horizontal-alignment: center; }
         }
-    }
-    if music.has-session && !music.has-lyrics && music.lyrics-note != "" : VerticalLayout {
-        alignment: center;
-        width: 120px;
-        Text { text: music.lyrics-note; color: Ice.dim; font-size: 11px; wrap: word-wrap; horizontal-alignment: center; }
     }
 }
 
@@ -962,6 +987,11 @@ export component Island inherits Window {
     in property <string> mode: "compact";
     in property <string> mascot-mood: "idle";
     in property <bool> held;
+    // Line: the capsule stays, showing the line being sung (capsule-line).
+    in property <bool> line-held;
+    in property <string> capsule-line;
+    // A long one: a size smaller, on two lines.
+    in property <bool> capsule-long;
     in property <int> mascot-dx;
     in property <int> mascot-dy;
     in property <bool> mascot-left;
@@ -1114,13 +1144,16 @@ export component Island inherits Window {
                     clicked => { root.mascot-clicked(); }
                 }
                 if root.has-front && root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
-                if root.has-front && root.front.icon == "" : Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
+                if root.has-front && root.front.icon == "" && root.capsule-line == "" : Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
+                // Line's lyric wraps to a second line rather than being cut.
                 Text {
-                    text: root.has-front ? root.front.title : root.clock;
+                    text: root.capsule-line != "" ? root.capsule-line : root.has-front ? root.front.title : root.clock;
                     color: Ice.ink;
-                    font-size: 13px;
+                    font-size: root.capsule-long ? 12px : 13px;
                     font-weight: 600;
                     vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    wrap: root.capsule-line != "" ? word-wrap : no-wrap;
                     overflow: elide;
                 }
                 if root.has-front && root.front.has-progress : Bar {
@@ -1241,7 +1274,7 @@ export component Island inherits Window {
 
                     Page {
                         shown: root.active-tab == "music";
-                        MusicPage { music: root.music; held: root.held; command(c) => { root.music-command(c); } nudge(d) => { root.lyrics-nudge(d); } }
+                        MusicPage { music: root.music; held: root.held; line-held: root.line-held; command(c) => { root.music-command(c); } nudge(d) => { root.lyrics-nudge(d); } }
                     }
                     Page {
                         shown: root.active-tab == "focus";

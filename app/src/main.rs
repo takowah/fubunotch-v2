@@ -49,6 +49,13 @@ const COMPACT_BUSY: (f32, f32) = (390.0, 38.0);
 /// A notification with a message: a small card showing who, what and the message.
 const COMPACT_NOTICE: (f32, f32) = (420.0, 80.0);
 const NOTICE_RADIUS: f32 = 22.0;
+/// The music's notices start this long after launch (ms), past the first snapshot.
+const MUSIC_EVENTS_AFTER: u64 = 4_000;
+/// Line's capsule: room for a line of lyrics.
+const COMPACT_LYRIC: (f32, f32) = (480.0, 38.0);
+const COMPACT_LYRIC_TALL: f32 = 58.0;
+/// About as many characters as fit on Line's one line at 13 px.
+const LYRIC_ONE_LINE: usize = 50;
 const EXPANDED: (f32, f32) = (520.0, 200.0);
 /// The expanded island grows for a long list (To-do), up to this tall; the
 /// rest scrolls.
@@ -92,6 +99,10 @@ struct State {
     /// Music's Hold: the island stays open when the pointer leaves (let go
     /// on leaving the Music tab, so it can't stay stuck open).
     held: bool,
+    /// Music's Line: the island stays a capsule showing the line being sung.
+    line_held: bool,
+    /// Counts the music's notices (song, play, pause, stop), one id each.
+    music_events: u64,
     /// The mascot: its mood, and the timers that blink it and end a mood.
     /// The mascot's life and its clock (running only while the island shows).
     life: mascot::Life,
@@ -455,7 +466,8 @@ fn refresh(ui: &Island) {
             ui.set_front(item(front));
         }
         // A Windows notification with a message shows it (v1's taller chip).
-        let notice = view.front.is_some_and(|a| a.id.starts_with("notif:") && !a.body.trim().is_empty());
+        // So does the music's notice (song, play, pause, stop).
+        let notice = view.front.is_some_and(|a| (a.id.starts_with("notif:") || a.id.starts_with("music:event")) && !a.body.trim().is_empty());
         ui.set_notice(notice);
         ui.set_waiting(view.waiting as i32);
         let others: Vec<Item> = state
@@ -527,7 +539,16 @@ fn refresh(ui: &Island) {
             state.held = false;
         }
         ui.set_held(state.held);
+        // Line ends with the music.
+        if !state.music.has_session {
+            state.line_held = false;
+        }
+        ui.set_line_held(state.line_held);
         let ytm = ytm_live(state, now);
+        let capsule_line = if state.line_held { capsule_lyric(state) } else { String::new() };
+        ui.set_capsule_line(capsule_line.as_str().into());
+        let capsule_long = lyric_width(&capsule_line) > LYRIC_ONE_LINE;
+        ui.set_capsule_long(capsule_long);
         ui.set_music(music_view(&state.music, &state.music_art, &state.lyrics, lines, lyrics_on, state.lyrics_nudge, rating, ytm.as_ref()));
 
         // Modes: a new notice pops the hidden island up; the compact island
@@ -550,7 +571,7 @@ fn refresh(ui: &Island) {
         }
         // A notification floats at least NOTIF_HOLD_MS, a new one again in full
         // even when the capsule is already down.
-        if front_changed && state.mode == Mode::Compact && front_id.as_deref().is_some_and(|id| id.starts_with("notif:")) {
+        if front_changed && state.mode == Mode::Compact && front_id.as_deref().is_some_and(|id| id.starts_with("notif:") || id.starts_with("music:event")) {
             let hold = now + hide_after(&state.settings).max(NOTIF_HOLD_MS);
             state.hide_at = Some(state.hide_at.map_or(hold, |t| t.max(hold)));
         }
@@ -558,7 +579,10 @@ fn refresh(ui: &Island) {
         if asking && state.mode == Mode::Hidden {
             state.mode = Mode::Compact;
         }
-        if state.mode == Mode::Compact && !asking && state.hide_at.is_some_and(|t| now >= t) {
+        if state.line_held && state.mode == Mode::Hidden {
+            state.mode = Mode::Compact;
+        }
+        if state.mode == Mode::Compact && !asking && !state.line_held && state.hide_at.is_some_and(|t| now >= t) {
             state.mode = Mode::Hidden;
             state.hide_at = None;
         }
@@ -585,6 +609,8 @@ fn refresh(ui: &Island) {
             Mode::Expanded => EXPANDED,
             Mode::Hidden => HIDDEN,
             Mode::Compact if notice => COMPACT_NOTICE,
+            // A long lyric takes a second line.
+            Mode::Compact if state.line_held => (COMPACT_LYRIC.0, if capsule_long { COMPACT_LYRIC_TALL } else { COMPACT_LYRIC.1 }),
             Mode::Compact if front_id.is_some() => COMPACT_BUSY,
             Mode::Compact => COMPACT_IDLE,
         };
@@ -605,7 +631,7 @@ fn refresh(ui: &Island) {
 
         // One timer: the arbiter's next wake, else the clock's next minute.
         let wake = state.arbiter.next_wake(now).map(|t| t.saturating_sub(now));
-        let music_on_screen = expanded && state.active_tab == "music" && state.music.playing;
+        let music_on_screen = (expanded && state.active_tab == "music" || state.line_held && state.mode == Mode::Compact) && state.music.playing;
         // The lyrics move on more often than the progress bar.
         let page_tick = match (music_on_screen, state.lyrics.as_ref().is_some_and(|l| !l.lines.is_empty())) {
             (true, true) => 250,
@@ -738,6 +764,25 @@ fn lyric_lines(state: &mut State) -> Option<ModelRc<LyricLine>> {
     Some(model)
 }
 
+/// The line the capsule shows while Line holds: the lyric being sung, else
+/// the song.
+fn capsule_lyric(state: &State) -> String {
+    let snap = &state.music;
+    if let Some(l) = state.lyrics.as_ref().filter(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty()) {
+        let shift = island_lyrics::intro_shift(snap.duration, l.duration) + state.lyrics_nudge;
+        if let Some(i) = island_lyrics::line_at(&l.lines, snap.position_now() - shift) {
+            let text = l.lines[i].text.trim();
+            return if text.is_empty() { "♪".into() } else { format!("♪  {text}") };
+        }
+    }
+    format!("♪  {} · {}", snap.title, snap.artist)
+}
+
+/// A line's width in Latin characters: kana and kanji count twice.
+fn lyric_width(text: &str) -> usize {
+    text.chars().map(|c| if c as u32 >= 0x2E80 { 2 } else { 1 }).sum()
+}
+
 /// The extension's report, while it is fresh (it repeats every 15 s) and the
 /// music is playing in a browser.
 fn ytm_live(state: &State, now: u64) -> Option<island_webhook::YtmState> {
@@ -827,6 +872,31 @@ fn on_music(ui: &Island, snap: music::Snapshot) {
             }
         } else {
             state.arbiter.end("music:now", now);
+        }
+        // A new song, play, pause and stop float down in the small card like a
+        // notification (not in the first seconds, when the session is found).
+        let old = &state.music;
+        let event = if old.has_session && !snap.has_session {
+            Some(("Stopped", format!("{} · {}", old.title, old.artist)))
+        } else if snap.has_session && !snap.title.is_empty() && song_key(&snap) != song_key(old) {
+            snap.playing.then(|| ("Now playing", format!("{} · {}", snap.title, snap.artist)))
+        } else if snap.has_session && old.has_session && snap.playing != old.playing {
+            Some((if snap.playing { "Playing" } else { "Paused" }, format!("{} · {}", snap.title, snap.artist)))
+        } else {
+            None
+        };
+        if let Some((title, body)) = event.filter(|_| now > MUSIC_EVENTS_AFTER) {
+            state.arbiter.end(&format!("music:event:{}", state.music_events), now);
+            state.music_events += 1;
+            let json = serde_json::json!({
+                "id": format!("music:event:{}", state.music_events),
+                "source": if snap.app.is_empty() { old.app.clone() } else { snap.app.clone() },
+                "kind": "status",
+                "title": title,
+                "body": body.trim_end_matches(" · "),
+                "ttl_ms": NOTIF_HOLD_MS,
+            });
+            upsert_json(state, json, now);
         }
         state.music = snap;
     });
@@ -1643,6 +1713,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             last_front: None,
             pinned,
             held: false,
+            line_held: false,
+            music_events: 0,
             life: mascot::Life::default(),
             life_timer: Timer::default(),
             size_to: (0.0, 0.0),
@@ -1753,7 +1825,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         if command.as_str() == "hold" {
-            with_state(|state| state.held = !state.held);
+            with_state(|state| {
+                state.held = !state.held;
+                state.line_held &= !state.held;
+            });
+            return refresh(&ui);
+        }
+        if command.as_str() == "line-hold" {
+            with_state(|state| {
+                state.line_held = !state.line_held;
+                state.held &= !state.line_held;
+            });
             return refresh(&ui);
         }
         // Like/dislike stay on this PC; a dislike also skips, as in YouTube Music.
@@ -2065,6 +2147,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 repeat: Some(music::Repeat::All),
                 ..Default::default()
             };
+            // =nolyrics: the song without; FUBUNOTCH_V2_LINE: Line on.
+            state.line_held = std::env::var_os("FUBUNOTCH_V2_LINE").is_some();
+            if std::env::var("FUBUNOTCH_V2_DEMO_MUSIC").is_ok_and(|v| v == "nolyrics") {
+                state.lyrics = Some(island_lyrics::Lyrics { status: island_lyrics::Status::None, lines: vec![], duration: 0.0 });
+                return;
+            }
             state.lyrics = Some(island_lyrics::Lyrics {
                 status: island_lyrics::Status::Found,
                 lines: ["koko wa kitto yume no naka ne", "", "mezameta no wa uso mitai da, hontou no kimi wa doko ni iru no ka mada wakaranai mama", "kimi no koe ga kikoeru", "tooku made"]

@@ -26,7 +26,7 @@ Windows 10/11, 64-bit.
 
 | | |
 |---|---|
-| ![Music](docs/screens/music.png) | **Music** — whatever is playing in Spotify, YouTube Music in a browser, or any player that shows in Windows' media controls. Play/pause, next, previous; shuffle and repeat when the player allows it; for YouTube Music in Chrome or Edge, add the small [extension](extension/ytm) (browsers don't pass shuffle and repeat to Windows). Like/dislike (kept on your PC). Synced lyrics from LRCLIB, or YouTube Music when LRCLIB has none, with Japanese in romaji. **Hold** keeps the island open while you read along. |
+| ![Music](docs/screens/music.png) | **Music** — whatever is playing in Spotify, YouTube Music in a browser, or any player that shows in Windows' media controls. Play/pause, next, previous; shuffle and repeat when the player allows it; for YouTube Music in Chrome or Edge, add the small [extension](extension/ytm) (browsers don't pass shuffle and repeat to Windows). Like/dislike (kept on your PC). Synced lyrics from LRCLIB, or YouTube Music when LRCLIB has none, with Japanese in romaji. **Hold** keeps the island open while you read along; **Line** keeps it a small capsule with just the line being sung. A new song, play, pause and stop show for a moment in the small capsule. |
 | ![Notifications](docs/screens/notifications.png) | **Notifications** — Windows notifications, mirrored on the island; a switch per app in Settings, as in Windows. A click opens the app. |
 | ![Water](docs/screens/water.png) | **Water** — a glass at a time toward a daily goal, reminders after a while without one, only inside your active hours. |
 | ![Focus](docs/screens/focus.png) | **Focus** — Pomodoro rounds and breaks, with a log of how long each round really was. |
