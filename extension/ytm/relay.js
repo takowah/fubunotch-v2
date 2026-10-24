@@ -4,7 +4,13 @@ window.addEventListener("message", (e) => {
   if (e.source !== window || !e.data) return;
   const kind = e.data.fubunotch;
   if (kind !== "state" && kind !== "watch") return;
-  chrome.runtime.sendMessage({ type: kind, state: e.data.state }).catch(() => {});
+  // After the extension is reloaded, this copy in an open tab is cut off from
+  // it ("Extension context invalidated", thrown at once, not as a rejection):
+  // stay quiet until the tab is reloaded.
+  if (!chrome.runtime || !chrome.runtime.id) return;
+  try {
+    chrome.runtime.sendMessage({ type: kind, state: e.data.state }).catch(() => {});
+  } catch (_) {}
 });
 
 chrome.runtime.onMessage.addListener((msg) => {
