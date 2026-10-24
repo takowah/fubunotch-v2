@@ -261,10 +261,17 @@ pub fn lrclib(query: &Query) -> Lyrics {
 
 static CACHE: Mutex<VecDeque<(String, Lyrics)>> = Mutex::new(VecDeque::new());
 
+/// Whether something this long can have synced lyrics: a live stream (or
+/// anything without a length) has none, and a search would only find another
+/// song's.
+pub fn has_length(duration: f64) -> bool {
+    duration.is_finite() && duration >= 1.0
+}
+
 /// LRCLIB, then YouTube Music when allowed (also when LRCLIB is down), then
 /// romaji for Japanese lines. Blocking.
 pub fn resolve(query: &Query, sources: Sources) -> Lyrics {
-    if !sources.lrclib && !sources.youtube {
+    if (!sources.lrclib && !sources.youtube) || !has_length(query.duration) {
         return Lyrics::of(Status::None);
     }
     let key = format!("{}\u{1f}{}{}", query.key(), sources.youtube as u8, sources.romaji as u8);
@@ -301,6 +308,17 @@ pub fn resolve(query: &Query, sources: Sources) -> Lyrics {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_live_stream_has_no_lyrics_to_look_for() {
+        assert!(!has_length(0.0));
+        assert!(!has_length(-0.0));
+        assert!(!has_length(f64::NAN));
+        assert!(!has_length(f64::INFINITY));
+        assert!(has_length(207.0));
+        let live = Query { title: "【#ホロ鯖ARK】ラグナロクで生きるARKその３".into(), artist: "フブキCh。白上フブキ".into(), album: String::new(), duration: -0.0 };
+        assert_eq!(resolve(&live, Sources { lrclib: true, youtube: true, romaji: true }).status, Status::None, "no request made");
+    }
 
     fn line(time: f64, text: &str) -> Line {
         Line { time, text: text.into() }
