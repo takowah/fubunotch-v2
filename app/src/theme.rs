@@ -34,6 +34,13 @@ pub fn rgb(hex: u32) -> Color {
     Color::from_rgb_u8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
+/// `a` moved toward `b` by `t` (0..1).
+pub fn mix(a: u32, b: u32, t: f32) -> Color {
+    let ch = |h: u32, s: u32| ((h >> s) & 0xff) as f32;
+    let m = |s: u32| (ch(a, s) + (ch(b, s) - ch(a, s)) * t).round() as u8;
+    Color::from_rgb_u8(m(16), m(8), m(0))
+}
+
 /// Sets one window's colours. A macro: each window type has its own Ice.
 #[macro_export]
 macro_rules! apply_theme {
@@ -44,8 +51,10 @@ macro_rules! apply_theme {
         ice.set_body($crate::theme::rgb(p.body));
         ice.set_body_lo($crate::theme::rgb(p.body_lo));
         ice.set_body_hi($crate::theme::rgb(p.body_hi));
-        ice.set_ink($crate::theme::rgb(p.ink));
-        ice.set_dim($crate::theme::rgb(p.dim));
+        // The text takes the member's colour too: ink toward her pale tone,
+        // dim toward her accent.
+        ice.set_ink($crate::theme::mix(p.ink, p.frost, 0.3));
+        ice.set_dim($crate::theme::mix(p.dim, p.glow, 0.25));
         ice.set_glow($crate::theme::rgb(p.glow));
         ice.set_frost($crate::theme::rgb(p.frost));
         ice.set_deep($crate::theme::rgb(p.deep));

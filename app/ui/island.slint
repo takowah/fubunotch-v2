@@ -600,7 +600,7 @@ component FocusPage inherits HorizontalLayout {
                 border-radius: 3px;
                 background: r.full ? Ice.glow : Ice.dim;
             }
-            Text { text: r.time; color: Ice.ink.with-alpha(0.8); font-size: 11px; horizontal-stretch: 1; }
+            Text { text: r.time; color: Ice.soft; font-size: 11px; horizontal-stretch: 1; }
             Text { text: r.length; color: r.full ? Ice.glow : Ice.dim; font-size: 11px; }
         }
     }
@@ -634,7 +634,7 @@ component WaterPage inherits HorizontalLayout {
             Text { text: "/ " + root.water.goal; color: Ice.dim; font-size: 12px; vertical-alignment: bottom; }
             Rectangle { horizontal-stretch: 1; }
         }
-        Text { text: root.water.next; color: root.water.due ? Ice.glow : Ice.ink.with-alpha(0.8); font-size: 11.5px; font-weight: root.water.due ? 700 : 400; }
+        Text { text: root.water.next; color: root.water.due ? Ice.glow : Ice.soft; font-size: 11.5px; font-weight: root.water.due ? 700 : 400; }
         Text { text: root.water.hours-text; color: Ice.dim; font-size: 10.5px; }
         HorizontalLayout {
             spacing: 8px;
@@ -948,7 +948,7 @@ component NotifPage inherits VerticalLayout {
                     Text { text: n.app; color: Ice.ink; font-size: 12px; font-weight: 700; vertical-alignment: center; overflow: elide; max-width: 90px; }
                     Text {
                         text: n.body == "" ? n.title : n.title + " · " + n.body;
-                        color: Ice.ink.with-alpha(0.72);
+                        color: Ice.soft;
                         font-size: 12px;
                         vertical-alignment: center;
                         overflow: elide;
@@ -1128,7 +1128,7 @@ export component Island inherits Window {
                         Text { text: root.front.source; color: Ice.dim; font-size: 10.5px; font-weight: 700; overflow: elide; horizontal-stretch: 1; }
                     }
                     Text { text: root.front.title; color: Ice.ink; font-size: 12.5px; font-weight: 700; overflow: elide; }
-                    Text { text: root.front.body; color: Ice.ink.with-alpha(0.78); font-size: 11.5px; wrap: word-wrap; overflow: elide; max-height: 30px; }
+                    Text { text: root.front.body; color: Ice.soft; font-size: 11.5px; wrap: word-wrap; overflow: elide; max-height: 30px; }
                 }
             }
 
@@ -1186,7 +1186,7 @@ export component Island inherits Window {
                             if root.front.icon == "" : Text { text: root.front.source; color: Ice.dim; font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
                             Text { text: root.front.title; color: Ice.ink; font-size: 12px; font-weight: 700; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
                         }
-                        if root.front.body != "" : Text { text: root.front.body; color: Ice.ink.with-alpha(0.78); font-size: 11.5px; overflow: elide; }
+                        if root.front.body != "" : Text { text: root.front.body; color: Ice.soft; font-size: 11.5px; overflow: elide; }
                     }
                     if root.front.has-progress : Bar {
                         width: 70px;
@@ -1297,7 +1297,7 @@ export component Island inherits Window {
                                 if root.has-front : HorizontalLayout {
                                     spacing: 8px;
                                     Equalizer { playing: root.music.playing; height: 12px; }
-                                    Text { text: root.front.title + "  ·  " + root.front.body; color: Ice.ink.with-alpha(0.8); font-size: 12px; overflow: elide; }
+                                    Text { text: root.front.title + "  ·  " + root.front.body; color: Ice.soft; font-size: 12px; overflow: elide; }
                                 }
                             }
                         }
@@ -1325,7 +1325,7 @@ export component Island inherits Window {
                             }
                             if root.front.body != "" : Text {
                                 text: root.front.body;
-                                color: Ice.ink.with-alpha(0.75);
+                                color: Ice.soft;
                                 font-size: 12.5px;
                                 wrap: word-wrap;
                                 overflow: elide;

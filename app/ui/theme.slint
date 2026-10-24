@@ -12,6 +12,9 @@ export global Ice {
     in-out property <color> glow: #5fd4ff;
     in-out property <color> frost: #b8e8ff;
     in-out property <color> deep: #3d74e0;
+    // Secondary text (a message, a time): between ink and dim, so it reads on
+    // a picture without glaring white-grey.
+    out property <color> soft: self.frost.mix(self.dim, 0.5);
     // The gap between the screen's top edge and the island.
     out property <length> top: 6px;
     // Motion: a spring-like ease with a small overshoot, and a soft ease.
