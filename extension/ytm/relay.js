@@ -1,8 +1,10 @@
 // The extension's side of the page: passes the page's reports to the
 // background worker, and the worker's commands to the page.
 window.addEventListener("message", (e) => {
-  if (e.source !== window || !e.data || e.data.fubunotch !== "state") return;
-  chrome.runtime.sendMessage({ type: "state", state: e.data.state }).catch(() => {});
+  if (e.source !== window || !e.data) return;
+  const kind = e.data.fubunotch;
+  if (kind !== "state" && kind !== "watch") return;
+  chrome.runtime.sendMessage({ type: kind, state: e.data.state }).catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((msg) => {

@@ -243,7 +243,7 @@ component Chip inherits Rectangle {
     in property <bool> active;
     callback clicked();
     // Space Mono runs wide: a size smaller and less padding keep the row (and ⚙) inside.
-    width: t.preferred-width + 12px;
+    width: t.preferred-width + 10px;
     height: 24px;
     border-radius: 12px;
     background: active ? Ice.glow.with-alpha(0.26) : (area.has-hover ? Ice.ink.with-alpha(0.07) : transparent);
@@ -282,12 +282,48 @@ global Icons {
     out property <string> play: "M 8 4.5 L 19.5 12 L 8 19.5 Z";
     out property <string> pause: "M 8 5 V 19 M 16 5 V 19";
     out property <string> moon: "M 20 14.5 A 8.5 8.5 0 1 1 9.5 4 A 6.8 6.8 0 0 0 20 14.5 Z";
+    // A screen on its stand: "Watch in island".
+    out property <string> tv: "M 3 6 H 21 V 17 H 3 Z M 8 21 H 16 M 12 17 V 21";
     out property <string> reset: "M 4.5 12 A 7.5 7.5 0 1 0 7 6.4 M 4 3.5 V 7.5 H 8";
     out property <string> like: "M 7.5 10.5 V 20 M 7.5 10.5 L 11 3.5 C 12.6 3.5 13.6 4.6 13.2 6.2 L 12.3 10 H 18.4 C 19.6 10 20.4 11.1 20.1 12.2 L 18.5 18.5 C 18.2 19.4 17.5 20 16.6 20 H 3.5 V 10.5 Z";
     out property <string> dislike: "M 7.5 13.5 V 4 M 7.5 13.5 L 11 20.5 C 12.6 20.5 13.6 19.4 13.2 17.8 L 12.3 14 H 18.4 C 19.6 14 20.4 12.9 20.1 11.8 L 18.5 5.5 C 18.2 4.6 17.5 4 16.6 4 H 3.5 V 13.5 Z";
 }
 
 // A round button with a drawn icon. `on`: a toggle that is active (glows).
+// The docked video's button in the tab row: on while the video is kept shown.
+// Right-click: back to its tab.
+component WatchButton inherits Rectangle {
+    in property <bool> held;
+    in property <string> title;
+    callback clicked();
+    callback back();
+    width: 26px;
+    height: 26px;
+    border-radius: 13px;
+    background: held ? Ice.glow.with-alpha(area.has-hover ? 0.30 : 0.20) : area.has-hover ? Ice.ink.with-alpha(0.12) : transparent;
+    animate background { duration: 150ms; }
+    Path {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 15px;
+        height: 15px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: Icons.tv;
+        stroke: root.held ? Ice.glow : Ice.ink;
+        stroke-width: 1.9px;
+        fill: transparent;
+    }
+    area := TouchArea {
+        clicked => { root.clicked(); }
+        pointer-event(e) => {
+            if e.button == PointerEventButton.right && e.kind == PointerEventKind.up {
+                root.back();
+            }
+        }
+    }
+}
+
 component IconButton inherits Rectangle {
     in property <string> icon;
     in property <length> size: 34px;
@@ -1005,6 +1041,13 @@ export component Island inherits Window {
     // Do not disturb: the island stays down for notifications (calls excepted).
     in property <bool> dnd;
     callback dnd-clicked();
+    // A YouTube video docked under the island ("Watch in island"), kept
+    // shown (held) or following the island; its title.
+    in property <bool> watching;
+    in property <bool> watch-held;
+    in property <string> watch-title;
+    callback watch-clicked();
+    callback watch-back();
     in property <int> mascot-dx;
     in property <int> mascot-dy;
     in property <bool> mascot-left;
@@ -1178,6 +1221,18 @@ export component Island inherits Window {
                     }
                     if root.mascot-on : Rectangle {
                         width: 32px;
+                        if root.watching : Path {
+                            width: 12px;
+                            height: 12px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            commands: Icons.tv;
+                            stroke: Ice.dim;
+                            stroke-width: 2.2px;
+                            fill: transparent;
+                            x: 0;
+                            y: (parent.height - self.height) / 2;
+                        }
                         if root.dnd : Path {
                             x: parent.width - self.width;
                             y: (parent.height - self.height) / 2;
@@ -1270,6 +1325,17 @@ export component Island inherits Window {
                     font-weight: 700;
                     vertical-alignment: center;
                 }
+                if root.watching : Path {
+                    width: 12px;
+                    height: 12px;
+                    y: (parent.height - self.height) / 2;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: Icons.tv;
+                    stroke: Ice.dim;
+                    stroke-width: 2.2px;
+                    fill: transparent;
+                }
                 if root.dnd : Path {
                     width: 12px;
                     height: 12px;
@@ -1298,7 +1364,15 @@ export component Island inherits Window {
                     for t in root.tabs : Chip { label: t.label; active: root.active-tab == t.id; clicked => { root.tab-clicked(t.id); } }
                     Rectangle { horizontal-stretch: 1; }
                     Hud { text: root.clock; }
-                    Rectangle { width: 4px; }
+                    Rectangle { width: root.watching ? 0px : 4px; }
+                    // The docked video: click keeps it shown or lets it follow
+                    // the island; right-click sends it back to its tab.
+                    if root.watching : WatchButton {
+                        held: root.watch-held;
+                        title: root.watch-title;
+                        clicked => { root.watch-clicked(); }
+                        back => { root.watch-back(); }
+                    }
                     // Do not disturb, beside Settings.
                     IconButton { icon: Icons.moon; size: 28px; icon-size: 15px; stroke-width: 1.8px; on: root.dnd; filled: root.dnd; clicked => { root.dnd-clicked(); } }
                     RoundButton { glyph: "⚙"; size: 28px; glyph-size: 16px; clicked => { root.open-settings(); } }
