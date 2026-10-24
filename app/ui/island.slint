@@ -999,6 +999,8 @@ export component Island inherits Window {
     in property <bool> capsule-long;
     // Something else up front while Line holds: shown under the lyric.
     in property <bool> line-notice;
+    // Flipped by Rust to have the island drawn again in full (see the body).
+    in property <bool> repaint;
     in property <int> mascot-dx;
     in property <int> mascot-dy;
     in property <bool> mascot-left;
@@ -1079,7 +1081,10 @@ export component Island inherits Window {
         border-width: 1px;
         border-color: root.hidden ? Ice.glow : Ice.glow.with-alpha(0.55);
         // Solid: the software renderer doesn't round gradients.
-        background: root.hidden ? Ice.frost : Ice.body;
+        // `repaint` flips the alpha by 1/255 (invisible): the whole island
+        // counts as changed and is drawn again. Without it the software
+        // renderer kept showing the old lyric in Line's capsule.
+        background: (root.hidden ? Ice.frost : Ice.body).with-alpha(root.repaint ? 1 : 0.996);
         clip: true;
 
         // Shown once the spring has settled at the size it was cut for.

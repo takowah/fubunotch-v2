@@ -108,6 +108,8 @@ struct State {
     music_events: u64,
     /// Until when the front shows under Line's lyric (ms).
     line_notice_until: u64,
+    /// What the compact island showed last (see show_changes).
+    last_shown: String,
     /// The mascot: its mood, and the timers that blink it and end a mood.
     /// The mascot's life and its clock (running only while the island shows).
     life: mascot::Life,
@@ -295,6 +297,13 @@ fn island_hwnd(ui: &Island) -> Option<windows::Win32::Foundation::HWND> {
 }
 
 /// A Slint window's native window, once the event loop has made it.
+/// Has the island drawn again in full. A change in the compact island (Line's
+/// lyric, the mascot) otherwise stayed off screen until its size changed: the
+/// software renderer did not count the new text as changed there.
+fn show_changes(ui: &Island) {
+    ui.set_repaint(!ui.get_repaint());
+}
+
 fn hwnd_of(window: &slint::Window) -> Option<windows::Win32::Foundation::HWND> {
     use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     window
@@ -466,6 +475,7 @@ fn refresh(ui: &Island) {
         state.pending.retain(|id, _| live.contains(id));
         let view = state.arbiter.view();
         let front_id = view.front.map(|a| a.id.clone());
+        let front_sig = view.front.map(|a| format!("{}|{}|{}|{:?}", a.id, a.title, a.body, a.progress)).unwrap_or_default();
         ui.set_has_front(view.front.is_some());
         if let Some(front) = view.front {
             ui.set_front(item(front));
@@ -681,6 +691,12 @@ fn refresh(ui: &Island) {
                 refresh(&ui);
             }
         });
+        // Drawn again only when what the capsule shows has changed.
+        let shown = format!("{capsule_line}|{line_notice}|{front_sig}");
+        if state.mode == Mode::Compact && shown != state.last_shown {
+            show_changes(ui);
+        }
+        state.last_shown = shown;
     });
     update_background(ui);
 }
@@ -692,10 +708,14 @@ fn mascot_tick(ui: &Island) {
         state.life.tick(roam)
     });
     if let Some(p) = pose {
+        let moved = ui.get_mascot_mood() != p.frame || ui.get_mascot_dx() != p.dx || ui.get_mascot_dy() != p.dy || ui.get_mascot_left() != p.left;
         ui.set_mascot_mood(p.frame.into());
         ui.set_mascot_dx(p.dx);
         ui.set_mascot_dy(p.dy);
         ui.set_mascot_left(p.left);
+        if moved && with_state(|state| state.mode == Mode::Compact).unwrap_or(false) {
+            show_changes(ui);
+        }
     }
 }
 
@@ -1748,6 +1768,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             line_held: false,
             music_events: 0,
             line_notice_until: 0,
+            last_shown: String::new(),
             life: mascot::Life::default(),
             life_timer: Timer::default(),
             size_to: (0.0, 0.0),
