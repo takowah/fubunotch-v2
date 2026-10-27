@@ -303,6 +303,59 @@ fn clip_window(ui: &Island, size: (f32, f32), hidden: bool) {
 const FRAME_STYLES: u32 = 0x00C0_0000 /* CAPTION */ | 0x0004_0000 /* THICKFRAME */ | 0x0008_0000 /* SYSMENU */ | 0x0002_0000 /* MINIMIZEBOX */ | 0x0001_0000 /* MAXIMIZEBOX */;
 const FRAME_EX_STYLES: u32 = 0x0004_0000 /* APPWINDOW */ | 0x0000_0100 /* WINDOWEDGE */ | 0x0000_0001 /* DLGMODALFRAME */;
 
+/// The island's window for `keep_on_top` (0 until the event loop made it).
+static ISLAND_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// Puts the island back above every window. Being always-on-top is not
+/// enough: other always-on-top windows (a Discord pop-out, a meeting app)
+/// go above it when they come forward, and now and then even ordinary
+/// windows ended up over it.
+fn keep_on_top() {
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE};
+    let h = ISLAND_HWND.load(std::sync::atomic::Ordering::Relaxed);
+    if h == 0 {
+        return;
+    }
+    unsafe {
+        let _ = SetWindowPos(
+            windows::Win32::Foundation::HWND(h as *mut core::ffi::c_void),
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+        );
+    }
+}
+
+unsafe extern "system" fn on_foreground(
+    _: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
+    _: u32,
+    _: windows::Win32::Foundation::HWND,
+    _: i32,
+    _: i32,
+    _: u32,
+    _: u32,
+) {
+    keep_on_top();
+}
+
+/// Keeps the island on top from now on: each time another app's window comes
+/// forward, Windows tells us and the island goes back above it. Nothing is
+/// polled. Once, on the UI thread (its message loop delivers the events).
+fn guard_on_top(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::UI::Accessibility::SetWinEventHook;
+    use windows::Win32::UI::WindowsAndMessaging::{EVENT_SYSTEM_FOREGROUND, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS};
+    let first = ISLAND_HWND.swap(hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed) == 0;
+    if first {
+        unsafe {
+            SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        }
+    }
+    keep_on_top();
+}
+
 /// The island's native window, once the event loop has made it.
 fn island_hwnd(ui: &Island) -> Option<windows::Win32::Foundation::HWND> {
     hwnd_of(ui.window())
@@ -2609,6 +2662,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Before the first morph: the island is a popup from the start.
             if let Some(hwnd) = island_hwnd(&ui) {
                 popup_style(hwnd);
+                guard_on_top(hwnd);
             }
             refresh(&ui);
             if settings_at_start {
