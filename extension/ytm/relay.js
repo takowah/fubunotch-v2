@@ -2,14 +2,13 @@
 // background worker, and the worker's commands to the page.
 window.addEventListener("message", (e) => {
   if (e.source !== window || !e.data) return;
-  const kind = e.data.fubunotch;
-  if (kind !== "state" && kind !== "watch") return;
+  if (e.data.fubunotch !== "state") return;
   // After the extension is reloaded, this copy in an open tab is cut off from
   // it ("Extension context invalidated", thrown at once, not as a rejection):
   // stay quiet until the tab is reloaded.
   if (!chrome.runtime || !chrome.runtime.id) return;
   try {
-    chrome.runtime.sendMessage({ type: kind, state: e.data.state }).catch(() => {});
+    chrome.runtime.sendMessage({ type: "state", state: e.data.state }).catch(() => {});
   } catch (_) {}
 });
 

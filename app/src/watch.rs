@@ -1,10 +1,8 @@
 // "Watch in island": a browser's picture-in-picture window docked just under
 // the island, shown or hidden with it (the browser keeps playing while it is
-// hidden). Two kinds: any video PiP Chrome or Edge opens (YouTube's own
-// button, a right-click, Chrome's media controls), found as it appears
-// through a WinEvent hook; and the Document PiP the extension's player button
-// opens (extension/ytm/watch.js), found by the title it reports. Win32 only:
-// nothing is drawn here.
+// hidden). Any video PiP Chrome or Edge opens (YouTube's own button, a
+// right-click, Chrome's media controls) is found as it appears through a
+// WinEvent hook. Win32 only: nothing is drawn here.
 
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
@@ -100,46 +98,6 @@ pub fn hook(changed: impl Fn() + Send + Sync + 'static) {
         SetWinEventHook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, None, Some(on_event), 0, 0, flags);
         SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, None, Some(on_event), 0, 0, flags);
     }
-}
-
-/// Chrome's picture-in-picture window whose title holds `window` (the
-/// extension's marker) or `title` (the video's): a topmost Chrome window.
-pub fn find(window: &str, title: &str) -> Option<HWND> {
-    struct Search {
-        want: Vec<String>,
-        found: Option<HWND>,
-    }
-    unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let search = unsafe { &mut *(lparam.0 as *mut Search) };
-        let mut class = [0u16; 64];
-        let n = unsafe { GetClassNameW(hwnd, &mut class) } as usize;
-        if String::from_utf16_lossy(&class[..n]) != "Chrome_WidgetWin_1" {
-            return true.into();
-        }
-        let ex = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
-        if ex & WS_EX_TOPMOST.0 == 0 {
-            return true.into();
-        }
-        let mut text = [0u16; 512];
-        let n = unsafe { GetWindowTextW(hwnd, &mut text) } as usize;
-        let text = String::from_utf16_lossy(&text[..n]);
-        // Visible only: Chrome keeps closed PiP windows around, hidden.
-        let visible = unsafe { IsWindowVisible(hwnd).as_bool() };
-        if visible && search.want.iter().any(|w| text.contains(w.as_str())) && is_chrome(hwnd) {
-            search.found = Some(hwnd);
-            return false.into();
-        }
-        true.into()
-    }
-    let want: Vec<String> = [window, title].iter().map(|s| s.trim().to_string()).filter(|s| s.chars().count() >= 4).collect();
-    if want.is_empty() {
-        return None;
-    }
-    let mut search = Search { want, found: None };
-    unsafe {
-        let _ = EnumWindows(Some(each), LPARAM(&mut search as *mut Search as isize));
-    }
-    search.found
 }
 
 fn is_chrome(hwnd: HWND) -> bool {

@@ -745,7 +745,7 @@ fn refresh(ui: &Island) {
             Mode::Compact => COMPACT_IDLE,
         };
         morph_to(ui, state, size);
-        follow_watch(ui, state, now);
+        follow_watch(ui, state);
         // The mascot lives only while it can be seen: no ticks when hidden.
         if state.mode != Mode::Hidden && state.settings.look.mascot {
             if !state.life_timer.running() {
@@ -837,26 +837,6 @@ fn apply(ui: &Island, event: Event) {
             }
             Event::Claude { event, payload, reply } => on_claude(state, &event, &payload, reply, now),
             Event::Ytm(ytm) => state.ytm = Some((ytm, now)),
-            // Opened from a click in Chrome: shown at once (held) until the
-            // user lets it follow the island.
-            Event::Watch(w) => {
-                if w.open {
-                    // The extension's report of a plain PiP already docked:
-                    // keep its window, note the extension knows it.
-                    let plain = state.watching.as_ref().filter(|d| d.plain && d.hwnd.is_some()).map(|d| d.hwnd);
-                    if let Some(hwnd) = plain {
-                        state.watching = Some(Watching { hwnd, window: String::new(), title: w.title, since: now, plain: true, via_extension: true });
-                    } else {
-                        state.watching = Some(Watching { hwnd: None, window: w.window, title: w.title, since: now, plain: false, via_extension: true });
-                        state.watch_held = true;
-                    }
-                } else {
-                    watch::track(None);
-                    state.watching = None;
-                    state.watch_held = false;
-                    state.watch_hover = false;
-                }
-            }
         }
     });
     refresh(ui);
@@ -1183,19 +1163,11 @@ fn is_call(title: &str, body: &str) -> bool {
 }
 
 /// FUBUNOTCH_V2_SNAPSHOT: a picture is drawn and the app quits.
-/// A YouTube video the extension put in a picture-in-picture window for the
-/// island: its window once found (Chrome opens it a moment after the report).
+/// A browser's video picture-in-picture window docked under the island
+/// (found by the WinEvent hook; none for a snapshot's demo).
 struct Watching {
     hwnd: Option<isize>,
-    window: String,
     title: String,
-    since: u64,
-    /// A browser's own video PiP (found by the hook), not the extension's
-    /// Document PiP.
-    plain: bool,
-    /// The extension knows this video (it said so): "back to tab" goes
-    /// through it; otherwise a plain PiP is closed.
-    via_extension: bool,
 }
 
 fn as_hwnd(h: isize) -> windows::Win32::Foundation::HWND {
@@ -1210,7 +1182,6 @@ fn pip_check(ui: &Island) {
         return;
     }
     let changed = with_state(|state| {
-        let now = now_ms(state.started);
         if let Some(w) = &state.watching {
             if w.hwnd.is_some_and(|h| !watch::alive(as_hwnd(h))) {
                 state.watching = None;
@@ -1223,7 +1194,7 @@ fn pip_check(ui: &Island) {
         }
         let Some(h) = watch::find_plain() else { return false };
         let title = if state.music.has_session { state.music.title.clone() } else { String::new() };
-        state.watching = Some(Watching { hwnd: Some(h.0 as isize), window: String::new(), title, since: now, plain: true, via_extension: false });
+        state.watching = Some(Watching { hwnd: Some(h.0 as isize), title });
         // Just opened: shown at once, until the user lets it follow the island.
         state.watch_held = true;
         watch::track(Some(h));
@@ -1235,52 +1206,29 @@ fn pip_check(ui: &Island) {
     }
 }
 
-/// The island's "back to tab": the extension puts its video back; a plain
-/// PiP the extension doesn't know is closed (the browser puts the video
-/// back in its tab).
+/// The island's "back to tab": the picture-in-picture window is closed, and
+/// the browser puts the video back in its tab.
 fn watch_back() {
-    let target = with_state(|state| state.watching.as_ref().map(|w| (w.via_extension, w.hwnd))).flatten();
-    match target {
-        Some((false, Some(h))) => watch::close(as_hwnd(h)),
-        Some(_) => island_webhook::ytm_command("watch-back"),
-        None => {}
+    if let Some(h) = with_state(|state| state.watching.as_ref().and_then(|w| w.hwnd)).flatten() {
+        watch::close(as_hwnd(h));
     }
 }
 
-/// Keeps the docked video under the island: found once Chrome has opened it,
-/// shown while the island is open, the video is held or the pointer is on it,
-/// hidden otherwise (Chrome keeps playing).
-fn follow_watch(ui: &Island, state: &mut State, now: u64) {
+/// Keeps the docked video under the island: shown while the island is open,
+/// the video is held or the pointer is on it, hidden otherwise (Chrome keeps
+/// playing).
+fn follow_watch(ui: &Island, state: &mut State) {
     if snapshot_mode() {
         return;
     }
-    let Some(w) = state.watching.as_mut() else { return };
-    let known = w.hwnd.map(as_hwnd).filter(|h| watch::alive(*h));
-    // A plain PiP is known from the start; the extension's is found by title.
-    let found = if w.plain { None } else { watch::find(&w.window, &w.title) };
-    let hwnd = match known.or(found) {
-        Some(h) => {
-            w.hwnd = Some(h.0 as isize);
-            watch::track(Some(h));
-            h
-        }
-        None if w.plain => {
-            // Closed (Chrome hides a closed PiP): let go now.
-            state.watching = None;
-            state.watch_held = false;
-            state.watch_hover = false;
-            watch::track(None);
-            return;
-        }
-        None => {
-            // Chrome never opened it, or it is gone without a word: let go.
-            if now.saturating_sub(w.since) > 10_000 {
-                state.watching = None;
-                state.watch_held = false;
-                state.watch_hover = false;
-            }
-            return;
-        }
+    let Some(w) = state.watching.as_ref() else { return };
+    let Some(hwnd) = w.hwnd.map(as_hwnd).filter(|h| watch::alive(*h)) else {
+        // Closed (Chrome hides a closed PiP): let go now.
+        state.watching = None;
+        state.watch_held = false;
+        state.watch_hover = false;
+        watch::track(None);
+        return;
     };
     let Some(island) = hwnd_of(ui.window()) else { return };
     let r = watch::rect(island);
@@ -2060,7 +2008,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             dnd: std::env::var_os("FUBUNOTCH_V2_DND").is_some(),
             // FUBUNOTCH_V2_DEMO_WATCH: a docked video, for snapshots.
             watching: std::env::var_os("FUBUNOTCH_V2_DEMO_WATCH")
-                .map(|_| Watching { hwnd: None, window: String::new(), title: "Demo stream".into(), since: u64::MAX / 2, plain: false, via_extension: false }),
+                .map(|_| Watching { hwnd: None, title: "Demo stream".into() }),
             watch_held: false,
             watch_hover: false,
             last_focus_running: false,

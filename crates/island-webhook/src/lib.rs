@@ -38,19 +38,6 @@ pub struct YtmState {
     pub title: String,
 }
 
-/// A YouTube video the extension moved into a picture-in-picture window for
-/// the island ("Watch in island"), or that it went back to its tab.
-#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
-pub struct WatchState {
-    pub open: bool,
-    /// The picture-in-picture window's title, to find it among Chrome's windows.
-    #[serde(default)]
-    pub window: String,
-    /// The video's title, for the island.
-    #[serde(default)]
-    pub title: String,
-}
-
 /// Commands waiting for the extension ("shuffle", "repeat"); it collects them
 /// with a long poll on /ytm/command.
 static YTM_COMMANDS: (std::sync::Mutex<std::collections::VecDeque<String>>, std::sync::Condvar) =
@@ -88,8 +75,6 @@ pub enum Event {
     Claude { event: String, payload: serde_json::Value, reply: Option<Reply> },
     /// The YouTube Music extension's report.
     Ytm(YtmState),
-    /// The extension's "Watch in island" window opened or closed.
-    Watch(WatchState),
 }
 
 impl PartialEq for Event {
@@ -99,7 +84,6 @@ impl PartialEq for Event {
             (Event::End(a), Event::End(b)) => a == b,
             (Event::Claude { event: a, payload: pa, .. }, Event::Claude { event: b, payload: pb, .. }) => a == b && pa == pb,
             (Event::Ytm(a), Event::Ytm(b)) => a == b,
-            (Event::Watch(a), Event::Watch(b)) => a == b,
             _ => false,
         }
     }
@@ -149,15 +133,6 @@ pub fn handle(req: &Request, token: &str) -> (Response, Option<Event>) {
                 }
                 match serde_json::from_slice::<YtmState>(req.body) {
                     Ok(state) => (Response { status: 200, body: "ok".into() }, Some(Event::Ytm(state))),
-                    Err(err) => reply(400, err.to_string()),
-                }
-            }
-            ("POST", "watch") => {
-                if req.body.len() > BODY_LIMIT {
-                    return reply(413, "body over 64 KB");
-                }
-                match serde_json::from_slice::<WatchState>(req.body) {
-                    Ok(state) => (Response { status: 200, body: "ok".into() }, Some(Event::Watch(state))),
                     Err(err) => reply(400, err.to_string()),
                 }
             }
@@ -343,17 +318,6 @@ mod tests {
         assert_eq!(poll(Some("chrome-extension://abc"), "POST"), 204, "waits, answered by spawn");
         assert_eq!(poll(None, "POST"), 403);
         assert_eq!(poll(Some("https://evil.example"), "POST"), 403);
-    }
-
-    #[test]
-    fn watch_reports_come_from_extensions() {
-        let body = br#"{"open":true,"window":"FubuNotch watch","title":"A stream"}"#;
-        let page = Request { origin: None, method: "POST", path: "/ytm/watch", authorization: None, content_type: Some("application/json"), body };
-        assert_eq!(handle(&page, TOKEN).0.status, 403);
-        let ext = Request { origin: Some("chrome-extension://abc"), method: "POST", path: "/ytm/watch", authorization: None, content_type: Some("application/json"), body };
-        let (r, e) = handle(&ext, TOKEN);
-        assert_eq!(r.status, 200);
-        assert_eq!(e, Some(Event::Watch(WatchState { open: true, window: "FubuNotch watch".into(), title: "A stream".into() })));
     }
 
     #[test]
