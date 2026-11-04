@@ -154,8 +154,8 @@ pub fn rect(hwnd: HWND) -> RECT {
 /// of every screen. It stays a visible window, so Chrome keeps playing and a
 /// close (Chrome hides it) still tells. `width`: the size it gets (Chrome
 /// remembers a PiP's last size, which may be anything); the height follows
-/// the video's shape, as Chrome keeps it.
-pub fn place(hwnd: HWND, island: Option<HWND>, x: i32, y: i32, shown: bool, width: i32) {
+/// the video's shape, as Chrome keeps it. Returns the top-left it is at.
+pub fn place(hwnd: HWND, island: Option<HWND>, x: i32, y: i32, shown: bool, width: i32) -> (i32, i32) {
     let r = rect(hwnd);
     let (mut w, h) = (r.right - r.left, r.bottom - r.top);
     let mut size = SWP_NOSIZE;
@@ -167,11 +167,12 @@ pub fn place(hwnd: HWND, island: Option<HWND>, x: i32, y: i32, shown: bool, widt
     }
     let left = if shown { x - w / 2 } else { (unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) }) - w - 64 };
     if size == SWP_NOSIZE && r.left == left && r.top == y {
-        return;
+        return (left, y);
     }
     unsafe {
         let _ = SetWindowPos(hwnd, island, left, y, w, height, size | SWP_NOACTIVATE);
     }
+    (left, y)
 }
 
 /// Lets the window go where Chrome would put it (bottom right of the main

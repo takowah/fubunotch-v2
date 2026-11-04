@@ -116,6 +116,9 @@ struct State {
     /// The pointer left the island for the video: the island stays open
     /// until it leaves the video too.
     watch_hover: bool,
+    /// A PiP window the user dragged away from the island: theirs now, not
+    /// docked again while it is open.
+    watch_freed: Option<isize>,
     /// Whether a Focus round ran at the last refresh: DND follows it.
     last_focus_running: bool,
     /// Until when the front shows under Line's lyric (ms).
@@ -745,7 +748,7 @@ fn refresh(ui: &Island) {
             Mode::Compact => COMPACT_IDLE,
         };
         morph_to(ui, state, size);
-        follow_watch(ui, state);
+        follow_watch(ui, state, now);
         // The mascot lives only while it can be seen: no ticks when hidden.
         if state.mode != Mode::Hidden && state.settings.look.mascot {
             if !state.life_timer.running() {
@@ -1168,6 +1171,11 @@ fn is_call(title: &str, body: &str) -> bool {
 struct Watching {
     hwnd: Option<isize>,
     title: String,
+    /// When it was docked (ms since start).
+    since: u64,
+    /// Where FubuNotch last put it (physical pixels): elsewhere means the
+    /// user dragged it, and it is let go.
+    placed: Option<(i32, i32)>,
 }
 
 fn as_hwnd(h: isize) -> windows::Win32::Foundation::HWND {
@@ -1182,6 +1190,7 @@ fn pip_check(ui: &Island) {
         return;
     }
     let changed = with_state(|state| {
+        let now = now_ms(state.started);
         if let Some(w) = &state.watching {
             if w.hwnd.is_some_and(|h| !watch::alive(as_hwnd(h))) {
                 state.watching = None;
@@ -1192,9 +1201,17 @@ fn pip_check(ui: &Island) {
             }
             return false;
         }
-        let Some(h) = watch::find_plain() else { return false };
+        let Some(h) = watch::find_plain() else {
+            state.watch_freed = None;
+            return false;
+        };
+        // The one the user dragged away stays free until it is closed.
+        if state.watch_freed == Some(h.0 as isize) {
+            return false;
+        }
+        state.watch_freed = None;
         let title = if state.music.has_session { state.music.title.clone() } else { String::new() };
-        state.watching = Some(Watching { hwnd: Some(h.0 as isize), title });
+        state.watching = Some(Watching { hwnd: Some(h.0 as isize), title, since: now, placed: None });
         // Just opened: shown at once, until the user lets it follow the island.
         state.watch_held = true;
         watch::track(Some(h));
@@ -1216,8 +1233,9 @@ fn watch_back() {
 
 /// Keeps the docked video under the island: shown while the island is open,
 /// the video is held or the pointer is on it, hidden otherwise (Chrome keeps
-/// playing).
-fn follow_watch(ui: &Island, state: &mut State) {
+/// playing). Dragged away by the user, it is let go: Chrome's PiP is
+/// movable again, until it is closed.
+fn follow_watch(ui: &Island, state: &mut State, now: u64) {
     if snapshot_mode() {
         return;
     }
@@ -1230,6 +1248,19 @@ fn follow_watch(ui: &Island, state: &mut State) {
         watch::track(None);
         return;
     };
+    // Not where it was put (and not Chrome settling it right after it
+    // opened): the user dragged it. Theirs now.
+    if let Some((px, py)) = w.placed {
+        let r = watch::rect(hwnd);
+        if now.saturating_sub(w.since) > 1_500 && ((r.left - px).abs() > 8 || (r.top - py).abs() > 8) {
+            state.watch_freed = Some(hwnd.0 as isize);
+            state.watching = None;
+            state.watch_held = false;
+            state.watch_hover = false;
+            watch::track(None);
+            return;
+        }
+    }
     let Some(island) = hwnd_of(ui.window()) else { return };
     let r = watch::rect(island);
     let scale = ui.window().scale_factor();
@@ -1239,7 +1270,10 @@ fn follow_watch(ui: &Island, state: &mut State) {
     let shown = state.watch_held || state.mode == Mode::Expanded || state.watch_hover;
     // As wide as the island's video area: 384 px (Chrome's own size is 366).
     let width = (384.0 * scale).round() as i32;
-    watch::place(hwnd, Some(island), x, y, shown, width);
+    let at = watch::place(hwnd, Some(island), x, y, shown, width);
+    if let Some(w) = state.watching.as_mut() {
+        w.placed = Some(at);
+    }
 }
 
 fn snapshot_mode() -> bool {
@@ -2008,9 +2042,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             dnd: std::env::var_os("FUBUNOTCH_V2_DND").is_some(),
             // FUBUNOTCH_V2_DEMO_WATCH: a docked video, for snapshots.
             watching: std::env::var_os("FUBUNOTCH_V2_DEMO_WATCH")
-                .map(|_| Watching { hwnd: None, title: "Demo stream".into() }),
+                .map(|_| Watching { hwnd: None, title: "Demo stream".into(), since: 0, placed: None }),
             watch_held: false,
             watch_hover: false,
+            watch_freed: None,
             last_focus_running: false,
             line_notice_until: 0,
             last_shown: String::new(),
