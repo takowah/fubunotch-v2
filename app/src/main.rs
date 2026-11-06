@@ -15,6 +15,7 @@ mod pet;
 mod claude;
 mod local_time;
 mod music;
+mod accent;
 mod notif;
 mod system;
 mod shelf;
@@ -62,6 +63,8 @@ const LINE_NOTICE_SHORT_H: f32 = 30.0;
 /// About as many characters as fit on Line's one line at 13 px (Space Mono).
 const LYRIC_ONE_LINE: usize = 44;
 const EXPANDED: (f32, f32) = (520.0, 200.0);
+/// The Music page is roomier: a bigger cover and the wave bar.
+const EXPANDED_MUSIC: (f32, f32) = (560.0, 224.0);
 /// The expanded island grows for a long list (To-do), up to this tall; the
 /// rest scrolls.
 const EXPANDED_MAX_H: f32 = 362.0;
@@ -80,7 +83,7 @@ fn hide_after(s: &Settings) -> u64 {
 /// region follows once it is done.
 const MORPH_MS: u64 = 450;
 /// The window never changes size: the largest island and its glow.
-const WINDOW: (f32, f32) = (EXPANDED.0 + 2.0 * GLOW + 8.0, TOP + EXPANDED_MAX_H + GLOW + 4.0);
+const WINDOW: (f32, f32) = (EXPANDED_MUSIC.0 + 2.0 * GLOW + 8.0, TOP + EXPANDED_MAX_H + GLOW + 4.0);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Mode {
@@ -138,6 +141,8 @@ struct State {
     /// What is playing (the Music module), and its artwork as an image.
     music: music::Snapshot,
     music_art: Option<slint::Image>,
+    /// The cover's colour (accent.rs), the island's while the song plays.
+    music_accent: Option<(u8, u8, u8)>,
     /// The lyrics of `lyrics_key` (a song), or where the search is.
     lyrics_key: String,
     lyrics: Option<island_lyrics::Lyrics>,
@@ -631,7 +636,7 @@ fn refresh(ui: &Island) {
         ui.set_capsule_line(capsule_line.as_str().into());
         let capsule_long = lyric_width(&capsule_line) > LYRIC_ONE_LINE;
         ui.set_capsule_long(capsule_long);
-        ui.set_music(music_view(&state.music, &state.music_art, &state.lyrics, lines, lyrics_on, state.lyrics_nudge, rating, ytm.as_ref()));
+        ui.set_music(music_view(&state.music, &state.music_art, state.music_accent, &state.lyrics, lines, lyrics_on, state.lyrics_nudge, rating, ytm.as_ref()));
 
         // Modes: a new notice pops the hidden island up; the compact island
         // goes up hide_after() later unless someone waits for an answer.
@@ -731,6 +736,7 @@ fn refresh(ui: &Island) {
                 let extra = state.data.todo.tasks.len().saturating_sub(TODO_ROWS_FIT) as f32 * TODO_PITCH;
                 (EXPANDED.0, (EXPANDED.1 + extra).min(EXPANDED_MAX_H))
             }
+            Mode::Expanded if state.active_tab == "music" => EXPANDED_MUSIC,
             Mode::Expanded => EXPANDED,
             Mode::Hidden => HIDDEN,
             // A long lyric takes a second line, a notice a row underneath.
@@ -948,6 +954,7 @@ fn ytm_live(state: &State, now: u64) -> Option<island_webhook::YtmState> {
 fn music_view(
     snap: &music::Snapshot,
     art: &Option<slint::Image>,
+    accent: Option<(u8, u8, u8)>,
     lyrics: &Option<island_lyrics::Lyrics>,
     lines: Option<ModelRc<LyricLine>>,
     lyrics_on: bool,
@@ -981,6 +988,8 @@ fn music_view(
         remaining: format!("-{}", local_time::mm_ss((snap.duration - position).max(0.0))).into(),
         has_art: art.is_some(),
         art: art.clone().unwrap_or_default(),
+        has_accent: accent.is_some(),
+        accent: accent.map_or_else(slint::Color::default, |(r, g, b)| slint::Color::from_rgb_u8(r, g, b)),
         has_lyrics: lines.is_some(),
         lyrics: lines.unwrap_or_default(),
         lyric_index: at.map_or(-1, |i| i as i32),
@@ -1012,6 +1021,7 @@ fn on_music(ui: &Island, snap: music::Snapshot) {
                 let px = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba, music::ART_PX, music::ART_PX);
                 (rgba.len() == (music::ART_PX * music::ART_PX * 4) as usize).then(|| slint::Image::from_rgba8(px))
             });
+            state.music_accent = snap.art.as_deref().and_then(accent::of_rgba);
         }
         if snap.has_session && snap.playing {
             let json = serde_json::json!({
@@ -2057,6 +2067,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings,
             music: music::Snapshot::default(),
             music_art: None,
+            music_accent: None,
             lyrics_key: String::new(),
             lyrics: None,
             lyrics_model: None,
@@ -2516,13 +2527,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 artist: "Shirakami Fubuki".into(),
                 app: "demo".into(),
                 playing: true,
-                position: 11.0,
+                // FUBUNOTCH_V2_DEMO_POS: seconds in (11 by default), to see the wave grown.
+                position: std::env::var("FUBUNOTCH_V2_DEMO_POS").ok().and_then(|v| v.parse().ok()).unwrap_or(11.0),
                 duration: 207.0,
                 at_unix_ms: music::now_unix_ms(),
                 shuffle: Some(false),
                 repeat: Some(music::Repeat::All),
                 ..Default::default()
             };
+            // A made-up cover in one colour (FUBUNOTCH_V2_DEMO_ART=rrggbb, pink by default):
+            // a diagonal shade and a pale disc, enough to check the island taking its colour.
+            let hex = std::env::var("FUBUNOTCH_V2_DEMO_ART").unwrap_or_else(|_| "ff5fa2".into());
+            let c = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(0xff5fa2);
+            let (cr, cg, cb) = ((c >> 16) as f32, ((c >> 8) & 0xff) as f32, (c & 0xff) as f32);
+            let n = music::ART_PX;
+            let mut art = Vec::with_capacity((n * n * 4) as usize);
+            for y in 0..n {
+                for x in 0..n {
+                    let shade = 0.45 + 0.55 * (x + y) as f32 / (2 * n) as f32;
+                    let (dx, dy) = (x as f32 - n as f32 * 0.62, y as f32 - n as f32 * 0.38);
+                    let disc = if dx * dx + dy * dy < (n as f32 * 0.2).powi(2) { 0.55 } else { 0.0 };
+                    let mix = |v: f32| (v * shade * (1.0 - disc) + 255.0 * disc).min(255.0) as u8;
+                    art.extend([mix(cr), mix(cg), mix(cb), 255]);
+                }
+            }
+            state.music_accent = accent::of_rgba(&art);
+            state.music_art = Some(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&art, n, n)));
+            state.music.art = Some(art);
             // =nolyrics: the song without; FUBUNOTCH_V2_LINE: Line on.
             state.line_held = std::env::var_os("FUBUNOTCH_V2_LINE").is_some();
             if std::env::var("FUBUNOTCH_V2_DEMO_MUSIC").is_ok_and(|v| v == "nolyrics") {

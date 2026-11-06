@@ -112,6 +112,9 @@ export struct Music {
     remaining: string,
     has-art: bool,
     art: image,
+    // The cover's colour (none for a grey or dark one).
+    has-accent: bool,
+    accent: color,
     has-lyrics: bool,
     // Every line of the song; the one being sung (-1: not yet) and the one
     // the list centres on.
@@ -223,6 +226,87 @@ component Bar inherits Rectangle {
     }
 }
 
+// The song's progress as water, after Mini Island for Windows' (github.com/
+// nkzwsn/dynamic-island-windows, MIT: the wave shape and its numbers): three layers of waves
+// in the cover's colour ride the played part of the bar, slow and long at the
+// back, short and quicker in front; they swell and settle on their own and
+// lie down when the song pauses. Redrawn 20 times a second, only while playing on screen.
+component WaveBar inherits Rectangle {
+    in property <float> value;
+    in property <bool> playing;
+    // On screen (the Music page open): the clock runs only then.
+    in property <bool> live;
+    in property <color> tint: Ice.glow;
+    height: 24px;
+    // The bar's line sits near the bottom; the waves rise above it.
+    property <float> base: self.height / 1px - 4;
+    property <float> fill: max(6, self.width / 1px * clamp(root.value, 0, 1));
+    animate fill { duration: 300ms; easing: ease-out; }
+    // The waves' clock, ticked by a timer 20 times a second while playing on
+    // screen, still otherwise. A binding on animation-tick() would have the
+    // paths rebuilt every frame (60 a second) whatever the step.
+    property <float> t;
+    Timer {
+        interval: 50ms;
+        running: root.playing && root.live;
+        triggered => { root.t = animation-tick() / 1ms / 1000; }
+    }
+    // Calm (lower) while paused.
+    property <float> calm: root.playing ? 1 : 0.4;
+    animate calm { duration: 700ms; easing: ease-in-out; }
+
+    // Point i of N along a layer's span.
+    pure function px(i: int, x0: float, x1: float) -> float { return x0 + (x1 - x0) * i / 24; }
+    pure function smooth(u: float) -> float { return u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u); }
+    // Layer l's height at point i: a long wave plus a shorter ripple, sharpened a
+    // little (peaks pointed, troughs flat), tapering to nothing at both ends.
+    pure function py(i: int, l: int, x0: float, x1: float, t: float, a: float) -> float {
+        let x = root.px(i, x0, x1);
+        let tap = max(1, min(22, (x1 - x0) * 0.4));
+        let env = root.smooth((x - x0) / tap) * root.smooth((x1 - x) / tap);
+        let w1 = (1 - cos(360deg * (x - [16, 22, 30][l] * t + [13, 0, 31][l]) / [110, 84, 62][l])) / 2;
+        let w2 = (1 - cos(360deg * (x - [23, 30, 40][l] * t + [48, 22, 9][l]) / [63, 49, 37][l])) / 2;
+        return root.base - a * env * (0.3 + 0.7 * pow(0.7 * w1 + 0.3 * w2, [1.2, 1.35, 1.5][l]));
+    }
+    pure function layer(l: int, t: float, a: float) -> string {
+        let x0 = root.fill * [0, 0.05, 0.12][l];
+        let x1 = root.fill * [1, 0.95, 0.86][l];
+        return "M " + x0 + " " + root.base + " L " + root.px(0, x0, x1) + " " + root.py(0, l, x0, x1, t, a) + " L " + root.px(1, x0, x1) + " " + root.py(1, l, x0, x1, t, a) + " L " + root.px(2, x0, x1) + " " + root.py(2, l, x0, x1, t, a) + " L " + root.px(3, x0, x1) + " " + root.py(3, l, x0, x1, t, a) + " L " + root.px(4, x0, x1) + " " + root.py(4, l, x0, x1, t, a) + " L " + root.px(5, x0, x1) + " " + root.py(5, l, x0, x1, t, a) + " L " + root.px(6, x0, x1) + " " + root.py(6, l, x0, x1, t, a) + " L " + root.px(7, x0, x1) + " " + root.py(7, l, x0, x1, t, a) + " L " + root.px(8, x0, x1) + " " + root.py(8, l, x0, x1, t, a) + " L " + root.px(9, x0, x1) + " " + root.py(9, l, x0, x1, t, a) + " L " + root.px(10, x0, x1) + " " + root.py(10, l, x0, x1, t, a) + " L " + root.px(11, x0, x1) + " " + root.py(11, l, x0, x1, t, a) + " L " + root.px(12, x0, x1) + " " + root.py(12, l, x0, x1, t, a) + " L " + root.px(13, x0, x1) + " " + root.py(13, l, x0, x1, t, a) + " L " + root.px(14, x0, x1) + " " + root.py(14, l, x0, x1, t, a) + " L " + root.px(15, x0, x1) + " " + root.py(15, l, x0, x1, t, a) + " L " + root.px(16, x0, x1) + " " + root.py(16, l, x0, x1, t, a) + " L " + root.px(17, x0, x1) + " " + root.py(17, l, x0, x1, t, a) + " L " + root.px(18, x0, x1) + " " + root.py(18, l, x0, x1, t, a) + " L " + root.px(19, x0, x1) + " " + root.py(19, l, x0, x1, t, a) + " L " + root.px(20, x0, x1) + " " + root.py(20, l, x0, x1, t, a) + " L " + root.px(21, x0, x1) + " " + root.py(21, l, x0, x1, t, a) + " L " + root.px(22, x0, x1) + " " + root.py(22, l, x0, x1, t, a) + " L " + root.px(23, x0, x1) + " " + root.py(23, l, x0, x1, t, a) + " L " + root.px(24, x0, x1) + " " + root.py(24, l, x0, x1, t, a) + " L " + x1 + " " + root.base + " Z";
+    }
+    // Each layer's height: a short bar early in the song gets low waves (no steep mounds).
+    pure function amp(l: int) -> float {
+        return min(1, root.fill * 0.11 / 12) * [12, 10, 8][l] * root.calm * (0.72 + 0.28 * sin(root.t * [0.6, 0.9, 1.3][l] * 1rad + [1, 0, 2.1][l] * 1rad));
+    }
+
+    // The track, then the played part.
+    Rectangle { x: 0; y: (root.base - 1) * 1px; width: parent.width; height: 2px; border-radius: 1px; background: Ice.ink.with-alpha(0.10); }
+    Rectangle { x: 0; y: (root.base - 1) * 1px; width: root.fill * 1px; height: 2px; border-radius: 1px; background: root.tint; }
+    for l in [0, 1, 2] : Path {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: parent.width / 1px;
+        viewbox-height: parent.height / 1px;
+        commands: root.layer(l, root.t, root.amp(l));
+        // One colour each (the software renderer fills a path flat): the back
+        // layer pale and thin like a far wave, the front one the song's own.
+        fill: [root.tint.mix(Ice.ink, 0.5).with-alpha(0.38), root.tint.mix(Ice.ink, 0.75).with-alpha(0.55), root.tint.with-alpha(0.80)][l];
+        stroke: transparent;
+    }
+    // The knob where the song is.
+    Rectangle {
+        x: root.fill * 1px - 4px;
+        y: (root.base - 4) * 1px;
+        width: 8px;
+        height: 8px;
+        border-radius: 4px;
+        background: Ice.ink;
+    }
+}
+
 // Four bars that dance while music plays (redrawn only while on screen).
 component Equalizer inherits HorizontalLayout {
     in property <bool> playing;
@@ -241,12 +325,13 @@ component Equalizer inherits HorizontalLayout {
 component Chip inherits Rectangle {
     in property <string> label;
     in property <bool> active;
+    in property <color> accent: Ice.glow;
     callback clicked();
     // Space Mono runs wide: a size smaller and less padding keep the row (and ⚙) inside.
     width: t.preferred-width + 10px;
     height: 24px;
     border-radius: 12px;
-    background: active ? Ice.glow.with-alpha(0.26) : (area.has-hover ? Ice.ink.with-alpha(0.07) : transparent);
+    background: active ? accent.with-alpha(0.26) : (area.has-hover ? Ice.ink.with-alpha(0.07) : transparent);
     animate background { duration: 200ms; }
     t := Text {
         text: label;
@@ -333,15 +418,17 @@ component IconButton inherits Rectangle {
     in property <bool> filled;
     in property <bool> enabled: true;
     in property <length> stroke-width: 2px;
+    // The colour of primary and on (the song's on the Music page).
+    in property <color> accent: Ice.glow;
     callback clicked();
     width: size;
     height: size;
     border-radius: size / 2;
-    background: primary ? (area.has-hover ? Ice.frost : Ice.glow)
-        : on ? Ice.glow.with-alpha(area.has-hover ? 0.30 : 0.20)
+    background: primary ? (area.has-hover ? accent.mix(Ice.ink, 0.7) : accent)
+        : on ? accent.with-alpha(area.has-hover ? 0.30 : 0.20)
         : area.has-hover && enabled ? Ice.ink.with-alpha(0.12) : transparent;
     animate background { duration: 150ms; }
-    property <color> ink: primary ? Ice.body-lo : !enabled ? Ice.dim.with-alpha(0.4) : on ? Ice.glow : Ice.ink;
+    property <color> ink: primary ? Ice.body-lo : !enabled ? Ice.dim.with-alpha(0.4) : on ? accent : Ice.ink;
     Path {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
@@ -363,11 +450,12 @@ component HoldChip inherits Rectangle {
     in property <string> icon;
     in property <bool> on;
     in property <bool> filled;
+    in property <color> accent: Ice.glow;
     callback clicked();
     width: chip-row.preferred-width + 16px;
     height: 20px;
     border-radius: 10px;
-    background: root.on ? Ice.glow.with-alpha(area.has-hover ? 0.42 : 0.30) : area.has-hover ? Ice.ink.with-alpha(0.14) : Ice.ink.with-alpha(0.07);
+    background: root.on ? root.accent.with-alpha(area.has-hover ? 0.42 : 0.30) : area.has-hover ? Ice.ink.with-alpha(0.14) : Ice.ink.with-alpha(0.07);
     animate background { duration: 150ms; }
     chip-row := HorizontalLayout {
         x: 8px;
@@ -379,9 +467,9 @@ component HoldChip inherits Rectangle {
             viewbox-width: 24;
             viewbox-height: 24;
             commands: root.icon;
-            stroke: root.on ? Ice.glow : Ice.dim;
+            stroke: root.on ? root.accent : Ice.dim;
             stroke-width: 1.6px;
-            fill: root.filled && root.on ? Ice.glow : transparent;
+            fill: root.filled && root.on ? root.accent : transparent;
         }
         Text { text: root.label; color: root.on ? Ice.ink : Ice.dim; font-size: 12px; font-weight: 700; vertical-alignment: center; }
     }
@@ -444,10 +532,32 @@ component MusicPage inherits HorizontalLayout {
     in property <Music> music;
     in property <bool> held;
     in property <bool> line-held;
+    // The song's colour (the theme's when the cover has none).
+    in property <color> tint: Ice.glow;
+    // The page is on screen.
+    in property <bool> live;
     callback command(string);
     // Moves the lyrics by this many seconds (later: positive).
     callback nudge(float);
     spacing: 14px;
+    // A new song: the cover and the names dip out and come back in, so the
+    // change reads as one (Slint can't start an animation from a set value,
+    // so a short timer brings them back).
+    property <float> song-in: 1;
+    animate song-in { duration: 200ms; easing: ease-in-out; }
+    changed music => {
+        if self.music.title != self.last-title {
+            self.last-title = self.music.title;
+            self.song-in = 0;
+            back.running = true;
+        }
+    }
+    property <string> last-title;
+    back := Timer {
+        interval: 200ms;
+        running: false;
+        triggered => { root.song-in = 1; self.running = false; }
+    }
 
     if !music.has-session : VerticalLayout {
         alignment: center;
@@ -459,53 +569,55 @@ component MusicPage inherits HorizontalLayout {
     // The player, after YouTube Music's: title between dislike and like, the
     // bar, then five even controls with play in the middle.
     if music.has-session : VerticalLayout {
-        spacing: 8px;
+        spacing: 9px;
         alignment: center;
-        width: 244px;
+        width: 272px;
         horizontal-stretch: 0;
         HorizontalLayout {
             spacing: 10px;
             Rectangle {
-                width: 52px;
-                height: 52px;
-                border-radius: 12px;
+                width: 64px;
+                height: 64px;
+                border-radius: 14px;
                 background: Ice.body-hi;
                 clip: true;
+                opacity: root.song-in;
                 if music.has-art : Image { source: music.art; width: parent.width; height: parent.height; image-fit: cover; }
-                if !music.has-art : Text { text: "♪"; color: Ice.glow; font-size: 22px; horizontal-alignment: center; vertical-alignment: center; }
+                if !music.has-art : Text { text: "♪"; color: root.tint; font-size: 22px; horizontal-alignment: center; vertical-alignment: center; }
             }
             VerticalLayout {
                 alignment: center;
                 spacing: 2px;
+                opacity: root.song-in;
                 HorizontalLayout {
                     spacing: 6px;
-                    Hud { text: music.app == "" ? "NOW PLAYING" : music.app; }
-                    Equalizer { playing: music.playing; height: 10px; }
+                    Hud { text: music.app == "" ? "NOW PLAYING" : music.app; color: root.tint.with-alpha(0.9); }
+                    Equalizer { playing: music.playing; height: 10px; tint: root.tint; }
                     Rectangle { horizontal-stretch: 1; }
                 }
-                Text { text: music.title; color: Ice.ink; font-size: 14.5px; font-weight: 700; overflow: elide; }
-                Text { text: music.artist; color: Ice.dim; font-size: 12.5px; overflow: elide; }
+                Text { text: music.title; color: Ice.ink; font-size: 16px; font-weight: 700; overflow: elide; }
+                Text { text: music.artist; color: Ice.dim; font-size: 13px; overflow: elide; }
             }
-            IconButton { icon: Icons.dislike; size: 32px; icon-size: 19px; stroke-width: 1.6px; on: music.rating < 0; filled: music.rating < 0; y: (parent.height - self.height) / 2; clicked => { root.command("dislike"); } }
-            IconButton { icon: Icons.like; size: 32px; icon-size: 19px; stroke-width: 1.6px; on: music.rating > 0; filled: music.rating > 0; y: (parent.height - self.height) / 2; clicked => { root.command("like"); } }
+            IconButton { accent: root.tint; icon: Icons.dislike; size: 32px; icon-size: 19px; stroke-width: 1.6px; on: music.rating < 0; filled: music.rating < 0; y: (parent.height - self.height) / 2; clicked => { root.command("dislike"); } }
+            IconButton { accent: root.tint; icon: Icons.like; size: 32px; icon-size: 19px; stroke-width: 1.6px; on: music.rating > 0; filled: music.rating > 0; y: (parent.height - self.height) / 2; clicked => { root.command("like"); } }
         }
         HorizontalLayout {
             spacing: 8px;
             Text { text: music.elapsed; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
-            Bar { value: music.position; y: (parent.height - self.height) / 2; }
+            WaveBar { value: music.position; playing: music.playing; live: root.live; tint: root.tint; y: (parent.height - self.height) / 2; }
             Text { text: music.remaining; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
         }
         HorizontalLayout {
             alignment: space-between;
             IconButton {
-                icon: Icons.shuffle; enabled: music.can-shuffle; on: music.shuffle;
+                icon: Icons.shuffle; accent: root.tint; enabled: music.can-shuffle; on: music.shuffle;
                 y: (parent.height - self.height) / 2;
                 clicked => { root.command("shuffle"); }
             }
             IconButton { icon: Icons.previous; filled: true; y: (parent.height - self.height) / 2; clicked => { root.command("previous"); } }
             IconButton {
                 icon: music.playing ? Icons.pause : Icons.play;
-                primary: true; filled: !music.playing; size: 44px; icon-size: 20px; stroke-width: music.playing ? 3.2px : 1.5px;
+                primary: true; accent: root.tint; filled: !music.playing; size: 44px; icon-size: 20px; stroke-width: music.playing ? 3.2px : 1.5px;
                 clicked => { root.command("play-pause"); }
             }
             IconButton { icon: Icons.next; filled: true; y: (parent.height - self.height) / 2; clicked => { root.command("next"); } }
@@ -513,8 +625,8 @@ component MusicPage inherits HorizontalLayout {
                 width: 34px;
                 height: 34px;
                 y: (parent.height - self.height) / 2;
-                IconButton { icon: Icons.repeat; enabled: music.can-repeat; on: music.repeat > 0; clicked => { root.command("repeat"); } }
-                if music.repeat == 2 : Text { text: "1"; color: Ice.glow; font-size: 10px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                IconButton { icon: Icons.repeat; accent: root.tint; enabled: music.can-repeat; on: music.repeat > 0; clicked => { root.command("repeat"); } }
+                if music.repeat == 2 : Text { text: "1"; color: root.tint; font-size: 10px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
             }
         }
     }
@@ -529,10 +641,11 @@ component MusicPage inherits HorizontalLayout {
         spacing: 2px;
         HorizontalLayout {
             spacing: 6px;
-            Hud { text: "LYRICS"; horizontal-stretch: 1; vertical-alignment: center; }
+            Hud { text: "LYRICS"; color: root.tint.with-alpha(0.9); horizontal-stretch: 1; vertical-alignment: center; }
             // Line: the island stays a capsule showing the line being sung.
             HoldChip {
                 label: "Line";
+                accent: root.tint;
                 icon: "M 4 7 H 20 M 4 12 H 15 M 4 17 H 18";
                 on: root.line-held;
                 clicked => { root.command("line-hold"); }
@@ -540,6 +653,7 @@ component MusicPage inherits HorizontalLayout {
             // Hold: the island stays open while you read along.
             HoldChip {
                 label: "Hold";
+                accent: root.tint;
                 icon: "M 9 3 H 15 L 14 10 L 18 14 H 6 L 10 10 Z M 12 14 V 21";
                 filled: true;
                 on: root.held;
@@ -569,7 +683,7 @@ component MusicPage inherits HorizontalLayout {
                         horizontal-alignment: center;
                         font-size: self.sung ? 13px : 11.5px;
                         font-weight: self.sung ? 700 : 400;
-                        color: self.sung ? Ice.ink : i < music.lyric-index ? Ice.dim.with-alpha(0.7) : Ice.ink.with-alpha(0.55);
+                        color: self.sung ? Ice.ink.mix(root.tint, 0.8) : i < music.lyric-index ? Ice.dim.with-alpha(0.7) : Ice.ink.with-alpha(0.55);
                         opacity: self.away <= 1 ? 1 : self.away == 2 ? 0.45 : 0;
                         animate color, opacity { duration: 250ms; easing: ease-out; }
                         init => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
@@ -1096,6 +1210,16 @@ export component Island inherits Window {
     property <length> island-r: expanded ? 28px : root.compact && (root.notice || (root.line-held && (root.line-notice || root.capsule-long))) ? 22px : self.island-h / 2;
     animate island-r { duration: Ice.morph; easing: ease-out; }
     property <length> ix: (root.width - self.island-w) / 2;
+    // The island takes the cover's colour while it shows the song (Music, or
+    // the capsule's now playing / Line): edge, glow, a wash from the left, the
+    // wave and the controls. Anything else keeps the theme's.
+    property <bool> music-lit: root.music.has-session && root.music.has-accent && !root.hidden && (
+        (root.expanded && (root.active-tab == "music" || (root.active-tab == "home" && root.has-front && root.front.kind == "ambient")))
+        || (root.compact && (root.line-held || (!root.notice && root.has-front && root.front.kind == "ambient"))));
+    property <color> tint: root.music-lit ? root.music.accent : Ice.glow;
+    animate tint { duration: 650ms; easing: ease-in-out; }
+    property <float> lit: root.music-lit ? 1 : 0;
+    animate lit { duration: 650ms; easing: ease-in-out; }
 
     // Hidden: a wider strip than the bar, so it is easy to point at.
     if hidden : TouchArea {
@@ -1106,15 +1230,22 @@ export component Island inherits Window {
         changed has-hover => { root.hover-changed(self.has-hover); }
     }
 
-    // A soft glow, one layer.
+    // A soft glow, two rings fading outwards (the window keeps 6 px for it).
     Rectangle {
-        x: root.ix - 4px;
-        y: Ice.top - 4px;
-        width: root.island-w + 8px;
-        height: root.island-h + 8px;
-        border-radius: root.island-r + 4px;
-        background: Ice.glow.with-alpha(root.hidden ? 0.20 : 0.07);
-        animate background { duration: Ice.fade; }
+        x: root.ix - 6px;
+        y: Ice.top - 6px;
+        width: root.island-w + 12px;
+        height: root.island-h + 12px;
+        border-radius: root.island-r + 6px;
+        background: root.tint.with-alpha(root.hidden ? 0.08 : 0.03 + 0.05 * root.lit);
+    }
+    Rectangle {
+        x: root.ix - 3px;
+        y: Ice.top - 3px;
+        width: root.island-w + 6px;
+        height: root.island-h + 6px;
+        border-radius: root.island-r + 3px;
+        background: root.tint.with-alpha(root.hidden ? 0.16 : 0.07 + 0.07 * root.lit);
     }
     // The body: one shape with its own 1 px edge (stacked rounded layers
     // left halos at the edges with the software renderer), and a faint
@@ -1126,13 +1257,89 @@ export component Island inherits Window {
         height: root.island-h;
         border-radius: root.island-r;
         border-width: 1px;
-        border-color: root.hidden ? Ice.glow : Ice.glow.with-alpha(0.55);
+        border-color: root.hidden ? Ice.glow : root.tint.with-alpha(0.55 + 0.1 * root.lit);
         // Solid: the software renderer doesn't round gradients.
         // `repaint` flips the alpha by 1/255 (invisible): the whole island
         // counts as changed and is drawn again. Without it the software
         // renderer kept showing the old lyric in Line's capsule.
         background: (root.hidden ? Ice.frost : Ice.body).with-alpha(root.repaint ? 1 : 0.996);
         clip: true;
+
+        // The song's wash: its colour from the left edge, gone past the middle.
+        // One small white strip (assets/wash.png, alpha fading to the right)
+        // stretched and coloured: cheap to draw every frame, unlike paths or a
+        // gradient (which the software renderer neither rounds nor fills).
+        // The software renderer's clip is square too, so the strip is laid in
+        // three rectangles that stay inside the rounded shape (a middle band,
+        // and top and bottom bands right of the corners), and each left corner
+        // is a quarter disc in the strip's colour there.
+        wash := Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            visible: root.lit > 0.01;
+            property <length> r: min(root.island-r, self.height / 2);
+            property <length> span: self.width * 0.7;
+            property <float> strength: 0.26 * root.lit;
+            // How far into the strip a corner's middle is, in its 128 pixels.
+            property <int> skip: min(127, round(128 * self.r / max(1px, self.span)));
+            Image {
+                x: 0;
+                y: wash.r;
+                width: wash.span;
+                height: max(0px, wash.height - 2 * wash.r);
+                source: @image-url("../assets/wash.png");
+                image-fit: fill;
+                colorize: root.tint;
+                opacity: wash.strength;
+            }
+            for band in 2 : Image {
+                x: wash.r;
+                y: band == 0 ? 0px : wash.height - wash.r;
+                width: max(0px, wash.span - wash.r);
+                height: wash.r;
+                source: @image-url("../assets/wash.png");
+                source-clip-x: wash.skip;
+                source-clip-width: 128 - wash.skip;
+                image-fit: fill;
+                colorize: root.tint;
+                opacity: wash.strength;
+            }
+            for corner in 2 : Path {
+                x: 0;
+                y: corner == 0 ? 0px : wash.height - wash.r;
+                width: wash.r;
+                height: wash.r;
+                viewbox-x: 0;
+                viewbox-y: 0;
+                viewbox-width: 1;
+                viewbox-height: 1;
+                commands: corner == 0 ? "M 1 1 L 0 1 A 1 1 0 0 1 1 0 Z" : "M 1 0 L 0 0 A 1 1 0 0 0 1 1 Z";
+                // The strip's alpha half way into the corner: (1 - u)^1.7.
+                fill: root.tint.with-alpha(wash.strength * pow(1 - 0.5 * wash.r / max(1px, wash.span), 1.7));
+                stroke: transparent;
+            }
+        }
+        // Glass: a light catches the top edge, brightest in the middle (two
+        // overlapping strokes, as a stroke's gradient comes out flat too).
+        for g in 2 : Path {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            viewbox-x: 0;
+            viewbox-y: 0;
+            viewbox-width: parent.width / 1px;
+            viewbox-height: parent.height / 1px;
+            visible: !root.hidden;
+            property <float> w: parent.width / 1px;
+            property <float> half: self.w * (g == 0 ? 0.30 : 0.14);
+            commands: "M " + (self.w / 2 - self.half) + " 1.2 H " + (self.w / 2 + self.half);
+            stroke: #ffffff.with-alpha(g == 0 ? 0.07 : 0.10);
+            stroke-width: 1px;
+            fill: transparent;
+        }
 
         // Shown once the spring has settled at the size it was cut for.
         // 1 px in, so the island's edge stays drawn around it.
@@ -1246,7 +1453,7 @@ export component Island inherits Window {
                         }
                     }
                 }
-                if root.line-notice : Rectangle { height: 1px; background: Ice.glow.with-alpha(0.22); }
+                if root.line-notice : Rectangle { height: 1px; background: root.tint.with-alpha(0.22); }
                 if root.line-notice : HorizontalLayout {
                     padding-top: 6px;
                     padding-bottom: 6px;
@@ -1299,7 +1506,16 @@ export component Island inherits Window {
                     clicked => { root.mascot-clicked(); }
                 }
                 if root.has-front && root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
-                if root.has-front && root.front.icon == "" : Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
+                // Now playing: the cover, small, instead of the dot.
+                if root.has-front && root.front.icon == "" && root.front.kind == "ambient" && root.music.has-art : Rectangle {
+                    width: 20px;
+                    height: 20px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 6px;
+                    clip: true;
+                    Image { source: root.music.art; width: parent.width; height: parent.height; image-fit: cover; }
+                }
+                if root.has-front && root.front.icon == "" && !(root.front.kind == "ambient" && root.music.has-art) : Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
                 Text {
                     text: root.has-front ? root.front.title : root.clock;
                     color: Ice.ink;
@@ -1315,6 +1531,7 @@ export component Island inherits Window {
                 }
                 if root.has-front && root.front.kind == "ambient" && root.music.playing : Equalizer {
                     playing: true;
+                    tint: root.tint;
                     height: 14px;
                     y: (parent.height - self.height) / 2;
                 }
@@ -1360,10 +1577,10 @@ export component Island inherits Window {
                 HorizontalLayout {
                     spacing: 2px;
                     height: 28px;
-                    Chip { label: "Home"; active: root.active-tab == "home"; clicked => { root.tab-clicked("home"); } }
-                    for t in root.tabs : Chip { label: t.label; active: root.active-tab == t.id; clicked => { root.tab-clicked(t.id); } }
+                    Chip { accent: root.tint; label: "Home"; active: root.active-tab == "home"; clicked => { root.tab-clicked("home"); } }
+                    for t in root.tabs : Chip { accent: root.tint; label: t.label; active: root.active-tab == t.id; clicked => { root.tab-clicked(t.id); } }
                     Rectangle { horizontal-stretch: 1; }
-                    Hud { text: root.clock; }
+                    Hud { text: root.clock; color: root.tint.with-alpha(0.85); }
                     Rectangle { width: root.watching ? 0px : 4px; }
                     // The docked video: click keeps it shown or lets it follow
                     // the island; right-click sends it back to its tab.
@@ -1404,7 +1621,7 @@ export component Island inherits Window {
                                 if !root.has-front : Text { text: "All quiet. Pick a tab, or drop a file here."; color: Ice.dim; font-size: 12.5px; }
                                 if root.has-front : HorizontalLayout {
                                     spacing: 8px;
-                                    Equalizer { playing: root.music.playing; height: 12px; }
+                                    Equalizer { playing: root.music.playing; height: 12px; tint: root.tint; }
                                     Text { text: root.front.title + "  ·  " + root.front.body; color: Ice.soft; font-size: 13px; overflow: elide; }
                                 }
                             }
@@ -1457,7 +1674,7 @@ export component Island inherits Window {
 
                     Page {
                         shown: root.active-tab == "music";
-                        MusicPage { music: root.music; held: root.held; line-held: root.line-held; command(c) => { root.music-command(c); } nudge(d) => { root.lyrics-nudge(d); } }
+                        MusicPage { music: root.music; tint: root.tint; live: root.expanded && root.active-tab == "music"; held: root.held; line-held: root.line-held; command(c) => { root.music-command(c); } nudge(d) => { root.lyrics-nudge(d); } }
                     }
                     Page {
                         shown: root.active-tab == "focus";
