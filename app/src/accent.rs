@@ -29,11 +29,25 @@ pub fn of_rgba(rgba: &[u8]) -> Option<(u8, u8, u8)> {
     }
     let (r, g, b) = (r / weight, g / weight, b / weight);
     let max = r.max(g).max(b);
-    if max <= 0.0 || (max - r.min(g).min(b)) / max < 0.25 {
+    let sat = if max > 0.0 { (max - r.min(g).min(b)) / max } else { 0.0 };
+    // Only a truly grey cover has none. A pale one (a soft blue, a dusty
+    // pink) keeps its hue and gets its colour lifted, so it still shows.
+    if sat < 0.08 {
         return None;
     }
-    let k = 235.0 / max;
-    Some(((r * k) as u8, (g * k) as u8, (b * k) as u8))
+    Some(vivid(r, g, b, sat.max(0.55), 235.0))
+}
+
+/// The same hue at saturation `sat` and brightness `value` (0-255).
+fn vivid(r: f64, g: f64, b: f64, sat: f64, value: f64) -> (u8, u8, u8) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let span = (max - min).max(1e-9);
+    // Each channel's place between the darkest and the brightest, kept;
+    // the darkest moves to value * (1 - sat).
+    let low = value * (1.0 - sat);
+    let at = |c: f64| (low + (c - min) / span * (value - low)).round().clamp(0.0, 255.0) as u8;
+    (at(r), at(g), at(b))
 }
 
 #[cfg(test)]
@@ -54,8 +68,16 @@ mod tests {
     #[test]
     fn grey_dark_or_empty_has_none() {
         assert_eq!(of_rgba(&solid(128, 128, 128)), None);
+        assert_eq!(of_rgba(&solid(130, 128, 126)), None);
         assert_eq!(of_rgba(&solid(10, 5, 30)), None);
         assert_eq!(of_rgba(&[]), None);
+    }
+
+    #[test]
+    fn a_pale_blue_cover_comes_out_a_clear_blue() {
+        let (r, g, b) = of_rgba(&solid(150, 165, 200)).unwrap();
+        assert_eq!(b, 235);
+        assert!(r < 130 && g < 170, "{r} {g} {b}");
     }
 
     #[test]

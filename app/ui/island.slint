@@ -192,6 +192,17 @@ component SysIcon inherits Path {
         : "M 4 9 H 8 L 13 5 V 19 L 8 15 H 4 Z M 16 9 A 4 4 0 0 1 16 15 M 18.5 6.5 A 7.5 7.5 0 0 1 18.5 17.5";
 }
 
+// A pane of glass inside the island: a faint fill and a hairline edge, one
+// shape (no stacked layers). Sections of a page sit on one.
+component Panel inherits Rectangle {
+    in property <bool> lit;
+    border-radius: 14px;
+    background: Ice.ink.with-alpha(root.lit ? 0.07 : 0.035);
+    border-width: 1px;
+    border-color: Ice.ink.with-alpha(root.lit ? 0.14 : 0.07);
+    animate background, border-color { duration: 150ms; }
+}
+
 component Dot inherits Rectangle {
     in property <color> accent;
     width: 7px;
@@ -331,12 +342,15 @@ component Chip inherits Rectangle {
     width: t.preferred-width + 10px;
     height: 24px;
     border-radius: 12px;
-    background: active ? accent.with-alpha(0.26) : (area.has-hover ? Ice.ink.with-alpha(0.07) : transparent);
-    animate background { duration: 200ms; }
+    background: active ? accent.with-alpha(0.20) : (area.has-hover ? Ice.ink.with-alpha(0.07) : transparent);
+    border-width: 1px;
+    border-color: active ? accent.with-alpha(0.65) : transparent;
+    animate background, border-color { duration: 200ms; }
     t := Text {
         text: label;
         color: active ? Ice.ink : Ice.dim;
         font-size: 10.5px;
+        letter-spacing: 0.3px;
         font-weight: active ? 700 : 500;
         animate color { duration: 200ms; }
     }
@@ -429,6 +443,16 @@ component IconButton inherits Rectangle {
         : area.has-hover && enabled ? Ice.ink.with-alpha(0.12) : transparent;
     animate background { duration: 150ms; }
     property <color> ink: primary ? Ice.body-lo : !enabled ? Ice.dim.with-alpha(0.4) : on ? accent : Ice.ink;
+    if root.primary : Rectangle {
+        x: -4px;
+        y: -4px;
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        border-radius: self.width / 2;
+        border-width: 1px;
+        border-color: root.accent.with-alpha(area.has-hover ? 0.6 : 0.32);
+        animate border-color { duration: 150ms; }
+    }
     Path {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
@@ -503,16 +527,42 @@ component Ring inherits Rectangle {
         viewbox-height: 100;
         stroke: Ice.ink.with-alpha(0.08);
         stroke-width: root.thickness;
-        commands: "M 50 6 A 44 44 0 1 1 49.99 6";
+        commands: "M 50 9 A 41 41 0 1 1 49.99 9";
+    }
+    // The gauge's ticks, every quarter hour of a clock longer.
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        stroke: Ice.ink.with-alpha(0.22);
+        stroke-width: 1px;
+        commands: "M 50.00 3.50 L 50.00 0.50 M 56.07 3.90 L 56.27 2.41 M 62.04 5.08 L 62.42 3.64 M 67.79 7.04 L 68.37 5.65 M 73.25 9.73 L 74.75 7.13 M 78.31 13.11 L 79.22 11.92 M 82.88 17.12 L 83.94 16.06 M 86.89 21.69 L 88.08 20.78 M 90.27 26.75 L 92.87 25.25 M 92.96 32.21 L 94.35 31.63 M 94.92 37.96 L 96.36 37.58 M 96.10 43.93 L 97.59 43.73 M 96.50 50.00 L 99.50 50.00 M 96.10 56.07 L 97.59 56.27 M 94.92 62.04 L 96.36 62.42 M 92.96 67.79 L 94.35 68.37 M 90.27 73.25 L 92.87 74.75 M 86.89 78.31 L 88.08 79.22 M 82.88 82.88 L 83.94 83.94 M 78.31 86.89 L 79.22 88.08 M 73.25 90.27 L 74.75 92.87 M 67.79 92.96 L 68.37 94.35 M 62.04 94.92 L 62.42 96.36 M 56.07 96.10 L 56.27 97.59 M 50.00 96.50 L 50.00 99.50 M 43.93 96.10 L 43.73 97.59 M 37.96 94.92 L 37.58 96.36 M 32.21 92.96 L 31.63 94.35 M 26.75 90.27 L 25.25 92.87 M 21.69 86.89 L 20.78 88.08 M 17.12 82.88 L 16.06 83.94 M 13.11 78.31 L 11.92 79.22 M 9.73 73.25 L 7.13 74.75 M 7.04 67.79 L 5.65 68.37 M 5.08 62.04 L 3.64 62.42 M 3.90 56.07 L 2.41 56.27 M 3.50 50.00 L 0.50 50.00 M 3.90 43.93 L 2.41 43.73 M 5.08 37.96 L 3.64 37.58 M 7.04 32.21 L 5.65 31.63 M 9.73 26.75 L 7.13 25.25 M 13.11 21.69 L 11.92 20.78 M 17.12 17.12 L 16.06 16.06 M 21.69 13.11 L 20.78 11.92 M 26.75 9.73 L 25.25 7.13 M 32.21 7.04 L 31.63 5.65 M 37.96 5.08 L 37.58 3.64 M 43.93 3.90 L 43.73 2.41";
     }
     Path {
         width: parent.width;
         height: parent.height;
         viewbox-width: 100;
         viewbox-height: 100;
-        stroke: @linear-gradient(135deg, Ice.frost 0%, Ice.glow 50%, Ice.deep 100%);
+        stroke: Ice.glow;
         stroke-width: root.thickness;
-        commands: "M 50 6 A 44 44 0 " + (root.v > 0.5 ? "1" : "0") + " 1 " + (50 + 44 * sin(root.a)) + " " + (50 - 44 * cos(root.a));
+        commands: "M 50 9 A 41 41 0 " + (root.v > 0.5 ? "1" : "0") + " 1 " + (50 + 41 * sin(root.a)) + " " + (50 - 41 * cos(root.a));
+    }
+    // The tip: a bright dot with a soft ring, where the arc ends.
+    Rectangle {
+        property <length> d: root.thickness + 6px;
+        x: root.width * (50 + 41 * sin(root.a)) / 100 - self.d / 2;
+        y: root.height * (50 - 41 * cos(root.a)) / 100 - self.d / 2;
+        width: self.d;
+        height: self.d;
+        border-radius: self.d / 2;
+        background: Ice.glow.with-alpha(0.25);
+        Rectangle {
+            width: root.thickness - 1px;
+            height: self.width;
+            border-radius: self.width / 2;
+            background: Ice.ink;
+        }
     }
 }
 
@@ -736,8 +786,10 @@ component FocusPage inherits HorizontalLayout {
         }
     }
     // Today's rounds: how long each one really was.
-    VerticalLayout {
+    Panel {
         horizontal-stretch: 1;
+        VerticalLayout {
+        padding: 12px;
         alignment: center;
         spacing: 4px;
         Hud { text: "TODAY"; }
@@ -753,6 +805,7 @@ component FocusPage inherits HorizontalLayout {
             }
             Text { text: r.time; color: Ice.soft; font-size: 12px; horizontal-stretch: 1; }
             Text { text: r.length; color: r.full ? Ice.glow : Ice.dim; font-size: 12px; }
+        }
         }
     }
 }
@@ -798,30 +851,48 @@ component WaterPage inherits HorizontalLayout {
                 animate background { duration: 150ms; }
                 t := Text { text: "+ " + root.water.glass; color: Ice.body-lo; font-size: 13.5px; font-weight: 800; }
                 a := TouchArea { clicked => { root.command("drink"); } }
+                // The same halo as the other primary buttons.
+                Rectangle {
+                    x: -4px;
+                    y: -4px;
+                    width: parent.width + 8px;
+                    height: parent.height + 8px;
+                    border-radius: self.height / 2;
+                    border-width: 1px;
+                    border-color: Ice.glow.with-alpha(a.has-hover ? 0.6 : 0.32);
+                }
             }
             Pill { label: "Undo"; enabled: root.water.drinks > 0; y: (parent.height - self.height) / 2; clicked => { root.command("undo"); } }
         }
     }
     // Today by the hour, over the active hours (the hour now in light).
-    VerticalLayout {
+    Panel {
         horizontal-stretch: 1;
+        VerticalLayout {
+        padding: 12px;
+        padding-left: 10px;
+        padding-right: 10px;
         spacing: 4px;
         alignment: center;
         Hud { text: "BY THE HOUR"; }
         HorizontalLayout {
-            height: 78px;
+            height: 70px;
             alignment: space-between;
-            for b in root.water.hours : VerticalLayout {
-                width: 13px;
+            for b[i] in root.water.hours : VerticalLayout {
+                width: 15px;
+                padding-left: 2px;
+                padding-right: 2px;
                 alignment: end;
                 spacing: 3px;
                 Rectangle {
-                    height: max(3px, 60px * b.fraction);
+                    height: max(3px, 52px * b.fraction);
                     border-radius: 2px;
                     background: b.now ? Ice.glow : b.fraction > 0 ? Ice.glow.with-alpha(0.55) : Ice.ink.with-alpha(0.08);
                 }
-                Text { text: b.label; color: b.now ? Ice.glow : Ice.dim; font-size: 10px; horizontal-alignment: center; }
+                // Every other hour's label (and now's): a dozen don't fit side by side.
+                Text { text: b.now || mod(i, 2) == 0 ? b.label : ""; color: b.now ? Ice.glow : Ice.dim; font-size: 9.5px; horizontal-alignment: center; }
             }
+        }
         }
     }
 }
@@ -855,12 +926,11 @@ component ShelfPage inherits VerticalLayout {
     if !drop-hover : Flickable {
         content-height: rows.preferred-height;
         rows := VerticalLayout {
-            spacing: 2px;
-            for f[i] in root.items : Rectangle {
-                height: 32px;
+            spacing: 4px;
+            for f[i] in root.items : Panel {
+                height: 34px;
                 border-radius: 10px;
-                background: row.has-hover ? Ice.ink.with-alpha(0.07) : transparent;
-                animate background { duration: 120ms; }
+                lit: row.has-hover;
                 row := TouchArea { clicked => { root.open(i); } }
                 HorizontalLayout {
                     padding-left: 8px;
@@ -1013,8 +1083,10 @@ component TodoPage inherits VerticalLayout {
             height: 30px;
             horizontal-stretch: 1;
             border-radius: 10px;
-            background: input.has-focus ? Ice.glow.with-alpha(0.12) : Ice.ink.with-alpha(0.06);
-            animate background { duration: 150ms; }
+            background: input.has-focus ? Ice.glow.with-alpha(0.10) : Ice.ink.with-alpha(0.05);
+            border-width: 1px;
+            border-color: input.has-focus ? Ice.glow.with-alpha(0.6) : Ice.ink.with-alpha(0.08);
+            animate background, border-color { duration: 150ms; }
             input := TextInput {
                 x: 12px;
                 width: parent.width - 24px;
@@ -1085,12 +1157,11 @@ component NotifPage inherits VerticalLayout {
     Flickable {
         content-height: list.preferred-height;
         list := VerticalLayout {
-            spacing: 1px;
-            for n[i] in root.items : Rectangle {
-                height: 28px;
-                border-radius: 8px;
-                background: row.has-hover ? Ice.ink.with-alpha(0.07) : transparent;
-                animate background { duration: 120ms; }
+            spacing: 4px;
+            for n[i] in root.items : Panel {
+                height: 32px;
+                border-radius: 10px;
+                lit: row.has-hover;
                 HorizontalLayout {
                     padding-left: 6px;
                     padding-right: 8px;
@@ -1262,10 +1333,13 @@ export component Island inherits Window {
         // `repaint` flips the alpha by 1/255 (invisible): the whole island
         // counts as changed and is drawn again. Without it the software
         // renderer kept showing the old lyric in Line's capsule.
-        background: (root.hidden ? Ice.frost : Ice.body).with-alpha(root.repaint ? 1 : 0.996);
+        // Glass: the body lets the screen through a little (the window is
+        // transparent per pixel), the hidden bar stays solid.
+        background: root.hidden ? Ice.frost.with-alpha(root.repaint ? 1 : 0.996)
+            : Ice.body.with-alpha(root.repaint ? Ice.glass : Ice.glass - 0.004);
         clip: true;
 
-        // The song's wash: its colour from the left edge, gone past the middle.
+        // The wash: the song's colour (or the theme's) from the left edge, gone past the middle.
         // One small white strip (assets/wash.png, alpha fading to the right)
         // stretched and coloured: cheap to draw every frame, unlike paths or a
         // gradient (which the software renderer neither rounds nor fills).
@@ -1278,10 +1352,11 @@ export component Island inherits Window {
             y: 0;
             width: parent.width;
             height: parent.height;
-            visible: root.lit > 0.01;
+            visible: !root.hidden;
             property <length> r: min(root.island-r, self.height / 2);
             property <length> span: self.width * 0.7;
-            property <float> strength: 0.26 * root.lit;
+            // Always some (the theme's colour), stronger for a song's.
+            property <float> strength: 0.16 + 0.10 * root.lit;
             // How far into the strip a corner's middle is, in its 128 pixels.
             property <int> skip: min(127, round(128 * self.r / max(1px, self.span)));
             Image {
@@ -1577,8 +1652,15 @@ export component Island inherits Window {
                 HorizontalLayout {
                     spacing: 2px;
                     height: 28px;
+                    Panel {
+                        border-radius: 14px;
+                        HorizontalLayout {
+                    padding: 2px;
+                    spacing: 2px;
                     Chip { accent: root.tint; label: "Home"; active: root.active-tab == "home"; clicked => { root.tab-clicked("home"); } }
                     for t in root.tabs : Chip { accent: root.tint; label: t.label; active: root.active-tab == t.id; clicked => { root.tab-clicked(t.id); } }
+                        }
+                    }
                     Rectangle { horizontal-stretch: 1; }
                     Hud { text: root.clock; color: root.tint.with-alpha(0.85); }
                     Rectangle { width: root.watching ? 0px : 4px; }
@@ -1632,6 +1714,10 @@ export component Island inherits Window {
                     Page {
                         shown: root.active-tab == "home" && root.has-front && root.front.kind != "ambient";
                         VerticalLayout {
+                        spacing: 6px;
+                        Panel {
+                        VerticalLayout {
+                            padding: 12px;
                             spacing: 6px;
                             HorizontalLayout {
                                 spacing: 8px;
@@ -1662,6 +1748,8 @@ export component Island inherits Window {
                                 alignment: start;
                                 for a in root.front.actions : Pill { label: a.label; clicked => { root.action-clicked(a.id); } }
                             }
+                        }
+                        }
                             for item in root.others : HorizontalLayout {
                                 spacing: 8px;
                                 height: 18px;
