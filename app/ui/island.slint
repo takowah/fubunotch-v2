@@ -192,14 +192,15 @@ component SysIcon inherits Path {
         : "M 4 9 H 8 L 13 5 V 19 L 8 15 H 4 Z M 16 9 A 4 4 0 0 1 16 15 M 18.5 6.5 A 7.5 7.5 0 0 1 18.5 17.5";
 }
 
-// A pane of glass inside the island: a faint fill and a hairline edge, one
-// shape (no stacked layers). Sections of a page sit on one.
+// A pane of frosted glass inside the island: near solid (what sits on it,
+// a chart or a row of text, must read over any screen behind the see-through
+// body) with a hairline edge, one shape (no stacked layers).
 component Panel inherits Rectangle {
     in property <bool> lit;
     border-radius: 14px;
-    background: Ice.ink.with-alpha(root.lit ? 0.07 : 0.035);
+    background: (root.lit ? Ice.body-hi.mix(Ice.ink, 0.88) : Ice.body-hi).with-alpha(0.94);
     border-width: 1px;
-    border-color: Ice.ink.with-alpha(root.lit ? 0.14 : 0.07);
+    border-color: Ice.ink.with-alpha(root.lit ? 0.18 : 0.10);
     animate background, border-color { duration: 150ms; }
 }
 
@@ -876,7 +877,7 @@ component WaterPage inherits HorizontalLayout {
         alignment: center;
         Hud { text: "BY THE HOUR"; }
         HorizontalLayout {
-            height: 70px;
+            height: 104px;
             alignment: space-between;
             for b[i] in root.water.hours : VerticalLayout {
                 width: 15px;
@@ -885,9 +886,9 @@ component WaterPage inherits HorizontalLayout {
                 alignment: end;
                 spacing: 3px;
                 Rectangle {
-                    height: max(3px, 52px * b.fraction);
+                    height: max(3px, 86px * b.fraction);
                     border-radius: 2px;
-                    background: b.now ? Ice.glow : b.fraction > 0 ? Ice.glow.with-alpha(0.55) : Ice.ink.with-alpha(0.08);
+                    background: b.now ? Ice.glow : b.fraction > 0 ? Ice.glow.with-alpha(0.6) : Ice.ink.with-alpha(0.14);
                 }
                 // Every other hour's label (and now's): a dozen don't fit side by side.
                 Text { text: b.now || mod(i, 2) == 0 ? b.label : ""; color: b.now ? Ice.glow : Ice.dim; font-size: 9.5px; horizontal-alignment: center; }

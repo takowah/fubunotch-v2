@@ -62,15 +62,15 @@ const LINE_NOTICE_H: f32 = 54.0;
 const LINE_NOTICE_SHORT_H: f32 = 30.0;
 /// About as many characters as fit on Line's one line at 13 px (Space Mono).
 const LYRIC_ONE_LINE: usize = 44;
-const EXPANDED: (f32, f32) = (520.0, 200.0);
+const EXPANDED: (f32, f32) = (580.0, 240.0);
 /// The Music page is roomier: a bigger cover and the wave bar.
-const EXPANDED_MUSIC: (f32, f32) = (560.0, 224.0);
+const EXPANDED_MUSIC: (f32, f32) = (620.0, 252.0);
 /// The expanded island grows for a long list (To-do), up to this tall; the
 /// rest scrolls.
-const EXPANDED_MAX_H: f32 = 362.0;
+const EXPANDED_MAX_H: f32 = 400.0;
 /// One to-do row, and how many fit the regular height.
 const TODO_PITCH: f32 = 27.0;
-const TODO_ROWS_FIT: usize = 4;
+const TODO_ROWS_FIT: usize = 5;
 /// How long a Windows notification floats on the capsule, at least.
 const NOTIF_HOLD_MS: u64 = 5_000;
 
