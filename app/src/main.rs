@@ -71,11 +71,36 @@ const EXPANDED_MAX_H: f32 = 400.0;
 /// One to-do row, and how many fit the regular height.
 const TODO_PITCH: f32 = 27.0;
 const TODO_ROWS_FIT: usize = 5;
+/// Finished tasks shown in the log (more are kept).
+const TODO_LOG_SHOWN: usize = 100;
 /// How long a Windows notification floats on the capsule, at least.
 const NOTIF_HOLD_MS: u64 = 5_000;
 
 /// The compact island goes up this long after the pointer left (or a notice
 /// came): Settings → General.
+/// Now, as the to-do keeps it.
+fn stamp_now() -> island_core::daily::Stamp {
+    island_core::daily::Stamp { date: local_time::today(), min: local_time::minute_of_day() }
+}
+
+/// The to-do log, newest first, the day named on the first row of each.
+fn todo_log_rows(log: &[island_core::daily::LoggedTask], today: &str) -> Vec<DoneRow> {
+    let mut last_day = None;
+    log.iter()
+        .rev()
+        .take(TODO_LOG_SHOWN)
+        .map(|l| {
+            let first = last_day != Some(l.done.date.as_str());
+            last_day = Some(l.done.date.as_str());
+            DoneRow {
+                day: if first { island_core::daily::day_label(&l.done.date, today).to_uppercase().into() } else { SharedString::new() },
+                time: local_time::hh_mm(l.done.min).into(),
+                text: l.text.as_str().into(),
+            }
+        })
+        .collect()
+}
+
 fn hide_after(s: &Settings) -> u64 {
     s.general.hide_after_s.clamp(2, 60) as u64 * 1000
 }
@@ -617,6 +642,7 @@ fn refresh(ui: &Island) {
         ui.set_water(water_view(state));
         let tasks: Vec<TaskRow> = state.data.todo.ordered().into_iter().map(|t| TaskRow { id: t.id as i32, text: t.text.as_str().into(), done: t.done }).collect();
         ui.set_tasks(ModelRc::new(VecModel::from(tasks)));
+        ui.set_todo_log(ModelRc::new(VecModel::from(todo_log_rows(&state.data.todo.log, &local_time::today()))));
         ui.set_todo_open(state.data.todo.open_count() as i32);
         let shelf_rows: Vec<ShelfRow> = state.data.shelf.iter().map(|f| ShelfRow { name: f.name().into(), detail: f.detail().into() }).collect();
         ui.set_shelf(ModelRc::new(VecModel::from(shelf_rows)));
@@ -2377,7 +2403,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.on_todo_toggle(move |id| {
         let Some(ui) = weak.upgrade() else { return };
         with_state(|state| {
-            state.data.todo.toggle(id as u64);
+            state.data.todo.toggle(id as u64, &stamp_now());
             store::save_data(&state.data);
         });
         refresh(&ui);
@@ -2395,7 +2421,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.on_todo_clear_done(move || {
         let Some(ui) = weak.upgrade() else { return };
         with_state(|state| {
-            state.data.todo.clear_done();
+            state.data.todo.clear_done(&stamp_now());
             store::save_data(&state.data);
         });
         refresh(&ui);
@@ -2404,7 +2430,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.on_todo_remove(move |id| {
         let Some(ui) = weak.upgrade() else { return };
         with_state(|state| {
-            state.data.todo.remove(id as u64);
+            state.data.todo.remove(id as u64, &stamp_now());
             store::save_data(&state.data);
         });
         refresh(&ui);
@@ -2498,10 +2524,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ];
             let ids: Vec<u64> = names.iter().filter_map(|n| todo.add(n)).collect();
             for i in [1, 4, 7] {
-                todo.toggle(ids[i]);
+                todo.toggle(ids[i], &stamp_now());
+            }
+            // FUBUNOTCH_V2_DEMO_TODO=log: some cleared ones too, over three days.
+            if std::env::var("FUBUNOTCH_V2_DEMO_TODO").is_ok_and(|v| v == "log") {
+                let today = local_time::today();
+                for (date, min, text) in [
+                    ("2026-11-08", 600, "Order the poster prints"),
+                    (today.as_str(), 545, "Check the equipment list"),
+                    (today.as_str(), 610, "Buy the brochure paper, the thick one the print shop asked for last time"),
+                ] {
+                    todo.log.push(island_core::daily::LoggedTask { text: text.into(), done: island_core::daily::Stamp { date: date.into(), min } });
+                }
             }
             state.data.todo = todo;
         });
+        ui.set_todo_show_log(std::env::var_os("FUBUNOTCH_V2_TODO_LOG").is_some());
     }
     if std::env::var_os("FUBUNOTCH_V2_DEMO_NOTIFS").is_some() {
         // A few notifications, for checks of the page without real ones.

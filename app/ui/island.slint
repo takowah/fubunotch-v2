@@ -83,6 +83,14 @@ export struct TaskRow {
     done: bool,
 }
 
+// A cleared task in the to-do log. `day` ("Today", "8 Nov") only on the
+// first row of each day.
+export struct DoneRow {
+    day: string,
+    time: string,
+    text: string,
+}
+
 export struct ShelfRow {
     name: string,
     detail: string,
@@ -1004,7 +1012,11 @@ component TodoRow inherits Rectangle {
                 grip := TouchArea {
                     enabled: !root.task.done;
                     mouse-cursor: self.pressed ? grabbing : grab;
-                    moved => { root.drag-dy = self.mouse-y - self.pressed-y; }
+                    // The row (and this grip with it) follows the mouse, so
+                    // mouse-y is measured from where the row is now: add it on.
+                    // Set outright, it bounced between the drag and 0 each
+                    // move, and the drop landed back where it started.
+                    moved => { root.drag-dy += self.mouse-y - self.pressed-y; }
                     changed pressed => {
                         if !self.pressed {
                             if root.target != root.index { root.move(root.target); }
@@ -1071,7 +1083,9 @@ component TodoRow inherits Rectangle {
 
 component TodoPage inherits VerticalLayout {
     in property <[TaskRow]> tasks;
+    in property <[DoneRow]> log;
     in property <int> open-count;
+    in-out property <bool> show-log;
     callback add(string);
     callback toggle(int);
     callback remove(int);
@@ -1088,16 +1102,34 @@ component TodoPage inherits VerticalLayout {
             border-width: 1px;
             border-color: input.has-focus ? Ice.glow.with-alpha(0.6) : Ice.ink.with-alpha(0.08);
             animate background, border-color { duration: 150ms; }
-            input := TextInput {
+            // A bare TextInput doesn't scroll: a long task ran past the
+            // box. It slides inside this clip to keep the cursor in sight,
+            // as Slint's own LineEdit does.
+            Rectangle {
                 x: 12px;
                 width: parent.width - 24px;
-                color: Ice.ink;
-                font-size: 13.5px;
-                vertical-alignment: center;
-                single-line: true;
-                accepted => {
-                    root.add(self.text);
-                    self.text = "";
+                clip: true;
+                input := TextInput {
+                    property <length> scroll-x;
+                    x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.scroll-x));
+                    width: max(parent.width - self.text-cursor-width, self.preferred-width);
+                    height: 100%;
+                    color: Ice.ink;
+                    font-size: 13.5px;
+                    vertical-alignment: center;
+                    single-line: true;
+                    cursor-position-changed(pos) => {
+                        if pos.x + self.scroll-x < 0px {
+                            self.scroll-x = -pos.x;
+                        } else if pos.x + self.scroll-x > parent.width - self.text-cursor-width {
+                            self.scroll-x = parent.width - pos.x - self.text-cursor-width;
+                        }
+                    }
+                    accepted => {
+                        root.add(self.text);
+                        self.text = "";
+                        self.scroll-x = 0px;
+                    }
                 }
             }
             if input.text == "" : Text {
@@ -1108,19 +1140,44 @@ component TodoPage inherits VerticalLayout {
                 vertical-alignment: center;
             }
         }
-        if root.tasks.length > 0 : Hud {
+        if root.tasks.length > 0 && !root.show-log : Hud {
             text: root.open-count == 0 ? "ALL DONE" : root.open-count + " OPEN";
             vertical-alignment: center;
         }
-        if root.tasks.length > root.open-count : Pill { label: "Clear done"; y: (parent.height - self.height) / 2; clicked => { root.clear-done(); } }
+        if root.tasks.length > root.open-count && !root.show-log : Pill { label: "Clear done"; y: (parent.height - self.height) / 2; clicked => { root.clear-done(); } }
+        if root.log.length > 0 : Pill {
+            label: root.show-log ? "Back" : "Log";
+            y: (parent.height - self.height) / 2;
+            clicked => { root.show-log = !root.show-log; }
+        }
     }
-    if root.tasks.length == 0 : Text {
+    if root.tasks.length == 0 && !root.show-log : Text {
         text: "Nothing to do. Type above; drag the dots to move a task up.";
         color: Ice.dim;
         font-size: 13px;
         wrap: word-wrap;
     }
-    Flickable {
+    // Done and cleared, newest first, under a line for each day.
+    if root.show-log : Flickable {
+        interactive: false;
+        content-height: done-rows.preferred-height;
+        done-rows := VerticalLayout {
+            spacing: 2px;
+            for r in root.log : VerticalLayout {
+                spacing: 2px;
+                if r.day != "" : Hud { text: r.day; height: 22px; }
+                HorizontalLayout {
+                    spacing: 10px;
+                    height: 22px;
+                    Text { text: r.time; color: Ice.dim; font-size: 12px; width: 38px; vertical-alignment: center; }
+                    Text { text: r.text; color: Ice.soft; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+    // Wheel only: a mouse drag here is the grip's, never a scroll.
+    if !root.show-log : Flickable {
+        interactive: false;
         content-height: rows.preferred-height;
         rows := VerticalLayout {
             spacing: 1px;
@@ -1209,6 +1266,9 @@ export component Island inherits Window {
     in property <FocusView> pomodoro;
     in property <WaterView> water;
     in property <[TaskRow]> tasks;
+    in property <[DoneRow]> todo-log;
+    // The to-do page shows its log (set at start for snapshots of it).
+    in-out property <bool> todo-show-log;
     in property <[ShelfRow]> shelf;
     in property <bool> drop-hover;
     // "hidden", "compact", "expanded".
@@ -1777,6 +1837,8 @@ export component Island inherits Window {
                         shown: root.active-tab == "todo";
                         TodoPage {
                             tasks: root.tasks;
+                            log: root.todo-log;
+                            show-log <=> root.todo-show-log;
                             add(t) => { root.todo-add(t); }
                             toggle(id) => { root.todo-toggle(id); }
                             remove(id) => { root.todo-remove(id); }

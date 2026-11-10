@@ -255,20 +255,42 @@ pub fn next_reminder(plan: &WaterPlan, day: &WaterDay, now_min: u32, last_remind
 
 // ── To-do ─────────────────────────────────────────────────────────────────────
 
+/// When something happened: the day ("2026-11-10") and the minute after midnight.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Stamp {
+    pub date: String,
+    pub min: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Task {
     pub id: u64,
     pub text: String,
     pub done: bool,
+    /// When it was ticked off (none in lists saved before it was kept).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub done_at: Option<Stamp>,
+}
+
+/// A finished task, kept after it leaves the list.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LoggedTask {
+    pub text: String,
+    pub done: Stamp,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Todo {
     pub tasks: Vec<Task>,
     pub next_id: u64,
+    /// Done tasks that were cleared or removed, oldest first.
+    #[serde(default)]
+    pub log: Vec<LoggedTask>,
 }
 
 pub const TASK_MAX: usize = 200;
+/// Finished tasks kept: months of daily use.
+pub const TODO_LOG_MAX: usize = 500;
 
 impl Todo {
     pub fn add(&mut self, text: &str) -> Option<u64> {
@@ -277,19 +299,21 @@ impl Todo {
             return None;
         }
         self.next_id += 1;
-        self.tasks.push(Task { id: self.next_id, text, done: false });
+        self.tasks.push(Task { id: self.next_id, text, done: false, done_at: None });
         Some(self.next_id)
     }
 
-    /// Done goes to the very bottom (the latest done last); open again, it
-    /// comes back under the open ones.
-    pub fn toggle(&mut self, id: u64) {
+    /// Done goes to the very bottom (the latest done last) and remembers
+    /// `now`; open again, it comes back under the open ones.
+    pub fn toggle(&mut self, id: u64, now: &Stamp) {
         let Some(i) = self.tasks.iter().position(|t| t.id == id) else { return };
         let mut t = self.tasks.remove(i);
         t.done = !t.done;
         if t.done {
+            t.done_at = Some(now.clone());
             self.tasks.push(t);
         } else {
+            t.done_at = None;
             let at = self.open_count();
             self.tasks.insert(at, t);
         }
@@ -303,12 +327,31 @@ impl Todo {
         self.tasks.insert(to, t);
     }
 
-    pub fn clear_done(&mut self) {
-        self.tasks.retain(|t| !t.done);
+    /// The done tasks leave the list for the log (`now` for any saved
+    /// before the time was kept).
+    pub fn clear_done(&mut self, now: &Stamp) {
+        let (done, open): (Vec<Task>, Vec<Task>) = std::mem::take(&mut self.tasks).into_iter().partition(|t| t.done);
+        self.tasks = open;
+        for t in done {
+            self.log_task(t, now);
+        }
     }
 
-    pub fn remove(&mut self, id: u64) {
-        self.tasks.retain(|t| t.id != id);
+    /// A done task removed is logged; an open one is just gone.
+    pub fn remove(&mut self, id: u64, now: &Stamp) {
+        let Some(i) = self.tasks.iter().position(|t| t.id == id) else { return };
+        let t = self.tasks.remove(i);
+        if t.done {
+            self.log_task(t, now);
+        }
+    }
+
+    fn log_task(&mut self, t: Task, now: &Stamp) {
+        self.log.push(LoggedTask { text: t.text, done: t.done_at.unwrap_or_else(|| now.clone()) });
+        if self.log.len() > TODO_LOG_MAX {
+            let extra = self.log.len() - TODO_LOG_MAX;
+            self.log.drain(..extra);
+        }
     }
 
     /// Open first (in their order), then done. The list is kept this way;
@@ -322,6 +365,39 @@ impl Todo {
     pub fn open_count(&self) -> usize {
         self.tasks.iter().filter(|t| !t.done).count()
     }
+}
+
+/// "Today", "Yesterday", "8 Nov", or "8 Nov 2025" in another year, for a
+/// "2026-11-08" date seen on `today`.
+pub fn day_label(date: &str, today: &str) -> String {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    fn ymd(d: &str) -> Option<(i32, u32, u32)> {
+        let mut p = d.split('-');
+        Some((p.next()?.parse().ok()?, p.next()?.parse().ok()?, p.next()?.parse().ok()?))
+    }
+    fn day_before((y, m, d): (i32, u32, u32)) -> (i32, u32, u32) {
+        if d > 1 {
+            return (y, m, d - 1);
+        }
+        let (y, m) = if m == 1 { (y - 1, 12) } else { (y, m - 1) };
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let last = match m {
+            2 if leap => 29,
+            2 => 28,
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        };
+        (y, m, last)
+    }
+    let (Some(day), Some(now)) = (ymd(date), ymd(today)) else { return date.to_string() };
+    if day == now {
+        return "Today".into();
+    }
+    if day == day_before(now) {
+        return "Yesterday".into();
+    }
+    let month = MONTHS[(day.1 as usize).clamp(1, 12) - 1];
+    if day.0 == now.0 { format!("{} {month}", day.2) } else { format!("{} {month} {}", day.2, day.0) }
 }
 
 #[cfg(test)]
@@ -407,33 +483,81 @@ mod tests {
     #[test]
     fn todo_adds_toggles_and_orders() {
         let mut t = Todo::default();
+        let now = Stamp { date: "2026-11-10".into(), min: 600 };
         let a = t.add("Reply to Mika").unwrap();
         let b = t.add("  ").map(|_| 0);
         assert_eq!(b, None, "blank is not a task");
         let c = t.add("Rekap dachi").unwrap();
-        t.toggle(a);
+        t.toggle(a, &now);
         assert_eq!(t.ordered().iter().map(|x| x.id).collect::<Vec<_>>(), [c, a], "open first");
         assert_eq!(t.open_count(), 1);
-        t.remove(a);
+        t.remove(a, &now);
         assert_eq!(t.tasks.len(), 1);
+        assert_eq!(t.log.len(), 1, "a done task removed is logged");
+        t.remove(c, &now);
+        assert_eq!(t.log.len(), 1, "an open one is not");
     }
 
     #[test]
     fn todo_done_sinks_and_open_tasks_reorder() {
         let mut t = Todo::default();
+        let now = Stamp { date: "2026-11-10".into(), min: 600 };
         let ids: Vec<u64> = ["a", "b", "c", "d"].iter().map(|x| t.add(x).unwrap()).collect();
         let order = |t: &Todo| t.tasks.iter().map(|x| x.text.clone()).collect::<String>();
-        t.toggle(ids[0]);
+        t.toggle(ids[0], &now);
         assert_eq!(order(&t), "bcda", "done goes to the bottom");
-        t.toggle(ids[2]);
+        t.toggle(ids[2], &now);
         assert_eq!(order(&t), "bdac", "the latest done last");
         t.move_open(ids[3], 0);
         assert_eq!(order(&t), "dbac", "dragged to the top");
         t.move_open(ids[3], 99);
         assert_eq!(order(&t), "bdac", "never below the done ones");
-        t.toggle(ids[0]);
+        t.toggle(ids[0], &now);
         assert_eq!(order(&t), "bdac", "open again: under the open ones");
-        t.clear_done();
+        t.clear_done(&now);
         assert_eq!(order(&t), "bda");
+    }
+
+    #[test]
+    fn todo_cleared_tasks_go_to_the_log() {
+        let mut t = Todo::default();
+        let at = |min| Stamp { date: "2026-11-10".into(), min };
+        let a = t.add("Cetak poster").unwrap();
+        let b = t.add("Cek banner").unwrap();
+        t.add("Masih open").unwrap();
+        t.toggle(b, &at(540));
+        t.toggle(a, &at(600));
+        t.clear_done(&at(700));
+        assert_eq!(t.tasks.len(), 1);
+        let log: Vec<(&str, u32)> = t.log.iter().map(|l| (l.text.as_str(), l.done.min)).collect();
+        assert_eq!(log, [("Cek banner", 540), ("Cetak poster", 600)], "in the order they were done, at the time they were done");
+        let c = t.add("Reopened").unwrap();
+        t.toggle(c, &at(610));
+        t.toggle(c, &at(620));
+        assert_eq!(t.tasks.iter().find(|x| x.id == c).unwrap().done_at, None, "open again forgets the time");
+        for i in 0..TODO_LOG_MAX {
+            let id = t.add(&format!("x{i}")).unwrap();
+            t.toggle(id, &at(1));
+        }
+        t.clear_done(&at(2));
+        assert_eq!(t.log.len(), TODO_LOG_MAX, "capped, oldest dropped");
+        assert_eq!(t.log[0].text, "x0");
+    }
+
+    #[test]
+    fn todo_saved_before_the_log_still_loads() {
+        let t: Todo = serde_json::from_str(r#"{"tasks":[{"id":1,"text":"a","done":true}],"next_id":1}"#).unwrap();
+        assert!(t.log.is_empty() && t.tasks[0].done_at.is_none());
+    }
+
+    #[test]
+    fn day_labels() {
+        assert_eq!(day_label("2026-11-10", "2026-11-10"), "Today");
+        assert_eq!(day_label("2026-11-09", "2026-11-10"), "Yesterday");
+        assert_eq!(day_label("2026-02-28", "2026-03-01"), "Yesterday");
+        assert_eq!(day_label("2024-02-29", "2024-03-01"), "Yesterday");
+        assert_eq!(day_label("2025-12-31", "2026-01-01"), "Yesterday");
+        assert_eq!(day_label("2026-11-08", "2026-11-10"), "8 Nov");
+        assert_eq!(day_label("2025-11-08", "2026-11-10"), "8 Nov 2025");
     }
 }
