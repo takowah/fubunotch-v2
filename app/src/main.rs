@@ -244,6 +244,34 @@ fn take_drops() {
     refresh(&ui);
 }
 
+/// Puts the island back where it belongs: top centre of its monitor, above
+/// every window, its region matching what it shows. After a monitor came or
+/// went (screen off after idle, a dock, a resolution change), a wake from
+/// sleep, or FubuNotch started again while running.
+fn recover_island(ui: &Island) {
+    place(ui);
+    if let Some(hwnd) = island_hwnd(ui) {
+        popup_style(hwnd);
+    }
+    keep_on_top();
+    if let Some((size, hidden)) = with_state(|state| (state.size_to, state.mode == Mode::Hidden)) {
+        clip_window(ui, size, hidden);
+    }
+    show_changes(ui);
+}
+
+/// Windows said the screens or the power changed: recover once things settle
+/// (Windows moves windows about for a moment after a display change).
+fn recover_soon() {
+    Timer::single_shot(std::time::Duration::from_millis(800), || {
+        if let Some(ui) = ISLAND.with(|i| i.borrow().as_ref().and_then(|w| w.upgrade())) {
+            store::log("island: screens or power changed, placed again");
+            recover_island(&ui);
+            refresh(&ui);
+        }
+    });
+}
+
 fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
     STATE.with(|cell| cell.borrow_mut().as_mut().map(f))
 }
@@ -481,6 +509,16 @@ unsafe extern "system" fn no_caption_paint(
         // -1: change the activation state without repainting the frame.
         WM_NCACTIVATE => unsafe { DefSubclassProc(hwnd, msg, wparam, LPARAM(-1)) },
         WM_NCPAINT => LRESULT(0),
+        // A monitor came or went, or the PC woke: the island may have been
+        // moved off its place or under other windows.
+        WM_DISPLAYCHANGE => unsafe {
+            let _ = slint::invoke_from_event_loop(recover_soon);
+            DefSubclassProc(hwnd, msg, wparam, lparam)
+        },
+        WM_POWERBROADCAST if matches!(wparam.0 as u32, PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND) => unsafe {
+            let _ = slint::invoke_from_event_loop(recover_soon);
+            DefSubclassProc(hwnd, msg, wparam, lparam)
+        },
         // winit rewrites the styles from its own flags now and then (the
         // caption comes back with them): keep them a popup's, whoever asks.
         WM_STYLECHANGING => unsafe {
@@ -860,6 +898,7 @@ fn poke_mascot(ui: &Island) {
 }
 
 fn apply(ui: &Island, event: Event) {
+    let show = matches!(event, Event::Show);
     with_state(|state| {
         let now = now_ms(state.started);
         match event {
@@ -872,8 +911,18 @@ fn apply(ui: &Island, event: Event) {
             }
             Event::Claude { event, payload, reply } => on_claude(state, &event, &payload, reply, now),
             Event::Ytm(ytm) => state.ytm = Some((ytm, now)),
+            Event::Show => {
+                if state.mode == Mode::Hidden {
+                    state.mode = Mode::Compact;
+                    state.hide_at = Some(now + hide_after(&state.settings));
+                }
+            }
         }
     });
+    if show {
+        store::log("island: started again while running, brought back");
+        recover_island(ui);
+    }
     refresh(ui);
 }
 
@@ -2015,6 +2064,13 @@ fn ask_claude_hooks(ui: &Island, install: bool) {
 // ── Start ───────────────────────────────────────────────────────────────────
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Release builds abort on a panic with no window to say so: leave a line
+    // in the log first, so a crash can be traced.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        store::log(&format!("panic: {info}"));
+        default_hook(info);
+    }));
     // A borderless tool window: no taskbar button, never takes focus, on top.
     // Software rendering: ~17 MB RAM against ~71 MB with an OpenGL context,
     // and the island is small enough that the CPU never notices.
@@ -2669,14 +2725,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let token = island_webhook::load_or_create_token(&store::data_dir())?;
     let weak = ui.as_weak();
-    island_webhook::spawn(island_webhook::PORT, token, move |event| {
+    let served = island_webhook::spawn(island_webhook::PORT, token.clone(), move |event| {
         let weak = weak.clone();
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(ui) = weak.upgrade() {
                 apply(&ui, event);
             }
         });
-    })?;
+    });
+    if let Err(err) = served {
+        // The port is taken: FubuNotch is already running (its island hidden,
+        // moved off screen, or under something). Bring that one back rather
+        // than quit without a word.
+        let shown = island_webhook::ask_to_show(island_webhook::PORT, &token);
+        store::log(&format!("start: port {} taken ({err}); running copy {}", island_webhook::PORT, if shown { "brought back" } else { "did not answer" }));
+        if shown {
+            return Ok(());
+        }
+        return Err(err.into());
+    }
 
     place(&ui);
     ui.show()?;

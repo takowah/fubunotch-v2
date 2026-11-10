@@ -75,6 +75,9 @@ pub enum Event {
     Claude { event: String, payload: serde_json::Value, reply: Option<Reply> },
     /// The YouTube Music extension's report.
     Ytm(YtmState),
+    /// FubuNotch was started again while running: the island comes back
+    /// (placed again, on top, out of hiding) instead of a second copy.
+    Show,
 }
 
 impl PartialEq for Event {
@@ -84,6 +87,7 @@ impl PartialEq for Event {
             (Event::End(a), Event::End(b)) => a == b,
             (Event::Claude { event: a, payload: pa, .. }, Event::Claude { event: b, payload: pb, .. }) => a == b && pa == pb,
             (Event::Ytm(a), Event::Ytm(b)) => a == b,
+            (Event::Show, Event::Show) => true,
             _ => false,
         }
     }
@@ -178,6 +182,7 @@ pub fn handle(req: &Request, token: &str) -> (Response, Option<Event>) {
                 Err(err) => reply(400, format!("not JSON: {err}")),
             }
         }
+        ("POST", "/show") => (Response { status: 200, body: "ok".into() }, Some(Event::Show)),
         ("DELETE", path) if path.starts_with("/activity/") => {
             let id = &path["/activity/".len()..];
             if id.is_empty() {
@@ -187,6 +192,23 @@ pub fn handle(req: &Request, token: &str) -> (Response, Option<Event>) {
         }
         _ => reply(404, "not found"),
     }
+}
+
+/// Asks the copy already running on `port` to bring its island back. True
+/// when it said yes; quick either way (a copy that doesn't answer is skipped).
+pub fn ask_to_show(port: u16, token: &str) -> bool {
+    use std::io::Write;
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else { return false };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
+    let head = format!("POST /show HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    if stream.write_all(head.as_bytes()).is_err() {
+        return false;
+    }
+    let mut answer = Vec::new();
+    let _ = stream.take(4096).read_to_end(&mut answer);
+    String::from_utf8_lossy(&answer).lines().next().is_some_and(|l| l.contains(" 200"))
 }
 
 /// "%2F" → "/" (ids may hold anything).
@@ -325,6 +347,29 @@ mod tests {
         ytm_command("shuffle");
         assert_eq!(ytm_next(Duration::from_millis(10)).as_deref(), Some("shuffle"));
         assert_eq!(ytm_next(Duration::from_millis(10)), None, "nothing more: an empty answer after the wait");
+    }
+
+    #[test]
+    fn show_needs_the_token() {
+        let show = |auth| handle(&Request { origin: None, method: "POST", path: "/show", authorization: auth, content_type: None, body: b"" }, TOKEN);
+        let good = bearer();
+        let (r, e) = show(Some(&good));
+        assert_eq!((r.status, e), (200, Some(Event::Show)));
+        assert_eq!(show(None).0.status, 401);
+    }
+
+    #[test]
+    fn a_second_copy_reaches_the_first() {
+        let port = 48100 + (std::process::id() % 90) as u16;
+        let (tx, rx) = channel();
+        spawn(port, TOKEN.into(), move |e| {
+            let _ = tx.send(e);
+        })
+        .unwrap();
+        assert!(ask_to_show(port, TOKEN));
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).ok(), Some(Event::Show));
+        assert!(!ask_to_show(port, "wrong"), "a wrong token is refused");
+        assert!(!ask_to_show(port + 1, TOKEN), "nobody there: false, quickly");
     }
 
     #[test]
