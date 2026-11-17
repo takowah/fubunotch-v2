@@ -20,6 +20,7 @@ mod notif;
 mod system;
 mod shelf;
 mod snapshot;
+mod accounts;
 mod store;
 mod theme;
 
@@ -162,6 +163,8 @@ struct State {
     size_to: (f32, f32),
     region_timer: Timer,
     active_tab: String,
+    /// The account NotchDeck was just asked to switch to (shown as busy).
+    account_pending: String,
     settings: Settings,
     /// What is playing (the Music module), and its artwork as an image.
     music: music::Snapshot,
@@ -600,6 +603,34 @@ fn morph_to(ui: &Island, state: &mut State, target: (f32, f32)) {
 }
 
 /// Shows what the arbiter and the modules say, sizes the island, sets the one timer.
+/// The Accounts tab: NotchDeck's accounts, one group per app.
+fn set_accounts(ui: &Island, pending: &str) {
+    let list = accounts::load();
+    let groups: Vec<AccountGroup> = accounts::SERVICES
+        .iter()
+        .filter_map(|(service, title)| {
+            let rows: Vec<AccountRow> = list
+                .iter()
+                .filter(|a| a.service == *service)
+                .map(|a| AccountRow {
+                    id: a.id.as_str().into(),
+                    name: a.name.as_str().into(),
+                    initial: a.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
+                    // Once NotchDeck has switched, the pending one is the active one.
+                    active: a.active,
+                })
+                .collect();
+            (!rows.is_empty()).then(|| AccountGroup { title: (*title).into(), accounts: ModelRc::new(VecModel::from(rows)) })
+        })
+        .collect();
+    let pending = if list.iter().any(|a| a.id == pending && a.active) { "" } else { pending };
+    ui.set_account_pending(pending.into());
+    if groups.is_empty() {
+        ui.set_account_note(if accounts::installed() { "No accounts in NotchDeck yet." } else { "Install NotchDeck to switch Claude and Codex accounts here." }.into());
+    }
+    ui.set_account_groups(ModelRc::new(VecModel::from(groups)));
+}
+
 fn refresh(ui: &Island) {
     with_state(|state| {
         let now = now_ms(state.started);
@@ -684,6 +715,9 @@ fn refresh(ui: &Island) {
         ui.set_todo_open(state.data.todo.open_count() as i32);
         let shelf_rows: Vec<ShelfRow> = state.data.shelf.iter().map(|f| ShelfRow { name: f.name().into(), detail: f.detail().into() }).collect();
         ui.set_shelf(ModelRc::new(VecModel::from(shelf_rows)));
+        if state.active_tab == "accounts" {
+            set_accounts(ui, &state.account_pending);
+        }
         ui.set_drop_hover(state.drop_hover);
         *NOTIF_APPS.lock().unwrap_or_else(|e| e.into_inner()) = state.settings.notifications.filter();
         let rating = state.data.ratings.get(&song_key(&state.music)).copied().unwrap_or(0);
@@ -2146,6 +2180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             size_to: (0.0, 0.0),
             region_timer: Timer::default(),
             active_tab: first_tab,
+            account_pending: String::new(),
             settings,
             music: music::Snapshot::default(),
             music_art: None,
@@ -2223,6 +2258,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
         refresh(&ui);
+    });
+
+    let weak = ui.as_weak();
+    ui.on_account_clicked(move |id| {
+        let Some(ui) = weak.upgrade() else { return };
+        if let Err(e) = accounts::switch(id.as_str()) {
+            store::log(&format!("accounts: switch {id} failed: {e}"));
+            ui.set_account_note(format!("Couldn't switch: {e}").into());
+            return;
+        }
+        with_state(|state| state.account_pending = id.to_string());
+        refresh(&ui);
+        // NotchDeck writes its state within a second or so (Claude Desktop asks first): look again, then clear.
+        for (ms, last) in [(1200u64, false), (3500, false), (8000, true)] {
+            let weak = ui.as_weak();
+            Timer::single_shot(std::time::Duration::from_millis(ms), move || {
+                let Some(ui) = weak.upgrade() else { return };
+                if last {
+                    with_state(|state| state.account_pending.clear());
+                }
+                refresh(&ui);
+            });
+        }
     });
 
     let weak = ui.as_weak();

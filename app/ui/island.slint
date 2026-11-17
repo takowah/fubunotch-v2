@@ -35,6 +35,20 @@ export struct TabInfo {
     label: string,
 }
 
+// One account NotchDeck manages (Accounts tab).
+export struct AccountRow {
+    id: string,
+    name: string,
+    initial: string,
+    active: bool,
+}
+
+// One column of the Accounts tab: an app and its accounts.
+export struct AccountGroup {
+    title: string,
+    accounts: [AccountRow],
+}
+
 export struct RoundRow {
     time: string,
     length: string,
@@ -819,6 +833,71 @@ component FocusPage inherits HorizontalLayout {
     }
 }
 
+// Accounts: one column per app (Claude Desktop, Claude Code, Codex). The lit
+// row is the account in use; a click on another asks NotchDeck to switch.
+component AccountChip inherits Rectangle {
+    in property <AccountRow> account;
+    in property <bool> pending;
+    callback clicked();
+    height: 34px;
+    border-radius: 12px;
+    background: account.active ? Ice.glow.with-alpha(0.24)
+        : area.has-hover ? Ice.ink.with-alpha(0.10) : Ice.ink.with-alpha(0.045);
+    border-width: account.active ? 1px : 0px;
+    border-color: Ice.glow.with-alpha(0.7);
+    animate background { duration: 180ms; easing: ease-out; }
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 10px;
+        spacing: 8px;
+        Rectangle {
+            width: 22px;
+            height: 22px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 8px;
+            background: account.active ? Ice.glow : Ice.ink.with-alpha(0.14);
+            animate background { duration: 180ms; }
+            Text { text: account.initial; color: account.active ? Ice.body-lo : Ice.ink; font-size: 11px; font-weight: 800; }
+        }
+        Text {
+            text: account.name;
+            color: account.active ? Ice.ink : Ice.ink.with-alpha(0.82);
+            font-size: 12px;
+            font-weight: account.active ? 700 : 500;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if account.active : Dot { accent: Ice.glow; y: (parent.height - self.height) / 2; }
+        if root.pending : Text { text: "…"; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
+    }
+    area := TouchArea { enabled: !root.account.active; mouse-cursor: root.account.active ? default : pointer; clicked => { root.clicked(); } }
+}
+
+component AccountsPage inherits HorizontalLayout {
+    in property <[AccountGroup]> groups;
+    in property <string> pending;
+    in property <string> note;
+    callback clicked(string);
+    spacing: 14px;
+    if root.groups.length == 0 : VerticalLayout {
+        alignment: center;
+        Text { text: root.note; color: Ice.dim; font-size: 11.5px; horizontal-alignment: center; wrap: word-wrap; }
+    }
+    // Even columns, whatever the names: a narrow column cuts its names short.
+    property <length> col-w: (root.width - root.spacing * max(0, root.groups.length - 1)) / max(1, root.groups.length);
+    for g in root.groups : Panel {
+        width: root.col-w;
+        VerticalLayout {
+            padding: 10px;
+            alignment: start;
+            spacing: 6px;
+            Hud { text: g.title; height: 16px; }
+            for a in g.accounts : AccountChip { account: a; pending: root.pending == a.id; clicked => { root.clicked(a.id); } }
+        }
+    }
+}
+
 // Water, after v1: a ring toward the day's goal, the next reminder and the
 // active hours, a glass at a time, and today by the hour.
 component WaterPage inherits HorizontalLayout {
@@ -1270,6 +1349,10 @@ export component Island inherits Window {
     // The to-do page shows its log (set at start for snapshots of it).
     in-out property <bool> todo-show-log;
     in property <[ShelfRow]> shelf;
+    in property <[AccountGroup]> account-groups;
+    in property <string> account-pending;
+    in property <string> account-note;
+    callback account-clicked(string);
     in property <bool> drop-hover;
     // "hidden", "compact", "expanded".
     in property <string> mode: "compact";
@@ -1856,6 +1939,15 @@ export component Island inherits Window {
                             copy(i) => { root.shelf-copy(i); }
                             remove(i) => { root.shelf-remove(i); }
                             clear => { root.shelf-clear(); }
+                        }
+                    }
+                    Page {
+                        shown: root.active-tab == "accounts";
+                        AccountsPage {
+                            groups: root.account-groups;
+                            pending: root.account-pending;
+                            note: root.account-note;
+                            clicked(id) => { root.account-clicked(id); }
                         }
                     }
                     Page {
