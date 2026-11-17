@@ -356,26 +356,61 @@ component Equalizer inherits HorizontalLayout {
     }
 }
 
+// The tab icons, on a 24 x 24 grid (stroked).
+global TabIcons {
+    public pure function of(id: string) -> string {
+        return id == "home" ? "M 3 11.5 L 12 4 L 21 11.5 M 5.5 10 V 20 H 18.5 V 10"
+            : id == "music" ? "M 9 18 V 5.5 L 20 3.5 V 16 M 9 18 A 3 3 0 1 1 3 18 A 3 3 0 1 1 9 18 Z M 20 16 A 3 3 0 1 1 14 16 A 3 3 0 1 1 20 16 Z"
+            : id == "notifications" ? "M 6 16 V 11 A 6 6 0 0 1 18 11 V 16 L 20 18 H 4 Z M 10 21 H 14"
+            : id == "focus" ? "M 12 21 A 8 8 0 1 0 12 5 A 8 8 0 1 0 12 21 Z M 12 9 V 13 L 15 15 M 10 2 H 14"
+            : id == "water" ? "M 12 3 C 12 3 5.5 10.5 5.5 14.5 A 6.5 6.5 0 0 0 18.5 14.5 C 18.5 10.5 12 3 12 3 Z"
+            : id == "todo" ? "M 4 6 L 5.5 7.5 L 8 5 M 11 6 H 20 M 4 12 L 5.5 13.5 L 8 11 M 11 12 H 20 M 4 18 L 5.5 19.5 L 8 17 M 11 18 H 20"
+            : id == "shelf" ? "M 3 13 L 6 5 H 18 L 21 13 V 19 H 3 Z M 3 13 H 8 L 9.5 15.5 H 14.5 L 16 13 H 21"
+            : id == "accounts" ? "M 9 11 A 3.5 3.5 0 1 0 9 4 A 3.5 3.5 0 1 0 9 11 Z M 2.5 20 C 2.5 16 5.5 14 9 14 C 12.5 14 15.5 16 15.5 20 M 16 4.5 A 3.2 3.2 0 0 1 16 10.8 M 18 14.4 C 20.2 15 21.5 17 21.5 20"
+            : "M 5 5 H 19 V 19 H 5 Z";
+    }
+}
+
+// A tab: an icon (Home also its name), on a filled pill when chosen.
 component Chip inherits Rectangle {
+    in property <string> id;
     in property <string> label;
     in property <bool> active;
+    in property <bool> show-label;
     in property <color> accent: Ice.glow;
     callback clicked();
-    // Space Mono runs wide: a size smaller and less padding keep the row (and ⚙) inside.
-    width: t.preferred-width + 10px;
-    height: 24px;
-    border-radius: 12px;
-    background: active ? accent.with-alpha(0.20) : (area.has-hover ? Ice.ink.with-alpha(0.07) : transparent);
-    border-width: 1px;
-    border-color: active ? accent.with-alpha(0.65) : transparent;
-    animate background, border-color { duration: 200ms; }
-    t := Text {
-        text: label;
-        color: active ? Ice.ink : Ice.dim;
-        font-size: 10.5px;
-        letter-spacing: 0.3px;
-        font-weight: active ? 700 : 500;
-        animate color { duration: 200ms; }
+    width: root.show-label ? t.preferred-width + 44px : 36px;
+    height: 32px;
+    border-radius: 10px;
+    background: active ? Ice.ink.with-alpha(0.16) : (area.has-hover ? Ice.ink.with-alpha(0.07) : transparent);
+    animate background { duration: 200ms; easing: ease-out; }
+    HorizontalLayout {
+        padding-left: root.show-label ? 11px : 0px;
+        alignment: root.show-label ? start : center;
+        spacing: root.show-label ? 7px : 0px;
+        Path {
+            width: 17px;
+            height: 17px;
+            y: (parent.height - self.height) / 2;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: TabIcons.of(root.id);
+            stroke: root.active ? Ice.ink : Ice.dim;
+            stroke-width: 2px;
+            fill: transparent;
+            animate stroke { duration: 200ms; }
+        }
+        t := Text {
+            visible: root.show-label;
+            // A hidden text still takes room in a layout: none when the tab is an icon.
+            width: root.show-label ? self.preferred-width : 0px;
+            text: root.label;
+            color: root.active ? Ice.ink : Ice.dim;
+            font-size: 13px;
+            font-weight: 700;
+            vertical-alignment: center;
+            animate color { duration: 200ms; }
+        }
     }
     area := TouchArea { clicked => { root.clicked(); } }
 }
@@ -403,6 +438,7 @@ global Icons {
     out property <string> next: "M 5 5 L 15 12 L 5 19 Z M 18.5 5 V 19";
     out property <string> play: "M 8 4.5 L 19.5 12 L 8 19.5 Z";
     out property <string> pause: "M 8 5 V 19 M 16 5 V 19";
+    out property <string> gear: "M 12 15 A 3 3 0 1 0 12 9 A 3 3 0 1 0 12 15 Z M 12 2.5 V 5 M 12 19 V 21.5 M 2.5 12 H 5 M 19 12 H 21.5 M 5.3 5.3 L 7 7 M 17 17 L 18.7 18.7 M 5.3 18.7 L 7 17 M 17 7 L 18.7 5.3";
     out property <string> moon: "M 20 14.5 A 8.5 8.5 0 1 1 9.5 4 A 6.8 6.8 0 0 0 20 14.5 Z";
     // A screen on its stand: "Watch in island".
     out property <string> tv: "M 3 6 H 21 V 17 H 3 Z M 8 21 H 16 M 12 17 V 21";
@@ -1324,7 +1360,7 @@ component NotifPage inherits VerticalLayout {
 // ── The island ───────────────────────────────────────────────────────────────
 
 export component Island inherits Window {
-    default-font-family: "Space Mono";
+    default-font-family: "Segoe UI";
     title: "FubuNotch v2";
     no-frame: true;
     always-on-top: true;
@@ -1422,7 +1458,7 @@ export component Island inherits Window {
     property <length> island-w: target-w;
     property <length> island-h: target-h;
     animate island-w, island-h { duration: Ice.morph; easing: cubic-bezier(0.22, 1.18, 0.36, 1); }
-    property <length> island-r: expanded ? 28px : root.compact && (root.notice || (root.line-held && (root.line-notice || root.capsule-long))) ? 22px : self.island-h / 2;
+    property <length> island-r: expanded ? 36px : root.compact && (root.notice || (root.line-held && (root.line-notice || root.capsule-long))) ? 22px : self.island-h / 2;
     animate island-r { duration: Ice.morph; easing: ease-out; }
     property <length> ix: (root.width - self.island-w) / 2;
     // The island takes the cover's colour while it shows the song (Music, or
@@ -1795,18 +1831,19 @@ export component Island inherits Window {
 
                 HorizontalLayout {
                     spacing: 2px;
-                    height: 28px;
+                    height: 36px;
                     Panel {
                         border-radius: 14px;
                         HorizontalLayout {
                     padding: 2px;
                     spacing: 2px;
-                    Chip { accent: root.tint; label: "Home"; active: root.active-tab == "home"; clicked => { root.tab-clicked("home"); } }
-                    for t in root.tabs : Chip { accent: root.tint; label: t.label; active: root.active-tab == t.id; clicked => { root.tab-clicked(t.id); } }
+                    Chip { id: "home"; show-label: true; accent: root.tint; label: "Home"; active: root.active-tab == "home"; clicked => { root.tab-clicked("home"); } }
+                    for t in root.tabs : Chip { id: t.id; accent: root.tint; label: t.label; active: root.active-tab == t.id; clicked => { root.tab-clicked(t.id); } }
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    Hud { text: root.clock; color: root.tint.with-alpha(0.85); }
+                    Text { text: root.clock; color: Ice.ink; font-size: 16px; font-weight: 800; vertical-alignment: center; }
+                    Rectangle { width: 8px; }
                     Rectangle { width: root.watching ? 0px : 4px; }
                     // The docked video: click keeps it shown or lets it follow
                     // the island; right-click sends it back to its tab.
@@ -1818,7 +1855,7 @@ export component Island inherits Window {
                     }
                     // Do not disturb, beside Settings.
                     IconButton { icon: Icons.moon; size: 28px; icon-size: 15px; stroke-width: 1.8px; on: root.dnd; filled: root.dnd; clicked => { root.dnd-clicked(); } }
-                    RoundButton { glyph: "⚙"; size: 28px; glyph-size: 16px; clicked => { root.open-settings(); } }
+                    IconButton { icon: Icons.gear; size: 32px; icon-size: 18px; stroke-width: 1.8px; clicked => { root.open-settings(); } }
                 }
 
                 Rectangle {

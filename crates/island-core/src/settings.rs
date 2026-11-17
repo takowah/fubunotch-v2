@@ -98,9 +98,9 @@ impl Default for SystemSettings {
     }
 }
 
-/// The island's look: a theme (a hololive member's colours and pixel
-/// mascot) and, if the user chose one, a picture behind it.
-pub const THEMES: &[&str] = &["fubuki", "mio", "towa", "azki", "suisei"];
+/// The island's look: a theme (Graphite, neutral, or a hololive member's
+/// colours and pixel mascot) and, if the user chose one, a picture behind it.
+pub const THEMES: &[&str] = &["graphite", "fubuki", "mio", "towa", "azki", "suisei"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -117,7 +117,7 @@ pub struct LookSettings {
 
 impl Default for LookSettings {
     fn default() -> Self {
-        LookSettings { mascot: true, theme: "fubuki".into(), background: String::new(), background_dim: 0.55 }
+        LookSettings { mascot: false, theme: "graphite".into(), background: String::new(), background_dim: 0.55 }
     }
 }
 
@@ -375,7 +375,7 @@ mod tests {
         assert_eq!(parse_hh_mm("24:00"), None);
         let f = FocusSettings { focus_min: 0, short_min: 999, long_min: 15, rounds: 40 }.plan();
         assert_eq!((f.focus_min, f.short_min, f.rounds), (1, 60, 12));
-        assert_eq!(LookSettings { theme: "pekora".into(), ..Default::default() }.theme(), "fubuki");
+        assert_eq!(LookSettings { theme: "pekora".into(), ..Default::default() }.theme(), "graphite");
     }
 
     #[test]

@@ -26,7 +26,9 @@ pub fn palette(theme: &str) -> Palette {
         // Suisei: midnight blue and comet blue.
         "suisei" => Palette { body: 0x0a1030, body_lo: 0x070b22, body_hi: 0x142050, ink: 0xeef3ff, dim: 0x98a6c8, glow: 0x6aa0ff, frost: 0xc9dbff, deep: 0x2f55d8 },
         // Fubuki icy: deep navy, ice white, cyan.
-        _ => Palette { body: 0x0b1424, body_lo: 0x091020, body_hi: 0x12203a, ink: 0xe8f6ff, dim: 0x8fa7bd, glow: 0x5fd4ff, frost: 0xb8e8ff, deep: 0x3d74e0 },
+        "fubuki" => Palette { body: 0x0b1424, body_lo: 0x091020, body_hi: 0x12203a, ink: 0xe8f6ff, dim: 0x8fa7bd, glow: 0x5fd4ff, frost: 0xb8e8ff, deep: 0x3d74e0 },
+        // Graphite: neutral black and white; the song's colour is the only tint.
+        _ => Palette { body: 0x050505, body_lo: 0x000000, body_hi: 0x1c1c1e, ink: 0xffffff, dim: 0x8e8e93, glow: 0xf2f2f7, frost: 0xffffff, deep: 0x636366 },
     }
 }
 

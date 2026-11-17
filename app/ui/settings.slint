@@ -263,7 +263,7 @@ component ThemeCard inherits Rectangle {
 // ── The window ───────────────────────────────────────────────────────────────
 
 export component SettingsWindow inherits Window {
-    default-font-family: "Space Mono";
+    default-font-family: "Segoe UI";
     title: "FubuNotch v2 · Settings";
     preferred-width: 900px;
     preferred-height: 600px;
@@ -409,6 +409,7 @@ export component SettingsWindow inherits Window {
                 if root.page == "look" : HorizontalLayout {
                     spacing: 8px;
                     alignment: start;
+                    ThemeCard { id: "graphite"; name: "Graphite"; c1: #f2f2f7; c2: #1c1c1e; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
                     ThemeCard { id: "fubuki"; name: "Fubuki"; c1: #5fd4ff; c2: #f4f6fb; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
                     ThemeCard { id: "mio"; name: "Mio"; c1: #ff5a6e; c2: #2a2228; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
                     ThemeCard { id: "towa"; name: "Towa"; c1: #c08cff; c2: #ff7ac1; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
@@ -604,7 +605,7 @@ export component Tray inherits SystemTrayIcon {
 
 /// A yes/no question before something is written outside FubuNotch.
 export component ConfirmWindow inherits Window {
-    default-font-family: "Space Mono";
+    default-font-family: "Segoe UI";
     title: "FubuNotch v2";
     preferred-width: 480px;
     in property <bool> repaint;
