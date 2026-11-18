@@ -1136,21 +1136,57 @@ component LyricsPage inherits Rectangle {
     in property <bool> japanese;
     in-out property <bool> furigana: true;
     in-out property <bool> romaji: true;
+    in property <bool> live;
     callback command(string);
-    // The song on the left (cover, title, artist), the lines beside it.
-    property <length> side: 196px;
+    // The player on the left (cover and title, progress, controls), the lines beside it.
+    property <length> side: 280px;
+    property <length> pad: 16px;
+    property <length> cover: 64px;
     Tinted { width: parent.width; height: parent.height; tint: root.accent; lit: true; }
-    Cover { x: 16px; y: 16px; size: 72px; glyph-size: 24px; music: root.music; accent: root.accent; }
+    Cover { x: root.pad; y: root.pad; size: root.cover; glyph-size: 24px; music: root.music; accent: root.accent; }
     VerticalLayout {
-        x: 16px;
-        y: 16px + 72px + 10px;
-        width: root.side - 16px - 12px;
-        height: root.height - self.y - 14px;
-        alignment: start;
-        spacing: 1px;
-        Text { text: root.music.title; color: Mini.ink; font-size: 13px; font-weight: 700; wrap: word-wrap; max-height: 36px; overflow: elide; }
-        Text { text: root.music.artist; color: Mini.text-3; font-size: 12px; overflow: elide; }
+        x: root.pad + root.cover + 12px;
+        y: root.pad;
+        width: root.side - self.x - 14px;
+        height: root.cover;
+        alignment: center;
+        spacing: 2px;
+        HorizontalLayout {
+            spacing: 6px;
+            Text { text: root.music.title; color: Mini.ink; font-size: 15px; font-weight: 700; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+            Equalizer { playing: root.music.playing; tint: Paint.readable(root.accent); y: (parent.height - self.height) / 2; }
+        }
+        Text { text: root.music.artist; color: Mini.text-3; font-size: 12.5px; overflow: elide; }
         if root.music.lyrics-shift != "" : Text { text: root.music.lyrics-shift; color: Mini.label; font-size: 10.5px; overflow: elide; }
+    }
+    // Progress: time, the wave, what's left.
+    HorizontalLayout {
+        x: root.pad;
+        y: root.pad + root.cover + 12px;
+        width: root.side - root.pad - 14px;
+        height: 22px;
+        Text { text: root.music.elapsed; color: Mini.text-2; font-size: 11px; min-width: 34px; vertical-alignment: center; }
+        WaveBar {
+            horizontal-stretch: 1;
+            y: 22px / 2 + 2px - self.height;
+            value: root.music.position;
+            playing: root.music.playing;
+            live: root.live;
+            tint: root.accent;
+        }
+        Rectangle { width: 8px; }
+        Text { text: root.music.remaining; color: Mini.text-2; font-size: 11px; min-width: 34px; horizontal-alignment: right; vertical-alignment: center; }
+    }
+    // Controls, centred under the progress.
+    HorizontalLayout {
+        x: root.pad + (root.side - root.pad - 14px - self.preferred-width) / 2;
+        y: root.pad + root.cover + 12px + 22px + 8px;
+        width: self.preferred-width;
+        height: 36px;
+        spacing: 10px;
+        MediaButton { width: 36px; height: 36px; border-radius: 18px; glyph: Glyphs.prev; glyph-size: 13px; clicked => { root.command("previous"); } }
+        MediaButton { width: 36px; height: 36px; border-radius: 18px; glyph: root.music.playing ? Glyphs.pause : Glyphs.play; glyph-size: 16px; ring: true; clicked => { root.command("play-pause"); } }
+        MediaButton { width: 36px; height: 36px; border-radius: 18px; glyph: Glyphs.next; glyph-size: 13px; clicked => { root.command("next"); } }
     }
     Rectangle { x: root.side; y: 16px; width: 1px; height: root.height - 32px; background: Mini.wash.with-alpha(min(1, 0.078 * Mini.wk)); }
     view := Rectangle {
@@ -1430,6 +1466,8 @@ export component Island inherits Window {
     background: transparent;
 
     in property <bool> has-front;
+    // The song keeps the capsule while Claude Code only runs a tool.
+    in property <bool> song-over;
     // The front is a notification with a message: the capsule becomes a small card.
     in property <bool> notice;
     // That notice is the music's (a new song, play, pause): the song's card.
@@ -1544,7 +1582,7 @@ export component Island inherits Window {
     property <bool> show-media: root.compact && !root.line-held && root.notice && root.music-notice;
     property <bool> show-notif: root.compact && !root.line-held && root.notice && !root.music-notice;
     property <bool> show-ask: root.compact && !root.line-held && !root.notice && root.has-front && root.front.kind == "ask";
-    property <bool> show-song: root.compact && !root.line-held && !root.notice && root.has-front && root.front.kind == "ambient" && root.music.has-session;
+    property <bool> show-song: root.compact && !root.line-held && !root.notice && root.has-front && (root.front.kind == "ambient" || root.song-over) && root.music.has-session;
     property <bool> show-one: root.compact && !root.line-held && !root.notice && !root.show-ask && !root.show-song;
     // Springs: the size, and the radius.
     property <length> island-w: target-w;
@@ -1736,16 +1774,16 @@ export component Island inherits Window {
                 visible: self.opacity > 0.01;
                 property <length> pill-h: root.show-line && root.line-notice ? self.height - (root.front.body != "" ? 54px : 30px) : self.height;
                 Cover {
-                    x: 5px;
+                    x: 10px;
                     y: (parent.pill-h - self.height) / 2;
-                    size: 19px;
-                    glyph-size: 11px;
-                    border-radius: 6px;
+                    size: 30px;
+                    glyph-size: 15px;
+                    border-radius: 8px;
                     music: root.music;
                     accent: root.song-accent;
                 }
                 Equalizer {
-                    x: parent.width - 9px - self.width;
+                    x: parent.width - 16px - self.width;
                     y: (parent.pill-h - self.height) / 2;
                     bar-w: 3px * 0.95;
                     bar-h: 12px * 0.95;
@@ -1754,8 +1792,8 @@ export component Island inherits Window {
                 }
                 // Between the cover and the bars.
                 lyric-box := Rectangle {
-                    x: 24px + 7px;
-                    width: parent.width - self.x - 7px - 9px - 3 * 5px * 0.95;
+                    x: 10px + 30px + 12px;
+                    width: parent.width - self.x - 12px - 16px - 3 * 5px * 0.95;
                     height: parent.pill-h;
                     property <bool> lyric: root.show-line && root.capsule-line != "";
                     if !lyric-box.lyric : Marquee {
@@ -1770,19 +1808,21 @@ export component Island inherits Window {
                     // The line: the song's colour lifted toward white, made
                     // smaller when it is too long for the widest capsule.
                     line-probe := Text { visible: false; text: root.capsule-line; font-size: 11.5px * Mini.k; font-weight: 600; }
+                    ro-probe := Text { visible: false; text: root.capsule-romaji; font-size: 8.5px * Mini.k; }
                     if lyric-box.lyric : VerticalLayout {
                         alignment: center;
+                        spacing: 1px;
                         Text {
                             text: root.capsule-line;
-                            color: Paint.lift(root.song-accent, 0.55);
+                            color: Mini.ink;
                             font-size: 11.5px * Mini.k * min(1, lyric-box.width / max(1px, line-probe.preferred-width));
                             font-weight: 600;
                             horizontal-alignment: center;
                         }
                         if root.capsule-romaji != "" : Text {
                             text: root.capsule-romaji;
-                            color: Paint.lift(root.song-accent, 0.55).with-alpha(0.85);
-                            font-size: 8.5px * Mini.k * min(1, lyric-box.width / max(1px, line-probe.preferred-width));
+                            color: Mini.text-2;
+                            font-size: 8.5px * Mini.k * min(1, lyric-box.width / max(1px, ro-probe.preferred-width));
                             horizontal-alignment: center;
                         }
                     }
@@ -1953,8 +1993,18 @@ export component Island inherits Window {
                         }
                     }
                     Page {
-                        shown: root.active-tab == "music";
-                        MusicWide {
+                        shown: root.active-tab == "music" || root.active-tab == "lyrics";
+                        if root.music.lyrics.length > 0 : LyricsPage {
+                            width: parent.width;
+                            height: parent.height;
+                            music: root.music;
+                            accent: root.song-accent;
+                            held: root.held;
+                            japanese: root.lyrics-japanese;
+                            live: root.expanded && (root.active-tab == "music" || root.active-tab == "lyrics");
+                            command(c) => { root.music-command(c); }
+                        }
+                        if root.music.lyrics.length == 0 : MusicWide {
                             width: parent.width;
                             height: parent.height;
                             music: root.music;
@@ -1962,18 +2012,6 @@ export component Island inherits Window {
                             volume: root.volume;
                             live: root.expanded && root.active-tab == "music";
                             line-held: root.line-held;
-                            command(c) => { root.music-command(c); }
-                        }
-                    }
-                    Page {
-                        shown: root.active-tab == "lyrics";
-                        LyricsPage {
-                            width: parent.width;
-                            height: parent.height;
-                            music: root.music;
-                            accent: root.song-accent;
-                            held: root.held;
-                            japanese: root.lyrics-japanese;
                             command(c) => { root.music-command(c); }
                         }
                     }
