@@ -2546,7 +2546,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let was_hidden = with_state(|state| {
             let was_hidden = state.mode == Mode::Hidden;
             let onto_video = !over && state.watching.as_ref().and_then(|w| w.hwnd).is_some_and(|h| watch::pointer_over(windows::Win32::Foundation::HWND(h as *mut core::ffi::c_void)));
-            if over || inside {
+            // A question from Claude Code stays compact under the pointer: its
+            // Allow / Deny are in the capsule, and opening would move them away.
+            let asking = state.mode == Mode::Compact && state.arbiter.view().front.is_some_and(|a| a.kind == Kind::Ask);
+            if over && asking {
+                state.hide_at = None;
+            } else if over || inside {
                 state.mode = Mode::Expanded;
                 state.hide_at = None;
                 state.watch_hover = false;

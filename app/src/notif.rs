@@ -103,10 +103,98 @@ fn toasts(listener: &UserNotificationListener) -> windows::core::Result<Vec<User
     (0..list.Size()?).map(|i| list.GetAt(i)).collect()
 }
 
+/// An app's logo as Windows shows it (its tile), LOGO_PX square RGBA, kept
+/// per app (by AUMID) the first time one of its notifications is read, so the
+/// island draws the real icon instead of a letter. None when Windows has none
+/// (some unpackaged apps).
+pub const LOGO_PX: u32 = 48;
+static LOGOS: std::sync::Mutex<Option<std::collections::HashMap<String, Option<Arc<Vec<u8>>>>>> = std::sync::Mutex::new(None);
+
+pub fn logo(aumid: &str) -> Option<Arc<Vec<u8>>> {
+    LOGOS.lock().unwrap_or_else(|e| e.into_inner()).as_ref()?.get(aumid).cloned().flatten()
+}
+
+fn keep_logo(aumid: &str, info: &windows::ApplicationModel::AppInfo) {
+    if aumid.is_empty() {
+        return;
+    }
+    let mut map = LOGOS.lock().unwrap_or_else(|e| e.into_inner());
+    if map.as_ref().is_some_and(|m| m.contains_key(aumid)) {
+        return;
+    }
+    drop(map);
+    // A packaged app's tile first; else the icon Start shows for it (unpackaged apps).
+    let px = decode_logo(info).ok().or_else(|| shell_icon(aumid)).map(Arc::new);
+    map = LOGOS.lock().unwrap_or_else(|e| e.into_inner());
+    map.get_or_insert_with(Default::default).insert(aumid.to_string(), px);
+}
+
+/// The icon Windows' app list (shell:AppsFolder) shows for an AUMID, as RGBA.
+fn shell_icon(aumid: &str) -> Option<Vec<u8>> {
+    use windows::core::HSTRING;
+    use windows::Win32::Foundation::SIZE;
+    use windows::Win32::Graphics::Gdi::{DeleteObject, GetDC, GetDIBits, ReleaseDC, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS};
+    use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY};
+    unsafe {
+        let factory: IShellItemImageFactory = SHCreateItemFromParsingName(&HSTRING::from(format!("shell:AppsFolder\\{aumid}")), None).ok()?;
+        let n = LOGO_PX as i32;
+        let bmp = factory.GetImage(SIZE { cx: n, cy: n }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK).ok()?;
+        let mut info = BITMAPINFO::default();
+        info.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: n,
+            biHeight: -n,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        };
+        let mut px = vec![0u8; (n * n * 4) as usize];
+        let dc = GetDC(None);
+        let lines = GetDIBits(dc, bmp, 0, n as u32, Some(px.as_mut_ptr().cast()), &mut info, DIB_RGB_COLORS);
+        ReleaseDC(None, dc);
+        let _ = DeleteObject(bmp.into());
+        if lines == 0 {
+            return None;
+        }
+        // BGRA, premultiplied → RGBA, straight.
+        for c in px.chunks_exact_mut(4) {
+            let a = c[3] as u32;
+            let (b, g, r) = (c[0] as u32, c[1] as u32, c[2] as u32);
+            let un = |v: u32| if a == 0 { 0 } else { (v * 255 / a).min(255) as u8 };
+            c[0] = un(r);
+            c[1] = un(g);
+            c[2] = un(b);
+        }
+        px.iter().skip(3).step_by(4).any(|&a| a > 0).then_some(px)
+    }
+}
+
+fn decode_logo(info: &windows::ApplicationModel::AppInfo) -> windows::core::Result<Vec<u8>> {
+    use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapDecoder, BitmapPixelFormat, BitmapTransform, ColorManagementMode, ExifOrientationMode};
+    let size = windows::Foundation::Size { Width: LOGO_PX as f32, Height: LOGO_PX as f32 };
+    let stream = info.DisplayInfo()?.GetLogo(size)?.OpenReadAsync()?.get()?;
+    let decoder = BitmapDecoder::CreateAsync(&stream)?.get()?;
+    let transform = BitmapTransform::new()?;
+    transform.SetScaledWidth(LOGO_PX)?;
+    transform.SetScaledHeight(LOGO_PX)?;
+    let pixels = decoder
+        .GetPixelDataTransformedAsync(
+            BitmapPixelFormat::Rgba8,
+            BitmapAlphaMode::Straight,
+            &transform,
+            ExifOrientationMode::IgnoreExifOrientation,
+            ColorManagementMode::DoNotColorManage,
+        )?
+        .get()?;
+    Ok(pixels.DetachPixelData()?.to_vec())
+}
+
 fn read(n: &UserNotification) -> Option<Notif> {
     let info = n.AppInfo().ok()?;
     let app = info.DisplayInfo().and_then(|d| d.DisplayName()).map(|s| s.to_string()).unwrap_or_default();
     let aumid = info.AppUserModelId().map(|s| s.to_string()).unwrap_or_default();
+    keep_logo(&aumid, &info);
     let binding = n.Notification().ok()?.Visual().ok()?.GetBinding(&KnownNotificationBindings::ToastGeneric().ok()?).ok()?;
     let texts = binding.GetTextElements().ok()?;
     let mut lines = Vec::new();
@@ -328,5 +416,24 @@ mod tests {
         assert!(is_packaged("5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"));
         assert!(!is_packaged("com.squirrel.Discord.Discord"));
         assert!(!is_packaged("{1AC14E77}\\WindowsPowerShell\\v1.0\\powershell.exe"));
+    }
+}
+
+#[cfg(test)]
+mod logo_probe {
+    /// The logos of the apps that have notifications now (needs a desktop session).
+    #[test]
+    #[ignore]
+    fn logos_of_current_notifications() {
+        use windows::UI::Notifications::Management::UserNotificationListener;
+        use windows::UI::Notifications::NotificationKinds;
+        let l = UserNotificationListener::Current().unwrap();
+        let list = l.GetNotificationsAsync(NotificationKinds::Toast).unwrap().get().unwrap();
+        for i in 0..list.Size().unwrap() {
+            let n = list.GetAt(i).unwrap();
+            if let Some(x) = super::read(&n) {
+                println!("{} | {} | logo bytes {}", x.app, x.aumid, super::logo(&x.aumid).map(|p| p.len()).unwrap_or(0));
+            }
+        }
     }
 }
