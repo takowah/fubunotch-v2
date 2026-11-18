@@ -18,8 +18,11 @@ Status: done · doing · todo. "Have" = Kanmuri already did it before this list.
       the clock staying while music plays.
 - [ ] Auto-hide: always, or while chosen apps are in front; comes down while idle; a hide button /
       double right-click tucks it to a handle. Have: hide when idle, slides away for fullscreen.
-- [ ] Dashboard tab: weather (Open-Meteo, a switch: network only when on), quick toggles (Wi-Fi,
+- [~] Dashboard tab: weather (Open-Meteo, a switch: network only when on), quick toggles (Wi-Fi,
       Bluetooth, keep awake, dark mode, mute mic, lock), app launcher, day progress, prayer times.
+      Done 18 Nov 2026: weather (weather.rs, module "weather" off until turned on, from the
+      Prayer place, every 30 min while the page is open), Today (day progress + next prayer), the
+      six switches. Tested live: Open-Meteo, dark mode round trip. Left: the app launcher.
 - [~] Control tab (like Windows Quick Settings): Wi-Fi and Bluetooth lists (join / connect),
       toggles, brightness and volume sliders, sound output and microphone pickers, device battery.
       Done 18 Nov 2026 (control.rs): volume + mute, brightness (WMI, built-in screen), output and

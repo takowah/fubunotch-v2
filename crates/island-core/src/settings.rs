@@ -16,6 +16,8 @@ pub const MODULES: &[ModuleInfo] = &[
     ModuleInfo { id: "todo", name: "To-do", has_tab: true, default_on: true },
     ModuleInfo { id: "shelf", name: "Shelf", has_tab: true, default_on: true },
     ModuleInfo { id: "claude", name: "Claude Code", has_tab: false, default_on: true },
+    ModuleInfo { id: "dashboard", name: "Dashboard", has_tab: true, default_on: true },
+    ModuleInfo { id: "weather", name: "Weather", has_tab: false, default_on: false },
     ModuleInfo { id: "control", name: "Control", has_tab: true, default_on: true },
     ModuleInfo { id: "accounts", name: "Accounts", has_tab: true, default_on: true },
     ModuleInfo { id: "prayer", name: "Prayer", has_tab: true, default_on: true },
@@ -557,9 +559,10 @@ mod tests {
 
     #[test]
     fn unknown_modules_go_new_ones_come_order_is_kept() {
-        let s = Settings::parse(br#"{"modules":[{"id":"system","enabled":false},{"id":"weather","enabled":true},{"id":"music","enabled":true},{"id":"music","enabled":false}]}"#);
+        let s = Settings::parse(br#"{"modules":[{"id":"system","enabled":false},{"id":"radio","enabled":true},{"id":"music","enabled":true},{"id":"music","enabled":false}]}"#);
         let ids: Vec<&str> = s.modules.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(ids, ["system", "music", "notifications", "focus", "water", "todo", "shelf", "claude", "control", "accounts", "prayer", "day"], "weather dropped, duplicate ignored, the rest added");
+        assert_eq!(ids, ["system", "music", "notifications", "focus", "water", "todo", "shelf", "claude", "dashboard", "weather", "control", "accounts", "prayer", "day"], "radio (unknown) dropped, duplicate ignored, the rest added");
+        assert!(!s.is_on("weather"), "a new module that is off by default stays off");
         assert!(!s.is_on("system"));
         assert!(s.is_on("music"));
     }
@@ -581,7 +584,7 @@ mod tests {
     #[test]
     fn tabs_follow_order_and_switches() {
         let mut s = Settings::default();
-        assert_eq!(s.tabs().iter().map(|t| t.id).collect::<Vec<_>>(), ["music", "notifications", "focus", "water", "todo", "shelf", "control", "accounts", "prayer", "day"], "system has no tab");
+        assert_eq!(s.tabs().iter().map(|t| t.id).collect::<Vec<_>>(), ["music", "notifications", "focus", "water", "todo", "shelf", "dashboard", "control", "accounts", "prayer", "day"], "system has no tab");
         s.move_module("notifications", -1);
         assert_eq!(s.tabs()[..2].iter().map(|t| t.id).collect::<Vec<_>>(), ["notifications", "music"]);
         s.modules.iter_mut().find(|m| m.id == "music").unwrap().enabled = false;

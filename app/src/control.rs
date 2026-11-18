@@ -36,6 +36,8 @@ pub struct Snapshot {
     /// None: no such radio.
     pub wifi: Option<bool>,
     pub bluetooth: Option<bool>,
+    /// Windows in dark mode (apps and system).
+    pub dark: Option<bool>,
 }
 
 /// A change asked for from the page.
@@ -49,6 +51,34 @@ pub enum Command {
     Brightness(u32),
     Wifi(bool),
     Bluetooth(bool),
+    DarkMode(bool),
+    Lock,
+}
+
+const PERSONALIZE: PCWSTR = windows::core::w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+
+/// Apps in dark mode (AppsUseLightTheme = 0); None when Windows never set it.
+fn dark_mode() -> Option<bool> {
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let mut v = 0u32;
+    let mut len = 4u32;
+    unsafe { RegGetValueW(HKEY_CURRENT_USER, PERSONALIZE, windows::core::w!("AppsUseLightTheme"), RRF_RT_REG_DWORD, None, Some(&mut v as *mut u32 as *mut _), Some(&mut len)).ok().ok()? };
+    Some(v == 0)
+}
+
+/// Dark or light for apps and Windows itself, as Settings > Personalization does.
+fn set_dark_mode(dark: bool) -> Result<(), String> {
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD};
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE};
+    let light: u32 = if dark { 0 } else { 1 };
+    unsafe {
+        for name in [windows::core::w!("AppsUseLightTheme"), windows::core::w!("SystemUsesLightTheme")] {
+            RegSetKeyValueW(HKEY_CURRENT_USER, PERSONALIZE, name, REG_DWORD.0, Some(&light as *const u32 as *const _), 4).ok().map_err(|e| e.to_string())?;
+        }
+        SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, WPARAM(0), LPARAM(windows::core::w!("ImmersiveColorSet").as_ptr() as isize), SMTO_ABORTIFHUNG, 3000, None);
+    }
+    Ok(())
 }
 
 fn com() {
@@ -148,6 +178,7 @@ pub fn read_with(brightness_too: bool) -> Snapshot {
     }
     s.wifi = radio_on(RadioKind::WiFi);
     s.bluetooth = radio_on(RadioKind::Bluetooth);
+    s.dark = dark_mode();
     if brightness_too {
         s.brightness = brightness();
     }
@@ -175,6 +206,8 @@ pub fn apply(c: &Command) -> Result<(), String> {
             }
             Command::Wifi(on) => set_radio(RadioKind::WiFi, *on),
             Command::Bluetooth(on) => set_radio(RadioKind::Bluetooth, *on),
+            Command::DarkMode(d) => set_dark_mode(*d),
+            Command::Lock => windows::Win32::System::Shutdown::LockWorkStation().map_err(|e| e.to_string()),
         }
     }
 }
@@ -273,6 +306,33 @@ mod tests {
             println!("brightness {b} -> {to} -> {b}");
         }
         println!("round trip ok: volume {v} -> {up} -> {v}, mic {:?}", before.mic_muted);
+    }
+
+    /// Live and put back: dark mode flipped and back. Run outside an app
+    /// container (HKCU writes from one go to its own copy).
+    #[test]
+    #[ignore]
+    fn dark_mode_round_trip() {
+        let log = std::env::var("KANMURI_STEP_LOG").ok();
+        let step = |s: &str| {
+            if let Some(p) = &log {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+                    let _ = writeln!(f, "{s}");
+                }
+            }
+        };
+        let d = dark_mode().expect("Windows has a theme setting");
+        step(&format!("read {d}"));
+        let r = apply(&Command::DarkMode(!d));
+        step(&format!("flip {r:?}"));
+        let flipped = dark_mode();
+        step(&format!("read {flipped:?}"));
+        let r = apply(&Command::DarkMode(d));
+        step(&format!("back {r:?}"));
+        assert_eq!(flipped, Some(!d), "flipped");
+        assert_eq!(dark_mode(), Some(d), "back");
+        println!("dark mode {d} -> {} -> {d}", !d);
     }
 
     /// Prints what this PC has (cargo test -p kanmuri control_probe -- --ignored --nocapture).

@@ -34,6 +34,7 @@ The open island has one bar on top: the tabs, the time, and round buttons for a 
 | ![Accounts](docs/screens/accounts.png) | **Accounts**: your Claude Desktop, Claude Code and Codex accounts, each with its plan and how much of its limits is used. A click switches: Claude Code and Codex through their config folder (new terminals use it), Claude Desktop by swapping its saved login (it restarts, so it asks for a second click first). Accounts set up with AccountDeck / NotchDeck (`%USERPROFILE%\.accountdeck`) are picked up as they are. |
 
 Also:
+- **Dashboard**: the weather (Open-Meteo, off until you turn it on), how much of your day has gone and the next prayer, and switches for Wi-Fi, Bluetooth, the microphone, keep awake, dark mode and lock.
 - **Control**: like Windows' Quick Settings: volume and brightness sliders, which output and microphone are in use, Wi-Fi, Bluetooth and microphone switches.
 - **Idle island sides**: next to the time, pick the date, network, battery, the next prayer, CPU, RAM or disk (Settings → General).
 - **Prayer**: today's prayer times (Kemenag method), worked out on your PC, with a reminder before each.
@@ -50,7 +51,7 @@ Settings → Appearance: a black body, a colour of your own, the wallpaper's col
 
 ### Privacy
 
-Nothing leaves your PC except what you turn on: lyrics look-ups send the song's title, artist, album and length to LRCLIB (and YouTube Music if that switch is on); the Accounts tab asks Anthropic for each Claude account's usage with that account's own login. No telemetry, no account of ours. Settings and data stay in `%APPDATA%\Kanmuri`.
+Nothing leaves your PC except what you turn on: lyrics look-ups send the song's title, artist, album and length to LRCLIB (and YouTube Music if that switch is on); the Weather module, once on, sends the Prayer place's coordinates to Open-Meteo; the Accounts tab asks Anthropic for each Claude account's usage with that account's own login. No telemetry, no account of ours. Settings and data stay in `%APPDATA%\Kanmuri`.
 
 ## For developers
 

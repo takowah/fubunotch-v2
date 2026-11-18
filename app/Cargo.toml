@@ -49,6 +49,8 @@ windows = { version = "0.61", features = [
   "Win32_UI_Shell_Common",
   "Win32_Storage_FileSystem",
   "Devices_Radios",
+  "Win32_System_Shutdown",
+  "Win32_System_Power",
 ] }
 windows-core = "0.61"
 windows-collections = "0.2"
