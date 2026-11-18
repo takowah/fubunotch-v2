@@ -16,6 +16,7 @@ mod bg;
 mod claude;
 mod local_time;
 mod look;
+mod glass;
 mod music;
 mod accent;
 mod notif;
@@ -265,11 +266,18 @@ struct State {
     wallpaper: Option<island_core::look::Rgb>,
     /// The Look last put on the island.
     look_shown: Option<look::Colors>,
+    /// Liquid Glass (glass.rs): its ~10 fps clock (only while shown), the
+    /// backdrop is light (dark ink), the last frame's hash and the shape the
+    /// shown picture was cut for, a frame being made, unchanged frames in a
+    /// row, and whether the island is left out of screen capture.
+    glass_timer: Timer,
+    glass_light: bool,
+    glass_hash: u64,
+    glass_key: String,
+    glass_busy: bool,
+    glass_still: u32,
+    glass_excluded: Option<bool>,
 }
-
-/// The Frosted glass look is on: the window region is the island's rounded
-/// shape (Windows blurs the whole region) and the blur is switched on.
-static FROSTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 static ISLAND_MADE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -551,9 +559,7 @@ fn place(ui: &Island) {
 fn clip_window(ui: &Island, size: (f32, f32), hidden: bool) {
     use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
-    use windows::Win32::Graphics::Gdi::CreateRoundRectRgn;
     let scale = ui.window().scale_factor();
-    let frosted = FROSTED.load(std::sync::atomic::Ordering::Relaxed) && !hidden && !snapshot_mode();
     let (w, h) = if hidden { HIDDEN_HOVER } else { (size.0 + 2.0 * GLOW, TOP + size.1 + GLOW) };
     let x0 = ((WINDOW.0 - w) / 2.0 * scale).floor() as i32;
     let x1 = ((WINDOW.0 + w) / 2.0 * scale).ceil() as i32;
@@ -562,19 +568,8 @@ fn clip_window(ui: &Island, size: (f32, f32), hidden: bool) {
         let Ok(handle) = win.window_handle() else { return };
         if let RawWindowHandle::Win32(h) = handle.as_raw() {
             let hwnd = windows::Win32::Foundation::HWND(h.hwnd.get() as *mut core::ffi::c_void);
-            look::set_blur(hwnd, frosted);
             unsafe {
-                // Frosted: just the island, rounded (no glow), so the blur
-                // doesn't show as a square around it. Radius as the island's.
-                let region = if frosted {
-                    let r = if size.1 <= COMPACT_NOTICE.1 { size.1 / 2.0 } else { MEDIA_RADIUS };
-                    let (ix0, ix1) = (((WINDOW.0 - size.0) / 2.0 * scale).round() as i32, ((WINDOW.0 + size.0) / 2.0 * scale).round() as i32);
-                    let (iy0, iy1) = ((TOP * scale).round() as i32, ((TOP + size.1) * scale).round() as i32);
-                    let d = (2.0 * r * scale).round() as i32;
-                    CreateRoundRectRgn(ix0, iy0, ix1 + 1, iy1 + 1, d, d)
-                } else {
-                    CreateRectRgn(x0, 0, x1, y1)
-                };
+                let region = CreateRectRgn(x0, 0, x1, y1);
                 // The window owns the region from here on.
                 SetWindowRgn(hwnd, Some(region), true);
             }
@@ -1227,6 +1222,7 @@ fn refresh(ui: &Island) {
             }
         };
         morph_to(ui, state, size);
+        glass_sync(ui, state);
         follow_watch(ui, state, now);
         // The mascot lives only while it can be seen: no ticks when hidden.
         if state.mode != Mode::Hidden && state.settings.look.mascot {
@@ -2464,7 +2460,7 @@ fn set_number(s: &mut Settings, key: &str, v: i32) {
 
 /// Puts Settings → Appearance → Look on the island: its colours (set again
 /// only when they changed: the night's warmth moves with refresh's
-/// per-minute wake, never per frame), and Frosted glass' blur and region.
+/// per-minute wake, never per frame), and whether Liquid Glass is on.
 fn apply_look(ui: &Island, state: &mut State) {
     let warmth = if state.settings.look.night_warm {
         // Sunset and sunrise at the Prayer module's place, else 18:00 / 06:00.
@@ -2479,7 +2475,7 @@ fn apply_look(ui: &Island, state: &mut State) {
     } else {
         0.0
     };
-    let c = look::colors(&state.settings.look, state.wallpaper, warmth);
+    let c = look::colors(&state.settings.look, state.wallpaper, warmth, state.glass_light);
     if state.look_shown.as_ref() == Some(&c) {
         return;
     }
@@ -2494,10 +2490,154 @@ fn apply_look(ui: &Island, state: &mut State) {
     mini.set_label(look::color(c.ink[3]));
     mini.set_faint(look::color(c.ink[4]));
     mini.set_wash(look::color(c.wash));
-    let was = FROSTED.swap(c.frosted, std::sync::atomic::Ordering::Relaxed);
-    state.look_shown = Some(c.clone());
-    if was != c.frosted {
-        clip_window(ui, state.size_to, state.mode == Mode::Hidden);
+    mini.set_glass(c.glass);
+    state.look_shown = Some(c);
+}
+
+// ── Liquid Glass ─────────────────────────────────────────────────────────────
+
+/// Starts or stops Liquid Glass' clock: it runs only while the look is
+/// Liquid Glass and the island is shown (0 % CPU hidden). Also leaves the
+/// island out of screen capture while the look is on (and only then: it
+/// hides the island from screenshots and recordings too).
+fn glass_sync(ui: &Island, state: &mut State) {
+    let look_on = state.settings.look.style() == "liquid";
+    let on = look_on && state.mode != Mode::Hidden;
+    if snapshot_mode() {
+        if on {
+            glass_demo_frame(ui, state);
+        }
+        return;
+    }
+    if state.glass_excluded != Some(look_on) {
+        if let Some(hwnd) = island_hwnd(ui) {
+            let ok = glass::exclude_from_capture(hwnd, look_on);
+            store::log(&format!("glass: left out of capture {look_on} ({})", if ok { "ok" } else { "refused" }));
+            // Refused: no grabbing, or the island would grab itself.
+            state.glass_excluded = Some(if ok { look_on } else { false });
+        }
+    }
+    let can_grab = on && state.glass_excluded == Some(true);
+    if !can_grab {
+        state.glass_timer.stop();
+        if state.mode == Mode::Hidden || !look_on {
+            // A fresh picture when it shows again, not the old screen.
+            state.glass_key.clear();
+            state.glass_hash = 0;
+            ui.set_has_glass(false);
+        }
+        return;
+    }
+    if !state.glass_timer.running() {
+        state.glass_still = 0;
+        glass_restart(ui, state, GLASS_FAST_MS);
+        glass_tick(ui, state);
+    } else if glass_shape(ui, state).1 != state.glass_key {
+        // A new size: a frame now, not on the next tick.
+        glass_tick(ui, state);
+    }
+}
+
+/// Liquid Glass' frame rate while the screen behind changes (~10 fps), and
+/// after a few unchanged frames.
+const GLASS_FAST_MS: u64 = 100;
+const GLASS_SLOW_MS: u64 = 250;
+
+fn glass_restart(ui: &Island, state: &mut State, ms: u64) {
+    let weak = ui.as_weak();
+    state.glass_timer.start(TimerMode::Repeated, std::time::Duration::from_millis(ms), move || {
+        if let Some(ui) = weak.upgrade() {
+            with_state(|state| glass_tick(&ui, state));
+        }
+    });
+}
+
+/// The island's rectangle in physical window pixels, its radius (physical)
+/// and the scale, and a key for that shape.
+fn glass_shape(ui: &Island, state: &State) -> ((i32, i32, u32, u32, f32, f32), String) {
+    let scale = ui.window().scale_factor().max(0.5);
+    let (w, h) = state.size_to;
+    let r = ui.get_target_r().min(w / 2.0).min(h / 2.0);
+    let x = ((WINDOW.0 - w) / 2.0 * scale).round() as i32;
+    let y = (TOP * scale).round() as i32;
+    let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
+    let key = format!("{pw}x{ph}|{r}|{scale}");
+    ((x, y, pw, ph, r * scale, scale), key)
+}
+
+/// Asks the glass worker for a frame (one at a time).
+fn glass_tick(ui: &Island, state: &mut State) {
+    if state.glass_busy || state.mode == Mode::Hidden {
+        return;
+    }
+    let ((x, y, w, h, radius, scale), key) = glass_shape(ui, state);
+    if key != state.glass_key {
+        ui.set_has_glass(false);
+    }
+    let pos = ui.window().position();
+    state.glass_busy = true;
+    let job = glass::Job { x: pos.x + x, y: pos.y + y, w, h, radius, scale, was_light: state.glass_light, last_hash: state.glass_hash, last_key: state.glass_key.clone(), key };
+    let weak = ui.as_weak();
+    glass::request(
+        job,
+        Box::new(move |done| {
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    glass_done(&ui, done);
+                }
+            });
+        }),
+    );
+}
+
+fn glass_done(ui: &Island, done: glass::Done) {
+    with_state(|state| {
+        state.glass_busy = false;
+        let wanted = glass_shape(ui, state).1;
+        // Stale (the island changed size meanwhile, or went away): the next tick redoes it.
+        if done.key != wanted || state.mode == Mode::Hidden || !state.glass_timer.running() {
+            return;
+        }
+        match done.pixels {
+            None => {
+                state.glass_still += 1;
+                if state.glass_still == 5 {
+                    glass_restart(ui, state, GLASS_SLOW_MS);
+                }
+            }
+            Some((px, w, h)) => {
+                if state.glass_still >= 5 {
+                    glass_restart(ui, state, GLASS_FAST_MS);
+                }
+                state.glass_still = 0;
+                state.glass_hash = done.hash;
+                state.glass_key = done.key;
+                ui.set_glass(bg::image(&px, w, h));
+                ui.set_has_glass(true);
+                if done.light != state.glass_light {
+                    state.glass_light = done.light;
+                    apply_look(ui, state);
+                }
+            }
+        }
+    });
+}
+
+/// A snapshot's glass, over KANMURI_DEMO_BACKDROP: made here and now.
+fn glass_demo_frame(ui: &Island, state: &mut State) {
+    let ((x, y, w, h, radius, scale), key) = glass_shape(ui, state);
+    if key == state.glass_key {
+        return;
+    }
+    let win = ((WINDOW.0 * scale).round() as u32, (WINDOW.1 * scale).round() as u32);
+    if let Some((px, light)) = glass::demo(win, x, y, w, h, radius, scale, state.glass_light) {
+        state.glass_key = key;
+        ui.set_glass(bg::image(&px, w, h));
+        ui.set_has_glass(true);
+        if light != state.glass_light {
+            state.glass_light = light;
+            apply_look(ui, state);
+        }
     }
 }
 
@@ -2924,7 +3064,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(t) = std::env::var("KANMURI_THEME") {
         settings.look.theme = t;
     }
-    // KANMURI_LOOK=<black|color|wallpaper|glass|frosted>, KANMURI_LOOK_COLOR=rrggbb,
+    // KANMURI_LOOK=<black|color|wallpaper|liquid>, KANMURI_LOOK_COLOR=rrggbb,
     // KANMURI_NIGHT=<0..100> (night warmth on, at that strength),
     // KANMURI_CLOSED_OPACITY=<20..100>: a Look for this run only (checks).
     if let Ok(v) = std::env::var("KANMURI_LOOK") {
@@ -2968,6 +3108,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             last_shown: String::new(),
             life: mascot::Life::default(),
             life_timer: Timer::default(),
+            glass_timer: Timer::default(),
+            glass_light: false,
+            glass_hash: 0,
+            glass_key: String::new(),
+            glass_busy: false,
+            glass_still: 0,
+            glass_excluded: None,
             size_to: (0.0, 0.0),
             region_timer: Timer::default(),
             active_tab: first_tab,

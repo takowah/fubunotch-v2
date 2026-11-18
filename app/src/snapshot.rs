@@ -88,11 +88,12 @@ pub fn write(index: usize, size: (f32, f32), path: &str) -> Result<(), Box<dyn s
     window.draw_if_needed(|renderer| {
         renderer.render(&mut buf, w as usize);
     });
-    // Over a desktop-ish backdrop: a gradient, so transparency and glow show.
+    // Over a desktop-ish backdrop (a gradient, or KANMURI_DEMO_BACKDROP's
+    // picture), so transparency, glow and Liquid Glass show.
+    let backdrop = crate::glass::demo_backdrop(w, h);
     let mut rgb = Vec::with_capacity((w * h * 3) as usize);
     for (i, px) in buf.iter().enumerate() {
-        let y = (i as u32 / w) as f32 / h as f32;
-        let back = [(52.0 + 40.0 * y) as u32, (58.0 + 30.0 * y) as u32, (74.0 + 20.0 * y) as u32];
+        let back = [backdrop[i * 4] as u32, backdrop[i * 4 + 1] as u32, backdrop[i * 4 + 2] as u32];
         let a = px.alpha as u32;
         let c = [px.red as u32, px.green as u32, px.blue as u32];
         for k in 0..3 {

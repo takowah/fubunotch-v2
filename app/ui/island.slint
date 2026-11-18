@@ -282,6 +282,10 @@ export global Mini {
     in-out property <color> wash: #ffffff;
     // The body is light (white, yellow, pink): app colours get darker to read.
     in-out property <bool> light;
+    // Liquid Glass: the body is the island's `glass` picture (the blurred
+    // backdrop, rim and lens edge, cut round in Rust); `base` at `solid` is
+    // only its stand-in while the picture is not ready.
+    in-out property <bool> glass;
     // Fills over a light body need more ink than over a dark one to show as much.
     out property <float> wk: self.light ? 1.9 : 1;
     out property <color> edge: self.wash.with-alpha(0.16 * self.wk);
@@ -1747,6 +1751,9 @@ export component Island inherits Window {
     // The island's size for the mode (Rust): it springs there.
     in property <length> target-w: 180px;
     in property <length> target-h: 45px;
+    // Liquid Glass' body, made by Rust for the target size and radius.
+    in property <bool> has-glass;
+    in property <image> glass;
 
     callback shelf-open(int);
     callback shelf-copy(int);
@@ -1793,6 +1800,8 @@ export component Island inherits Window {
     animate island-w, island-h { duration: Ice.morph; easing: cubic-bezier(0.22, 1.18, 0.36, 1); }
     property <length> island-r: root.hidden ? 2px : root.expanded || root.show-media ? 24px : root.show-line && root.line-notice ? 22px : self.island-h / 2;
     animate island-r { duration: Ice.morph; easing: ease-out; }
+    // The radius it springs to (Rust cuts Liquid Glass' picture with it).
+    out property <length> target-r: root.hidden ? 2px : root.expanded || root.show-media ? 24px : root.show-line && root.line-notice ? 22px : root.target-h / 2;
     property <length> ix: (root.width - self.island-w) / 2;
     property <length> body-y: root.hidden ? 2px : Ice.top;
 
@@ -1815,6 +1824,10 @@ export component Island inherits Window {
     // Opacity when closed (Settings → Appearance): only the quiet capsule.
     property <float> body-alpha: Mini.solid * (root.compact && !root.pointer-on && !root.alerting ? Mini.closed : 1);
     animate body-alpha { duration: 260ms; easing: ease-in-out; }
+    // Liquid Glass' picture is on: once the spring has settled at the size it was cut for.
+    property <float> glass-in: Mini.glass && root.has-glass && !root.hidden
+        && abs(root.island-w - root.target-w) < 1px && abs(root.island-h - root.target-h) < 1px ? 1 : 0;
+    animate glass-in { duration: 200ms; easing: ease-out; }
 
     // Hidden: a wider strip than the handle, so it is easy to point at.
     if hidden : TouchArea {
@@ -1861,13 +1874,24 @@ export component Island inherits Window {
         height: root.island-h;
         border-radius: root.island-r;
         border-width: root.hidden ? 0px : 1px;
-        border-color: Mini.edge;
+        // Liquid Glass draws its own rim.
+        border-color: Mini.wash.with-alpha(0.16 * Mini.wk * (1 - root.glass-in));
         // `repaint` flips the alpha by 1/255 (invisible): the whole island
         // counts as changed and is drawn again. Without it the software
         // renderer kept showing the old lyric in Line's capsule.
         background: root.hidden ? Mini.handle.with-alpha(root.repaint ? 1 : 0.996)
-            : Mini.base.with-alpha(root.repaint ? root.body-alpha : root.body-alpha - 0.004);
+            : Mini.base.with-alpha(root.body-alpha * (1 - root.glass-in) + (root.repaint ? 0.004 : 0));
         clip: true;
+
+        // Liquid Glass: the blurred backdrop, its tint, rim and lens edge,
+        // already cut to the island's rounded shape.
+        if Mini.glass : Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.glass;
+            image-fit: fill;
+            opacity: root.glass-in * root.body-alpha / max(Mini.solid, 0.01);
+        }
 
         // The colour from the left edge, gone by 45 % of the width.
         Fade {
