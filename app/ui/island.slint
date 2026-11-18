@@ -845,9 +845,11 @@ component BatteryIcon inherits Rectangle {
     Rectangle { x: 20.5px; y: 4px; width: 1.5px; height: 4px; background: Mini.text-2; }
 }
 
-// One side of the idle island: the date, the connection, or the battery.
+// One side of the idle island: the date, the connection, the battery, or
+// words Rust writes (the next prayer, CPU, RAM, disk), as Poni's sides.
 component IdleSlot inherits HorizontalLayout {
     in property <string> kind;
+    in property <string> text;
     in property <string> date;
     in property <string> net;
     in property <string> battery;
@@ -858,6 +860,13 @@ component IdleSlot inherits HorizontalLayout {
     if root.kind == "network" : SysIcon { name: root.net; y: (parent.height - self.height) / 2; }
     if root.kind == "battery" : BatteryIcon { level: root.level; charging: root.charging; y: (parent.height - self.height) / 2; }
     if root.kind == "battery" : Text { text: root.battery; color: Mini.text-2; font-size: 13px; font-weight: 600; vertical-alignment: center; }
+    if root.kind == "prayer" || root.kind == "cpu" || root.kind == "memory" || root.kind == "disk" : Text {
+        text: root.text;
+        color: Mini.text-2;
+        font-size: 13px;
+        font-weight: 600;
+        vertical-alignment: center;
+    }
 }
 
 // A small pill for a question's answers.
@@ -1785,6 +1794,9 @@ export component Island inherits Window {
     // What sits left and right of the idle time: "" | "date" | "network" | "battery".
     in property <string> idle-left;
     in property <string> idle-right;
+    // A word side's text ("Asar 15:12", "CPU 12%"), written by Rust.
+    in property <string> idle-left-text;
+    in property <string> idle-right-text;
     in property <[TabInfo]> tabs;
     in property <string> active-tab: "notifications";
     in property <Music> music;
@@ -2251,7 +2263,7 @@ export component Island inherits Window {
                 alignment: center;
                 if root.has-front && root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
                 if root.has-front && root.front.icon == "" : AppIcon { size: 26px; accent: root.front.accent; initial: root.front.initial; logo: root.front.logo-small; has-logo: root.front.has-logo; y: (parent.height - self.height) / 2; }
-                if !root.has-front && root.idle-left != "" : IdleSlot { kind: root.idle-left; date: root.date; net: root.status-net; battery: root.status-battery; level: root.status-battery-level; charging: root.status-charging; }
+                if !root.has-front && root.idle-left != "" : IdleSlot { kind: root.idle-left; text: root.idle-left-text; date: root.date; net: root.status-net; battery: root.status-battery; level: root.status-battery-level; charging: root.status-charging; }
                 Text {
                     text: root.has-front ? root.front.title : root.clock;
                     color: Mini.ink;
@@ -2261,7 +2273,7 @@ export component Island inherits Window {
                     overflow: elide;
                 }
                 if root.has-front && root.front.has-progress : Bar { width: 70px; value: root.front.progress; tint: Paint.readable(root.front.accent); y: (parent.height - self.height) / 2; }
-                if !root.has-front && root.idle-right != "" : IdleSlot { kind: root.idle-right; date: root.date; net: root.status-net; battery: root.status-battery; level: root.status-battery-level; charging: root.status-charging; }
+                if !root.has-front && root.idle-right != "" : IdleSlot { kind: root.idle-right; text: root.idle-right-text; date: root.date; net: root.status-net; battery: root.status-battery; level: root.status-battery-level; charging: root.status-charging; }
                 if root.waiting > 0 : Text { text: "+" + root.waiting; color: Mini.label; font-size: 11px; font-weight: 600; vertical-alignment: center; }
                 if root.watching : Glyph { width: 14px; text: Glyphs.video; font-size: 11px; color: Mini.label; }
                 if root.dnd : Glyph { width: 14px; text: Glyphs.moon; font-size: 11px; color: Mini.label; }

@@ -11,9 +11,11 @@ Order (the owner picked all four, in this order of work): 1 Notch & daily panels
 Status: done · doing · todo. "Have" = Kanmuri already did it before this list.
 
 ## 1. Notch & daily panels
-- [ ] Closed notch: pick what its left and right show (weather, battery, date, next prayer, event,
+- [~] Closed notch: pick what its left and right show (weather, battery, date, next prayer, event,
       task, temperature, CPU, memory, disk, Wi-Fi), a clock in the middle that stays while music
-      plays. Have: one idle item (date / network / battery).
+      plays. Done 18 Nov 2026: next prayer, CPU, RAM, disk (stats.rs, read every 2 s only while
+      shown). Left: weather (with the Dashboard), event (Calendar), task (To-do), temperature,
+      the clock staying while music plays.
 - [ ] Auto-hide: always, or while chosen apps are in front; comes down while idle; a hide button /
       double right-click tucks it to a handle. Have: hide when idle, slides away for fullscreen.
 - [ ] Dashboard tab: weather (Open-Meteo, a switch: network only when on), quick toggles (Wi-Fi,

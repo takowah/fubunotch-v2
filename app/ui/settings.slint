@@ -66,6 +66,9 @@ export struct SettingsView {
     popups: bool,
     idle-left: string,
     idle-right: string,
+    // The word sides' text as the island shows it now ("Asar 15:12", "CPU 12%").
+    idle-left-text: string,
+    idle-right-text: string,
     hide-after: int,
     theme: string,
     has-background: bool,
@@ -453,6 +456,7 @@ component BatteryMark inherits Rectangle {
 // picks the side to change.
 component SlotZone inherits Rectangle {
     in property <string> kind;
+    in property <string> text;
     in property <bool> selected;
     in property <string> date;
     in property <string> net;
@@ -476,6 +480,13 @@ component SlotZone inherits Rectangle {
         if root.kind == "network" : NetIcon { name: root.net; y: (parent.height - self.height) / 2; }
         if root.kind == "battery" : BatteryMark { level: root.level; empty: root.battery == ""; y: (parent.height - self.height) / 2; }
         if root.kind == "battery" : Text { text: root.battery == "" ? "n/a" : root.battery; color: root.battery == "" ? K.hint : K.text-2; font-size: 13px; font-weight: 600; vertical-alignment: center; }
+        if root.kind == "prayer" || root.kind == "cpu" || root.kind == "memory" || root.kind == "disk" : Text {
+            text: root.text;
+            color: K.text-2;
+            font-size: 13px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
     }
     a := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
@@ -916,6 +927,7 @@ export component SettingsWindow inherits Window {
                                     SlotZone {
                                         y: (parent.height - self.height) / 2;
                                         kind: root.s.idle-left;
+                                        text: root.s.idle-left-text;
                                         selected: root.slot-side == "left";
                                         date: root.s.date; net: root.s.net; battery: root.s.battery; level: root.s.battery-level;
                                         clicked => { root.slot-side = "left"; }
@@ -930,6 +942,7 @@ export component SettingsWindow inherits Window {
                                     SlotZone {
                                         y: (parent.height - self.height) / 2;
                                         kind: root.s.idle-right;
+                                        text: root.s.idle-right-text;
                                         selected: root.slot-side == "right";
                                         date: root.s.date; net: root.s.net; battery: root.s.battery; level: root.s.battery-level;
                                         clicked => { root.slot-side = "right"; }
@@ -946,14 +959,27 @@ export component SettingsWindow inherits Window {
                             }
                         }
                     }
-                    SettingRow {
-                        title: root.slot-side == "left" ? "Left of the time" : "Right of the time";
-                        hint: "Battery shows only on a laptop.";
-                        last: true;
-                        Segmented {
-                            choices: [{id: "", label: "None"}, {id: "date", label: "Date"}, {id: "network", label: "Network"}, {id: "battery", label: "Battery"}];
-                            value: root.slot-side == "left" ? root.s.idle-left : root.s.idle-right;
-                            picked(id) => { root.slot-picked(root.slot-side, id); }
+                    // Eight choices: the title and hint above, the choices on a row of their own.
+                    VerticalLayout {
+                        padding-left: 16px;
+                        padding-right: 14px;
+                        padding-top: 10px;
+                        padding-bottom: 12px;
+                        spacing: 8px;
+                        Text { text: root.slot-side == "left" ? "Left of the time" : "Right of the time"; color: K.ink; font-size: 13.5px; font-weight: 500; }
+                        Text {
+                            text: "Battery shows only on a laptop. Prayer is the next one (place in Settings > Prayer). CPU, RAM and Disk update every 2 s while the island is up.";
+                            color: K.hint;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                        HorizontalLayout {
+                            alignment: start;
+                            Segmented {
+                                choices: [{id: "", label: "None"}, {id: "date", label: "Date"}, {id: "network", label: "Network"}, {id: "battery", label: "Battery"}, {id: "prayer", label: "Prayer"}, {id: "cpu", label: "CPU"}, {id: "memory", label: "RAM"}, {id: "disk", label: "Disk"}];
+                                value: root.slot-side == "left" ? root.s.idle-left : root.s.idle-right;
+                                picked(id) => { root.slot-picked(root.slot-side, id); }
+                            }
                         }
                     }
                 }

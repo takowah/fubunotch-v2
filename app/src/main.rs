@@ -27,6 +27,7 @@ mod shelf;
 mod snapshot;
 mod accounts;
 mod pixels;
+mod stats;
 mod usage;
 mod store;
 mod theme;
@@ -290,6 +291,10 @@ struct State {
     /// shown picture was cut for, a frame being made, unchanged frames in a
     /// row, and whether the island is left out of screen capture.
     glass_timer: Timer,
+    /// Re-reads the idle island's word sides (CPU / RAM / disk every
+    /// STATS_MS, the next prayer every half minute), only while they show.
+    stats_timer: Timer,
+    stats_every: u64,
     glass_light: bool,
     glass_hash: u64,
     glass_key: String,
@@ -1484,15 +1489,9 @@ fn refresh(ui: &Island) {
             Mode::Compact if (front_kind == Some(Kind::Ambient) || song_over) && state.music.has_session => COMPACT_SONG,
             Mode::Compact if front_id.is_some() => COMPACT_BUSY,
             Mode::Compact => {
-                // Room for what the idle island shows next to the time.
-                let room = |k: &str| match k {
-                    "date" => 84.0,
-                    "network" => 26.0,
-                    "battery" => 64.0,
-                    _ => 0.0,
-                };
                 {
-                    let extra = room(&ui.get_idle_left()) + room(&ui.get_idle_right());
+                    // Room for what the idle island shows next to the time.
+                    let extra = slot_room(&ui.get_idle_left()) + slot_room(&ui.get_idle_right());
                     // The time alone keeps Mini Island's idle width; with sides, just their room.
                     // (The idle width less the time's 120 px is its margin.)
                     (if extra > 0.0 { sizes.idle_w - (COMPACT_IDLE.0 - 120.0) + extra } else { sizes.idle_w }, sizes.idle_h)
@@ -1548,8 +1547,37 @@ fn refresh(ui: &Island) {
                 refresh(&ui);
             }
         });
+        // The idle island's word sides, re-read while they show (and only then).
+        let (l, r) = (ui.get_idle_left().to_string(), ui.get_idle_right().to_string());
+        let idle_shown = state.mode == Mode::Compact && front_id.is_none() && !line;
+        let every = match () {
+            _ if !idle_shown => 0,
+            _ if is_stat(&l) || is_stat(&r) => STATS_MS,
+            _ if l == "prayer" || r == "prayer" => 30_000,
+            _ => 0,
+        };
+        if every != state.stats_every {
+            state.stats_every = every;
+            if every == 0 {
+                state.stats_timer.stop();
+            } else {
+                let weak = ui.as_weak();
+                state.stats_timer.start(TimerMode::Repeated, std::time::Duration::from_millis(every), move || {
+                    if let Some(ui) = weak.upgrade() {
+                        idle_texts(&ui, true);
+                    }
+                });
+                // Fresh numbers as it comes up, not two seconds later (outside this borrow).
+                let weak = ui.as_weak();
+                Timer::single_shot(std::time::Duration::ZERO, move || {
+                    if let Some(ui) = weak.upgrade() {
+                        idle_texts(&ui, true);
+                    }
+                });
+            }
+        }
         // Drawn again only when what the capsule shows has changed.
-        let shown = format!("{}|{capsule_line}|{line_notice}|{front_sig}", state.watching.is_some());
+        let shown = format!("{}|{capsule_line}|{line_notice}|{front_sig}|{}|{}", state.watching.is_some(), ui.get_idle_left_text(), ui.get_idle_right_text());
         if state.mode == Mode::Compact && shown != state.last_shown {
             show_changes(ui);
         }
@@ -2229,6 +2257,90 @@ fn on_flash(ui: &Island, f: flash::Flash) {
     }
 }
 
+/// The room a side of the idle island takes, px: fixed per kind (the widest
+/// it gets), so the capsule doesn't twitch as a number changes.
+fn slot_room(k: &str) -> f32 {
+    match k {
+        "date" => 84.0,
+        "network" => 26.0,
+        "battery" => 64.0,
+        // "Maghrib 18:05"
+        "prayer" => 100.0,
+        // "CPU 100%", "RAM 100%", "C: 100%"
+        "cpu" => 72.0,
+        "memory" => 74.0,
+        "disk" => 62.0,
+        _ => 0.0,
+    }
+}
+
+/// The sides that are system stats (read every STATS_MS while shown).
+fn is_stat(k: &str) -> bool {
+    matches!(k, "cpu" | "memory" | "disk")
+}
+const STATS_MS: u64 = 2_000;
+
+/// The next prayer and its time, "Asar 15:12" (Subuh tomorrow after Isya).
+fn next_prayer_short(cache: &mut Option<(String, prayer::Day)>, settings: &Settings) -> String {
+    let (y, m, d, secs) = prayer_now();
+    let day = prayer_day(cache, settings, y, m, d);
+    match day.prayers().into_iter().find(|(_, at)| at * 60 > secs) {
+        Some((w, at)) => format!("{} {}", w.name(), prayer::hh_mm(at)),
+        None => {
+            let (_, lat, lon) = prayer_place(settings);
+            let (ty, tm, td) = local_time::add_days(y, m, d, 1);
+            let at = prayer::day(ty, tm, td, lat, lon, local_time::utc_offset_hours()).get(prayer::Which::Subuh);
+            format!("{} {}", prayer::Which::Subuh.name(), prayer::hh_mm(at))
+        }
+    }
+}
+
+/// The text of the idle island's sides that are words: the next prayer, and
+/// (when `read_stats`) CPU, memory and disk read now; a stat not read keeps
+/// what it showed.
+fn idle_texts(ui: &Island, read_stats: bool) {
+    let (left, right) = (ui.get_idle_left().to_string(), ui.get_idle_right().to_string());
+    let stats = if read_stats && (is_stat(&left) || is_stat(&right)) {
+        Some((stats::cpu_percent(), stats::memory_percent(), stats::disk_percent()))
+    } else {
+        None
+    };
+    let text = |k: &str, old: SharedString| -> SharedString {
+        let pct = |v: Option<u32>| v.map_or("–".to_string(), |p| format!("{p}%"));
+        match (k, stats) {
+            ("prayer", _) => with_state(|s| next_prayer_short(&mut s.prayer_day, &s.settings)).unwrap_or_default().into(),
+            ("cpu", Some((c, _, _))) => format!("CPU {}", pct(c)).into(),
+            ("memory", Some((_, mem, _))) => format!("RAM {}", pct(mem)).into(),
+            ("disk", Some((_, _, d))) => format!("C: {}", pct(d)).into(),
+            (k, None) if is_stat(k) && !old.is_empty() => old,
+            ("cpu", None) => "CPU –".into(),
+            ("memory", None) => "RAM –".into(),
+            ("disk", None) => "C: –".into(),
+            _ => SharedString::default(),
+        }
+    };
+    let (old_l, old_r) = (ui.get_idle_left_text(), ui.get_idle_right_text());
+    let (new_l, new_r) = (text(&left, old_l.clone()), text(&right, old_r.clone()));
+    if new_l != old_l || new_r != old_r {
+        ui.set_idle_left_text(new_l);
+        ui.set_idle_right_text(new_r);
+        // The software renderer can miss a change in the compact island.
+        show_changes(ui);
+    }
+}
+
+/// A word side as Settings' preview shows it, read now (real numbers).
+fn slot_preview(kind: &str, s: &Settings) -> String {
+    let pct = |v: Option<u32>| v.map_or("–".to_string(), |p| format!("{p}%"));
+    match kind {
+        "prayer" => next_prayer_short(&mut None, s),
+        "cpu" => format!("CPU {}", pct(stats::cpu_percent())),
+        "memory" => format!("RAM {}", pct(stats::memory_percent())),
+        "disk" => format!("C: {}", pct(stats::disk_percent())),
+        _ => String::new(),
+    }
+}
+
 /// The idle island's status icons, per Settings > General > Idle island.
 fn show_status(ui: &Island) {
     let st = system::status_now();
@@ -2246,6 +2358,7 @@ fn show_status(ui: &Island) {
     let slot = |k: &str| if k == "battery" && st.battery.is_none() { String::new() } else { k.to_string() };
     ui.set_idle_left(slot(&g.idle_left).into());
     ui.set_idle_right(slot(&g.idle_right).into());
+    idle_texts(ui, true);
     refresh(ui);
 }
 
@@ -2716,6 +2829,8 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         popups: s.general.popups,
         idle_left: s.general.idle_left.as_str().into(),
         idle_right: s.general.idle_right.as_str().into(),
+        idle_left_text: slot_preview(&s.general.idle_left, s).into(),
+        idle_right_text: slot_preview(&s.general.idle_right, s).into(),
         hide_after: s.general.hide_after_s.clamp(2, 60) as i32,
         theme: s.look.theme().into(),
         has_background: !s.look.background.is_empty(),
@@ -3516,6 +3631,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             life: mascot::Life::default(),
             life_timer: Timer::default(),
             glass_timer: Timer::default(),
+            stats_timer: Timer::default(),
+            stats_every: 0,
             glass_light: false,
             glass_hash: 0,
             glass_key: String::new(),
