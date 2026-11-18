@@ -52,6 +52,8 @@ pub enum Event {
     /// Headphones or a headset came or went: its name ("" for the computer's
     /// own jack), connected, and a Bluetooth battery when Windows knows it.
     Headphones(String, bool, Option<u8>),
+    /// Only the idle island's status (battery percent) changed: no pop-up.
+    Status,
 }
 
 type Sink = Box<dyn Fn(Event) + Send + Sync>;
@@ -286,7 +288,37 @@ fn network_now() -> Event {
     Event::Network(profile.and_then(|p| p.ProfileName().ok()).map(|n| n.to_string()))
 }
 
+/// What the idle island shows: the connection ("wifi", "ethernet",
+/// "wifi-off"), and the battery's percent and charging (None on a desktop).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Status {
+    pub net: &'static str,
+    pub battery: Option<(i32, bool)>,
+}
+
+pub fn status_now() -> Status {
+    let net = match NetworkInformation::GetInternetConnectionProfile() {
+        Ok(p) => {
+            if p.IsWlanConnectionProfile().unwrap_or(false) { "wifi" } else { "ethernet" }
+        }
+        Err(_) => "wifi-off",
+    };
+    // A desktop reports no battery: no percent, or "not present" with 100 %.
+    let present = PowerManager::BatteryStatus().map(|b| b != windows::System::Power::BatteryStatus::NotPresent).unwrap_or(false);
+    let battery = if present {
+        let charging = PowerManager::PowerSupplyStatus().map(|s| s != PowerSupplyStatus::NotPresent).unwrap_or(false);
+        PowerManager::RemainingChargePercent().ok().filter(|p| (0..=100).contains(p)).map(|p| (p, charging))
+    } else {
+        None
+    };
+    Status { net, battery }
+}
+
 fn start_power_and_network() {
+    let _ = PowerManager::RemainingChargePercentChanged(&windows::Foundation::EventHandler::new(|_, _| {
+        send(Event::Status);
+        Ok(())
+    }));
     let _ = PowerManager::PowerSupplyStatusChanged(&windows::Foundation::EventHandler::new(|_, _| {
         send(power_now());
         Ok(())
@@ -391,6 +423,7 @@ pub fn describe(e: &Event) -> (String, Option<f32>) {
         Event::Power(false, None) => ("On battery".into(), None),
         Event::Network(Some(name)) => (format!("Connected · {name}"), None),
         Event::Network(None) => ("No internet".into(), None),
+        Event::Status => (String::new(), None),
         Event::Headphones(name, connected, battery) => (headphones_text(name, *connected, *battery), None),
     }
 }
@@ -417,6 +450,7 @@ pub fn icon(e: &Event) -> &'static str {
         Event::Power(true, _) => "bolt",
         Event::Power(false, _) => "battery",
         Event::Network(Some(_)) => "wifi",
+        Event::Status => "battery",
         Event::Network(None) => "wifi-off",
         Event::Headphones(_, true, _) => "headphones",
         Event::Headphones(_, false, _) => "headphones-off",

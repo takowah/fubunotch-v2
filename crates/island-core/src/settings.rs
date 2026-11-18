@@ -216,11 +216,15 @@ pub struct GeneralSettings {
     pub popups: bool,
     /// The screen the island sits on, by Windows' name ("\\.\DISPLAY1"); "" = the main one.
     pub screen: String,
+    /// What the idle island shows left and right of the time:
+    /// "" | "date" | "network" | "battery".
+    pub idle_left: String,
+    pub idle_right: String,
 }
 
 impl Default for GeneralSettings {
     fn default() -> Self {
-        GeneralSettings { hide_after_s: 3, popups: true, screen: String::new() }
+        GeneralSettings { hide_after_s: 3, popups: true, screen: String::new(), idle_left: "date".into(), idle_right: "network".into() }
     }
 }
 

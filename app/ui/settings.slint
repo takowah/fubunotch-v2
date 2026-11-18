@@ -48,6 +48,8 @@ export struct SettingsView {
     autostart: bool,
     mascot: bool,
     popups: bool,
+    idle-left: string,
+    idle-right: string,
     hide-after: int,
     theme: string,
     has-background: bool,
@@ -272,7 +274,7 @@ component ThemeCard inherits Rectangle {
 
 export component SettingsWindow inherits Window {
     default-font-family: "Segoe UI";
-    title: "FubuNotch v2 · Settings";
+    title: "Kanmuri · Settings";
     preferred-width: 900px;
     preferred-height: 600px;
     min-width: 760px;
@@ -303,6 +305,7 @@ export component SettingsWindow inherits Window {
     callback notif-app-toggled(string, bool);
     callback theme-picked(string);
     callback screen-picked(string);
+    callback slot-picked(string, string);
     /// "background.pick", "background.clear", "open-data-folder".
     callback action(string);
     callback claude-connect(bool);
@@ -325,17 +328,20 @@ export component SettingsWindow inherits Window {
                         height: 64px;
                         border-radius: 16px;
                         background: Ice.glow.with-alpha(0.16);
-                        Image {
-                            width: 64px;
-                            height: 64px;
-                            image-rendering: pixelated;
-                            source: Sprites.pick(Ice.theme, "idle", false);
+                        // A crown (kanmuri), drawn: no mascot.
+                        Path {
+                            width: 40px;
+                            height: 40px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            fill: Ice.ink;
+                            commands: "M 3 8 L 7.5 12 L 12 5 L 16.5 12 L 21 8 L 19 18 H 5 Z M 5 19.5 H 19 V 21 H 5 Z";
                         }
                     }
                     VerticalLayout {
                         alignment: center;
-                        Text { text: "FubuNotch"; color: Ice.ink; font-size: 16px; font-weight: 800; }
-                        Text { text: "v2 · Settings"; color: Ice.glow; font-size: 12px; font-weight: 600; }
+                        Text { text: "Kanmuri"; color: Ice.ink; font-size: 16px; font-weight: 800; }
+                        Text { text: "Settings"; color: Ice.glow; font-size: 12px; font-weight: 600; }
                     }
                 }
                 Heading { text: "ISLAND"; }
@@ -398,10 +404,30 @@ export component SettingsWindow inherits Window {
                     if root.s.screens.length > 1 : SettingRow {
                         title: "Screen";
                         hint: "Which screen the island sits on.";
+                        HorizontalLayout { spacing: 6px; alignment: end;
                         for sc in root.s.screens : SmallButton {
                             label: sc.label;
                             primary: sc.id == root.s.screen;
                             clicked => { root.screen-picked(sc.id); }
+                        }
+                        }
+                    }
+                    SettingRow {
+                        title: "Left of the time";
+                        hint: "What the idle island shows there.";
+                        HorizontalLayout { spacing: 6px; alignment: end;
+                        for k in [{id: "", l: "None"}, {id: "date", l: "Date"}, {id: "network", l: "Network"}, {id: "battery", l: "Battery"}] : SmallButton {
+                            label: k.l; primary: k.id == root.s.idle-left; clicked => { root.slot-picked("left", k.id); }
+                        }
+                        }
+                    }
+                    SettingRow {
+                        title: "Right of the time";
+                        hint: "Battery shows only on a laptop.";
+                        HorizontalLayout { spacing: 6px; alignment: end;
+                        for k in [{id: "", l: "None"}, {id: "date", l: "Date"}, {id: "network", l: "Network"}, {id: "battery", l: "Battery"}] : SmallButton {
+                            label: k.l; primary: k.id == root.s.idle-right; clicked => { root.slot-picked("right", k.id); }
+                        }
                         }
                     }
                     SettingRow { title: "Pop up for activities"; tall: true; hint: "The island drops down for new things. Questions from Claude Code always show."; Toggle { on: root.s.popups; toggled(v) => { root.flag-changed("general.popups", v); } } }
@@ -513,7 +539,7 @@ export component SettingsWindow inherits Window {
                     SettingRow {
                         title: "Pop up the island";
                         tall: true;
-                        hint: "Windows' own pop-ups stay off while this module is on; off, or quitting FubuNotch, brings them back.";
+                        hint: "Windows' own pop-ups stay off while this module is on; off, or quitting Kanmuri, brings them back.";
                         last: root.s.notif-access;
                         Toggle { on: root.s.notif-popups; toggled(v) => { root.flag-changed("notifications.popups", v); } }
                     }
@@ -611,20 +637,20 @@ export component SettingsWindow inherits Window {
 
 export component Tray inherits SystemTrayIcon {
     icon: @image-url("../assets/tray.png");
-    tooltip: "FubuNotch v2";
+    tooltip: "Kanmuri";
     callback open-settings();
     callback quit();
     Menu {
         MenuItem { title: "Settings…"; activated => { root.open-settings(); } }
         MenuSeparator { }
-        MenuItem { title: "Quit FubuNotch v2"; activated => { root.quit(); } }
+        MenuItem { title: "Quit Kanmuri"; activated => { root.quit(); } }
     }
 }
 
 /// A yes/no question before something is written outside FubuNotch.
 export component ConfirmWindow inherits Window {
     default-font-family: "Segoe UI";
-    title: "FubuNotch v2";
+    title: "Kanmuri";
     preferred-width: 480px;
     in property <bool> repaint;
     background: root.repaint ? Palette.background : Palette.background.with-alpha(0.999);

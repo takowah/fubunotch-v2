@@ -5,7 +5,7 @@ use windows::core::{w, HSTRING, PCWSTR};
 use windows::Win32::System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
 
 const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-const VALUE: PCWSTR = w!("FubuNotch v2");
+const VALUE: PCWSTR = w!("Kanmuri");
 
 pub fn set(on: bool) -> Result<(), String> {
     unsafe {

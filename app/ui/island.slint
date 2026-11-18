@@ -589,11 +589,49 @@ component SysIcon inherits Path {
         : name == "bolt" ? "M 13 2 L 5 13 H 11 L 10 22 L 19 10 H 13 Z"
         : name == "battery" ? "M 3 8 H 18 V 16 H 3 Z M 21 11 V 13 M 6 11 V 13"
         : name == "wifi" ? "M 2 9 A 15 15 0 0 1 22 9 M 5 12.5 A 10 10 0 0 1 19 12.5 M 8.5 16 A 5 5 0 0 1 15.5 16 M 12 19.5 V 20"
+        : name == "ethernet" ? "M 4 5 H 20 V 15 H 4 Z M 8 15 V 19 H 16 V 15 M 8 9 V 11 M 11 9 V 11 M 13 9 V 11 M 16 9 V 11"
         : name == "wifi-off" ? "M 2 9 A 15 15 0 0 1 22 9 M 5 12.5 A 10 10 0 0 1 19 12.5 M 8.5 16 A 5 5 0 0 1 15.5 16 M 3 3 L 21 21"
         : name == "keyboard" ? "M 3 6 H 21 V 18 H 3 Z M 7 10 H 8 M 11 10 H 12 M 15 10 H 16 M 8 14 H 16"
         : name == "caps-on" || name == "caps-off" ? "M 12 4 L 4 13 H 8 V 19 H 16 V 13 H 20 Z"
         : name == "volume-off" ? "M 4 9 H 8 L 13 5 V 19 L 8 15 H 4 Z M 16 9 L 21 14 M 21 9 L 16 14"
         : "M 4 9 H 8 L 13 5 V 19 L 8 15 H 4 Z M 16 9 A 4 4 0 0 1 16 15 M 18.5 6.5 A 7.5 7.5 0 0 1 18.5 17.5";
+}
+
+// The idle island's battery: an outline filled to the level (red at 20 %
+// or less, green while charging), as Windows' own tray icon.
+component BatteryIcon inherits Rectangle {
+    in property <float> level;
+    in property <bool> charging;
+    width: 22px;
+    height: 12px;
+    Rectangle {
+        x: 0; y: 0; width: 20px; height: 12px;
+        border-radius: 3px;
+        border-width: 1.2px;
+        border-color: Mini.text-2;
+        Rectangle {
+            x: 2px; y: 2px; height: parent.height - 4px;
+            width: max(1px, (parent.width - 4px) * clamp(root.level, 0, 1));
+            border-radius: 1.5px;
+            background: root.charging ? #30d158 : root.level <= 0.2 ? #ff453a : Mini.ink;
+        }
+    }
+    Rectangle { x: 20.5px; y: 4px; width: 1.5px; height: 4px; background: Mini.text-2; }
+}
+
+// One side of the idle island: the date, the connection, or the battery.
+component IdleSlot inherits HorizontalLayout {
+    in property <string> kind;
+    in property <string> date;
+    in property <string> net;
+    in property <string> battery;
+    in property <float> level;
+    in property <bool> charging;
+    spacing: 5px;
+    if root.kind == "date" : Text { text: root.date; color: Mini.text-2; font-size: 13px; font-weight: 600; vertical-alignment: center; }
+    if root.kind == "network" : SysIcon { name: root.net; y: (parent.height - self.height) / 2; }
+    if root.kind == "battery" : BatteryIcon { level: root.level; charging: root.charging; y: (parent.height - self.height) / 2; }
+    if root.kind == "battery" : Text { text: root.battery; color: Mini.text-2; font-size: 13px; font-weight: 600; vertical-alignment: center; }
 }
 
 // A small pill for a question's answers.
@@ -988,7 +1026,7 @@ component AccountsPage inherits VerticalLayout {
 
 export component Island inherits Window {
     default-font-family: "Segoe UI";
-    title: "FubuNotch v2";
+    title: "Kanmuri";
     no-frame: true;
     always-on-top: true;
     background: transparent;
@@ -1003,6 +1041,15 @@ export component Island inherits Window {
     in property <[Item]> others;
     in property <string> clock;
     in property <string> date;
+    // Next to the idle time (Settings > General): "wifi" | "ethernet" |
+    // "wifi-off" | "" (off), the battery's "87%" ("" off or no battery).
+    in property <string> status-net;
+    in property <string> status-battery;
+    in property <float> status-battery-level;
+    in property <bool> status-charging;
+    // What sits left and right of the idle time: "" | "date" | "network" | "battery".
+    in property <string> idle-left;
+    in property <string> idle-right;
     in property <[TabInfo]> tabs;
     in property <string> active-tab: "notifications";
     in property <Music> music;
@@ -1360,6 +1407,7 @@ export component Island inherits Window {
                 alignment: center;
                 if root.has-front && root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
                 if root.has-front && root.front.icon == "" : AppIcon { size: 26px; accent: root.front.accent; initial: root.front.initial; y: (parent.height - self.height) / 2; }
+                if !root.has-front && root.idle-left != "" : IdleSlot { kind: root.idle-left; date: root.date; net: root.status-net; battery: root.status-battery; level: root.status-battery-level; charging: root.status-charging; }
                 Text {
                     text: root.has-front ? root.front.title : root.clock;
                     color: Mini.ink;
@@ -1369,6 +1417,7 @@ export component Island inherits Window {
                     overflow: elide;
                 }
                 if root.has-front && root.front.has-progress : Bar { width: 70px; value: root.front.progress; tint: Paint.readable(root.front.accent); y: (parent.height - self.height) / 2; }
+                if !root.has-front && root.idle-right != "" : IdleSlot { kind: root.idle-right; date: root.date; net: root.status-net; battery: root.status-battery; level: root.status-battery-level; charging: root.status-charging; }
                 if root.waiting > 0 : Text { text: "+" + root.waiting; color: Mini.label; font-size: 11px; font-weight: 600; vertical-alignment: center; }
                 if root.watching : Glyph { width: 14px; text: Glyphs.video; font-size: 11px; color: Mini.label; }
                 if root.dnd : Glyph { width: 14px; text: Glyphs.moon; font-size: 11px; color: Mini.label; }

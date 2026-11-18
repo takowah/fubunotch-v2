@@ -977,7 +977,20 @@ fn refresh(ui: &Island) {
             Mode::Compact if front_kind == Some(Kind::Ask) => COMPACT_NOTICE,
             Mode::Compact if front_kind == Some(Kind::Ambient) && state.music.has_session => COMPACT_SONG,
             Mode::Compact if front_id.is_some() => COMPACT_BUSY,
-            Mode::Compact => COMPACT_IDLE,
+            Mode::Compact => {
+                // Room for what the idle island shows next to the time.
+                let room = |k: &str| match k {
+                    "date" => 84.0,
+                    "network" => 26.0,
+                    "battery" => 64.0,
+                    _ => 0.0,
+                };
+                {
+                    let extra = room(&ui.get_idle_left()) + room(&ui.get_idle_right());
+                    // The time alone keeps Mini Island's idle width; with sides, just their room.
+                    (if extra > 0.0 { 120.0 + extra } else { COMPACT_IDLE.0 }, COMPACT_IDLE.1)
+                }
+            }
         };
         morph_to(ui, state, size);
         follow_watch(ui, state, now);
@@ -1569,8 +1582,34 @@ fn on_notification(ui: &Island, n: notif::Notif) {
     refresh(ui);
 }
 
+/// The idle island's status icons, per Settings > General > Idle island.
+fn show_status(ui: &Island) {
+    let st = system::status_now();
+    let g = with_state(|s| s.settings.general.clone()).unwrap_or_default();
+    ui.set_status_net(st.net.into());
+    match st.battery {
+        Some((p, charging)) => {
+            ui.set_status_battery(format!("{p}%").into());
+            ui.set_status_battery_level(p as f32 / 100.0);
+            ui.set_status_charging(charging);
+        }
+        None => ui.set_status_battery("".into()),
+    }
+    // A battery slot on a PC without one shows nothing.
+    let slot = |k: &str| if k == "battery" && st.battery.is_none() { String::new() } else { k.to_string() };
+    ui.set_idle_left(slot(&g.idle_left).into());
+    ui.set_idle_right(slot(&g.idle_right).into());
+    refresh(ui);
+}
+
 /// A change from the System module: shown when its switch is on (and the module is).
 fn on_system(ui: &Island, e: system::Event) {
+    if matches!(e, system::Event::Power(..) | system::Event::Network(_) | system::Event::Status) {
+        show_status(ui);
+    }
+    if e == system::Event::Status {
+        return;
+    }
     with_state(|state| {
         let sys = &state.settings.system;
         let (on, id) = match e {
@@ -1580,6 +1619,7 @@ fn on_system(ui: &Island, e: system::Event) {
             system::Event::Power(..) => (sys.charger, "sys:power"),
             system::Event::Network(_) => (sys.network, "sys:network"),
             system::Event::Headphones(..) => (sys.audio_device, "sys:audio"),
+            system::Event::Status => return,
         };
         if !on || !state.settings.is_on("system") {
             return;
@@ -1747,7 +1787,7 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         .collect();
     let (installed, status) = match claude::read_settings() {
         Ok(v) if claude::installed(&v) => (true, format!("Hooks in {}.", claude::settings_path().display())),
-        Ok(_) => (false, "Connecting adds FubuNotch v2's hooks to Claude Code's settings.json (a backup first).".to_string()),
+        Ok(_) => (false, "Connecting adds Kanmuri's hooks to Claude Code's settings.json (a backup first).".to_string()),
         Err(e) => (false, e),
     };
     let preview = with_state(|state| state.bg_preview.clone()).flatten();
@@ -1798,6 +1838,8 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         autostart: s.autostart,
         mascot: s.look.mascot,
         popups: s.general.popups,
+        idle_left: s.general.idle_left.as_str().into(),
+        idle_right: s.general.idle_right.as_str().into(),
         hide_after: s.general.hide_after_s.clamp(2, 60) as i32,
         theme: s.look.theme().into(),
         has_background: !s.look.background.is_empty(),
@@ -2061,6 +2103,15 @@ fn open_settings(ui: &Island) {
         }
     });
     let island = ui.as_weak();
+    win.on_slot_picked(move |side, kind| {
+        if let Some(ui) = island.upgrade() {
+            change_settings(&ui, |s| {
+                if side == "left" { s.general.idle_left = kind.to_string() } else { s.general.idle_right = kind.to_string() }
+            });
+            show_status(&ui);
+        }
+    });
+    let island = ui.as_weak();
     win.on_screen_picked(move |id| {
         if let Some(ui) = island.upgrade() {
             change_settings(&ui, |s| s.general.screen = id.to_string());
@@ -2205,11 +2256,11 @@ fn ask_claude_hooks(ui: &Island, install: bool) {
     let path = claude::settings_path().display().to_string();
     let message = if install {
         format!(
-            "Adds FubuNotch v2's hooks for {} to:\n{path}\n\nA backup of the file is saved first (settings.json.bak-fubunotch-v2-<date>). Your other settings and hooks, FubuNotch v1's included, stay as they are. If both v1 and v2 are running, both islands may ask for the same permission.",
+            "Adds Kanmuri's hooks for {} to:\n{path}\n\nA backup of the file is saved first (settings.json.bak-fubunotch-v2-<date>). Your other settings and hooks, FubuNotch v1's included, stay as they are. If both v1 and v2 are running, both islands may ask for the same permission.",
             events.join(", ")
         )
     } else {
-        format!("Removes FubuNotch v2's hooks from:\n{path}\n\nA backup is saved first. Nothing else in the file changes.")
+        format!("Removes Kanmuri's hooks from:\n{path}\n\nA backup is saved first. Nothing else in the file changes.")
     };
     let Ok(confirm) = ConfirmWindow::new() else { return };
     confirm.set_heading(if install { "Connect Claude Code?" } else { "Disconnect Claude Code?" }.into());
@@ -2744,6 +2795,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The System module's watchers cost nothing while nothing changes; its
     // switches are read per event, so turning one off needs no restart.
+    show_status(&ui);
     let weak = ui.as_weak();
     system::start(move |e| {
         let weak = weak.clone();

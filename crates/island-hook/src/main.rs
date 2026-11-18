@@ -23,7 +23,8 @@ const STDIN_LIMIT: u64 = 1024 * 1024;
 
 fn token() -> Option<String> {
     let dir = std::env::var_os("APPDATA")?;
-    let path = std::path::Path::new(&dir).join("FubuNotch v2").join("token");
+    // Kanmuri (was FubuNotch v2): the new folder first, the old one until it is copied.
+    let path = ["Kanmuri", "FubuNotch v2"].iter().map(|n| std::path::Path::new(&dir).join(n).join("token")).find(|p| p.exists()).unwrap_or_default();
     let t = std::fs::read_to_string(path).ok()?.trim().to_string();
     (t.len() >= 32).then_some(t)
 }
@@ -54,7 +55,7 @@ fn post(event: &str, body: &[u8], token: &str, wait: Duration) -> Option<String>
 fn decision_json(decision: &str) -> Option<String> {
     let behavior = match decision.trim() {
         "allow" => r#"{"behavior":"allow"}"#,
-        "deny" => r#"{"behavior":"deny","message":"Denied from FubuNotch v2"}"#,
+        "deny" => r#"{"behavior":"deny","message":"Denied from Kanmuri"}"#,
         _ => return None,
     };
     Some(format!(r#"{{"hookSpecificOutput":{{"hookEventName":"PermissionRequest","decision":{behavior}}}}}"#))
