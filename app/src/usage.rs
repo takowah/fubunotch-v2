@@ -52,6 +52,10 @@ pub struct Usage {
     pub plan: String,
     pub windows: Vec<Window>,
     pub updated: i64,
+    /// The account these numbers are of (Claude Code's accountUuid). A slot
+    /// signed in again as someone else drops them: never one account's usage
+    /// under another's name (the owner, 19 Nov 2026: "misleading").
+    pub account: String,
 }
 
 #[derive(Default)]
@@ -195,6 +199,12 @@ pub fn ago(secs: i64) -> String {
 
 /// Claude Code's `rateLimitTier` / `subscriptionType` as a badge: "Max 20x", "Max 5x", "Pro".
 pub fn claude_plan(tier: &str, subscription: &str) -> String {
+    // A Team or Enterprise seat says so (Claude Desktop shows "Team"), even
+    // when its rate-limit tier reads like a Max one.
+    let sub = subscription.to_ascii_lowercase();
+    if sub == "team" || sub == "enterprise" {
+        return title_case(subscription);
+    }
     let t = tier.to_ascii_lowercase();
     if t.contains("max_20x") {
         return "Max 20x".into();
@@ -303,7 +313,7 @@ pub fn parse_codex_limits(rl: &Value) -> Option<Usage> {
             Some(Window { label: codex_label(minutes), used, resets_at })
         })
         .collect();
-    Some(Usage { plan, windows, updated: 0 })
+    Some(Usage { plan, windows, updated: 0, ..Usage::default() })
 }
 
 fn find_rate_limits(v: &Value) -> Option<&Value> {
@@ -494,16 +504,29 @@ pub fn sweep(accounts: &[Account], online: bool) {
         let dir = dir_of(a);
         match a.service.as_str() {
             "claude" => {
-                if let Some(u) = account_uuid(&dir) {
-                    uuids.insert(u, a.id.clone());
+                let who = account_uuid(&dir).unwrap_or_default();
+                if !who.is_empty() {
+                    uuids.insert(who.clone(), a.id.clone());
                 }
-                let Some(c) = read_creds(&dir, now) else { continue };
-                let (due, mut usage) = with_store(|s| {
+                let Some(c) = read_creds(&dir, now) else {
+                    // Signed out: nothing of whoever was here before.
+                    with_store(|s| s.usage.remove(&a.id));
+                    continue;
+                };
+                let (mut due, mut usage) = with_store(|s| {
                     s.expired.insert(a.id.clone(), c.expired);
                     let u = s.usage.get(&a.id).cloned().unwrap_or_default();
                     let asked = s.asked.get(&a.id).copied().unwrap_or(0);
                     (now - u.updated >= FETCH_EVERY_S && now - asked >= FETCH_EVERY_S, u)
                 });
+                // Another account in this slot now (signed in again): the old
+                // numbers go, and the new account is asked at once.
+                if usage.account != who {
+                    usage = Usage { account: who.clone(), ..Usage::default() };
+                    with_store(|s| s.asked.remove(&a.id));
+                    due = true;
+                    changed = true;
+                }
                 if usage.plan != c.plan {
                     usage.plan = c.plan.clone();
                     changed = true;
@@ -581,14 +604,14 @@ fn demo_view(id: &str) -> View {
     let w = |label: &str, used: f32, in_h: i64| Window { label: label.into(), used, resets_at: Some(now + in_h * 3600 + 1800) };
     let (u, expired) = match id {
         "desktop-partner" | "claude-partner" => (
-            Usage { plan: "Max 20x".into(), windows: vec![w("5-hour", 32.0, 2), w("Week · all models", 58.0, 50), w("Week · Opus", 91.0, 50)], updated: now },
+            Usage { plan: "Max 20x".into(), windows: vec![w("5-hour", 32.0, 2), w("Week · all models", 58.0, 50), w("Week · Opus", 91.0, 50)], updated: now, ..Usage::default() },
             false,
         ),
         "desktop-daffa" | "claude-daffa" => (
-            Usage { plan: "Max 5x".into(), windows: vec![w("5-hour", 4.0, 4), w("Week · all models", 77.0, 98)], updated: now - 18 * 60 },
+            Usage { plan: "Max 5x".into(), windows: vec![w("5-hour", 4.0, 4), w("Week · all models", 77.0, 98)], updated: now - 18 * 60, ..Usage::default() },
             true,
         ),
-        "codex-main" => (Usage { plan: "Plus".into(), windows: vec![w("5-hour", 12.0, 3), w("Weekly", 35.0, 120)], updated: now - 18 * 60 }, false),
+        "codex-main" => (Usage { plan: "Plus".into(), windows: vec![w("5-hour", 12.0, 3), w("Weekly", 35.0, 120)], updated: now - 18 * 60, ..Usage::default() }, false),
         _ => return View::default(),
     };
     make_view(&u, expired, id.starts_with("codex"), now, offset)
@@ -629,7 +652,7 @@ mod tests {
     #[test]
     fn plans() {
         assert_eq!(claude_plan("default_claude_max_20x", "max"), "Max 20x");
-        assert_eq!(claude_plan("default_claude_max_5x", "team"), "Max 5x");
+        assert_eq!(claude_plan("default_claude_max_5x", "team"), "Team", "a Team seat, as Claude Desktop says");
         assert_eq!(claude_plan("default_claude_ai", "pro"), "Pro");
     }
 
@@ -659,7 +682,7 @@ mod tests {
 
     #[test]
     fn stale_and_expired_notes() {
-        let u = Usage { plan: "Max 20x".into(), windows: vec![Window { label: "5-hour".into(), used: 32.4, resets_at: Some(10_000) }], updated: 1000 };
+        let u = Usage { plan: "Max 20x".into(), windows: vec![Window { label: "5-hour".into(), used: 32.4, resets_at: Some(10_000) }], updated: 1000, ..Usage::default() };
         let v = make_view(&u, false, false, 1000 + 60, 0);
         assert_eq!(v.note, "");
         assert_eq!(v.rows[0].used_text, "32% used");
@@ -668,7 +691,7 @@ mod tests {
         let v = make_view(&u, false, false, 20_000, 0);
         assert_eq!(v.rows[0].used, 0.0, "past the reset");
         assert_eq!(v.rows[0].resets, "reset");
-        let none = Usage { plan: "Max 5x".into(), windows: vec![], updated: 0 };
+        let none = Usage { plan: "Max 5x".into(), windows: vec![], updated: 0, ..Usage::default() };
         assert_eq!(make_view(&none, true, false, 1, 0).note, "Open Claude Code to see usage");
     }
 }

@@ -190,6 +190,8 @@ component Glyph inherits Text {
 component Field inherits Rectangle {
     in property <string> text;
     in property <string> placeholder;
+    // A name field saves when left; the "new account" field only on Enter / Add.
+    in property <bool> save-on-leave: true;
     callback accepted(string);
     out property <string> value: input.text;
     height: 30px;
@@ -208,6 +210,11 @@ component Field inherits Rectangle {
         font-size: 12.5px;
         single-line: true;
         accepted => { root.accepted(self.text); }
+        // Clicking away saves too: there is no Save button (the owner,
+        // 19 Nov 2026: "ntah dimana tombol save nya").
+        changed has-focus => {
+            if (!self.has-focus && self.text != root.text && root.save-on-leave) { root.accepted(self.text); }
+        }
     }
 }
 
@@ -456,7 +463,7 @@ component AccountsCard inherits Card {
         padding-top: 10px;
         padding-bottom: 12px;
         spacing: 8px;
-        add-field := Field { width: 220px; placeholder: "New account's name"; accepted(t) => { root.act("add", root.service, t); } }
+        add-field := Field { width: 220px; placeholder: "New account's name"; save-on-leave: false; accepted(t) => { root.act("add", root.service, t); } }
         SmallButton { label: "Add"; glyph: SetGlyphs.add; clicked => { root.act("add", root.service, add-field.value); } }
         Text { horizontal-stretch: 1; text: root.add-hint; color: K.hint; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
     }
@@ -1448,6 +1455,7 @@ export component SettingsWindow inherits Window {
                         }
                     }
                 }
+                if root.page == "accounts" : Text { text: "Edit a name and press Enter or click elsewhere: it saves at once."; color: K.hint; font-size: 12px; wrap: word-wrap; }
                 if root.page == "accounts" && root.account-note != "" : Text { text: root.account-note; color: #ff9f0a; font-size: 12.5px; wrap: word-wrap; }
                 if root.page == "accounts" : Heading { text: "CLAUDE DESKTOP"; }
                 if root.page == "accounts" : AccountsCard {
