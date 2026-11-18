@@ -31,6 +31,9 @@ export struct Item {
     accent: color,
     // The first letter of the app, for its round icon.
     initial: string,
+    // The app's real logo (rounded by Rust), when Windows has one.
+    logo: image,
+    has-logo: bool,
 }
 
 export struct TabInfo {
@@ -150,6 +153,22 @@ export struct NotifRow {
     accent: color,
     // The first letter of the app, for its round icon.
     initial: string,
+    // The app's real logo (rounded by Rust), when Windows has one.
+    logo: image,
+    has-logo: bool,
+}
+
+// A question from Claude Code waiting for Allow / Deny, at the top of the
+// Notifications page: "Allow Bash?", the project, the command.
+export struct AskRow {
+    id: string,
+    title: string,
+    project: string,
+    command: string,
+    accent: color,
+    initial: string,
+    logo: image,
+    has-logo: bool,
 }
 
 export struct LyricLine {
@@ -361,16 +380,21 @@ component Tinted inherits Rectangle {
     }
 }
 
-// An app's round icon: its colour, a little darker, and its first letter.
+// An app's icon: its real logo (a rounded square, the corners cut in the
+// picture: the software renderer clips square), else a disc in its colour
+// with its first letter.
 component AppIcon inherits Rectangle {
     in property <color> accent;
     in property <string> initial;
+    in property <image> logo;
+    in property <bool> has-logo;
     in property <length> size: 34px;
     width: root.size;
     height: root.size;
     border-radius: root.size / 2;
-    background: root.accent;
-    Text {
+    background: root.has-logo ? transparent : root.accent;
+    if root.has-logo : Image { width: parent.width; height: parent.height; source: root.logo; image-fit: contain; }
+    if !root.has-logo : Text {
         width: 100%;
         height: 100%;
         text: root.initial == "" ? "?" : root.initial;
@@ -962,12 +986,17 @@ component MusicWide inherits Rectangle {
 // columns, each row the app's round icon, the title and message, the time.
 component NotifPage inherits Rectangle {
     in property <[NotifRow]> items;
+    // Claude Code's open questions, on top, one a row (the three newest).
+    in property <[AskRow]> asks;
     callback clicked(int);
     callback clear();
+    callback answered(string, string);
     // One column for a single notification, else two.
     property <int> cols: root.items.length == 1 ? 1 : 2;
     property <length> col-w: (root.width - (self.cols - 1) * 10px) / self.cols;
-    if root.items.length == 0 : Text {
+    property <int> ask-rows: min(root.asks.length, 3);
+    property <length> grid-y: 28px + self.ask-rows * 50px;
+    if root.items.length == 0 && root.asks.length == 0 : Text {
         width: parent.width;
         height: parent.height;
         vertical-alignment: center;
@@ -976,7 +1005,7 @@ component NotifPage inherits Rectangle {
         font-size: 13px;
         horizontal-alignment: center;
     }
-    if root.items.length > 0 : Rectangle {
+    if root.items.length > 0 || root.asks.length > 0 : Rectangle {
         x: 8px;
         y: 0;
         width: parent.width - 16px;
@@ -991,7 +1020,7 @@ component NotifPage inherits Rectangle {
             font-weight: 600;
             vertical-alignment: center;
         }
-        Text {
+        if root.items.length > 0 : Text {
             x: parent.width - self.width;
             width: self.preferred-width;
             height: 100%;
@@ -1004,14 +1033,46 @@ component NotifPage inherits Rectangle {
             clear-area := TouchArea { mouse-cursor: pointer; clicked => { root.clear(); } }
         }
     }
+    // A question: the Claude logo, "Allow Bash?", the project and the
+    // command, Allow / Deny on the right (the capsule's answers).
+    for q[i] in root.asks : Rectangle {
+        visible: i < 3;
+        x: 0;
+        y: 28px + i * 50px;
+        width: root.width;
+        height: 48px;
+        Tinted { width: parent.width; height: parent.height; tint: q.accent; lit: true; }
+        AppIcon { x: 8px; y: 9px; size: 30px; accent: q.accent; initial: q.initial; logo: q.logo; has-logo: q.has-logo; }
+        VerticalLayout {
+            x: 50px;
+            width: parent.width - 50px - 12px - answers.preferred-width - 12px;
+            alignment: center;
+            Text { text: q.title; color: Mini.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+            Text {
+                text: q.command == "" ? q.project : q.project + " · " + q.command;
+                color: Mini.text-3;
+                font-size: 12px;
+                overflow: elide;
+            }
+        }
+        answers := HorizontalLayout {
+            x: parent.width - 12px - self.preferred-width;
+            y: (parent.height - 24px) / 2;
+            width: self.preferred-width;
+            height: 24px;
+            spacing: 6px;
+            ActionPill { label: "Allow"; clicked => { root.answered(q.id, "allow"); } }
+            ActionPill { label: "Deny"; clicked => { root.answered(q.id, "deny"); } }
+        }
+    }
     for n[i] in root.items : Rectangle {
         visible: i < 6;
         x: mod(i, root.cols) * (root.col-w + 10px);
-        y: 28px + floor(i / root.cols) * 50px;
+        y: root.grid-y + floor(i / root.cols) * 50px;
         width: root.col-w;
         height: 48px;
         Tinted { width: parent.width; height: parent.height; tint: n.accent; lit: row.has-hover; }
-        AppIcon { x: 8px; y: 9px; size: 30px; accent: n.accent; initial: n.initial; }
+        AppIcon { x: 8px; y: 9px; size: 30px; accent: n.accent; initial: n.initial; logo: n.logo; has-logo: n.has-logo; }
         VerticalLayout {
             x: 50px;
             width: parent.width - 50px - 10px - 44px;
@@ -1365,6 +1426,7 @@ export component Island inherits Window {
     // Romaji of the line on the capsule (shown under it), when the lyrics have it.
     in property <string> capsule-romaji;
     in property <[NotifRow]> notifications;
+    in property <[AskRow]> asks;
     in property <FocusView> pomodoro;
     in property <WaterView> water;
     in property <PrayerView> prayer;
@@ -1433,6 +1495,8 @@ export component Island inherits Window {
     callback notif-clicked(int);
     callback notif-clear();
     callback action-clicked(string);
+    // A question answered from its row on the Notifications page: its id, "allow" / "deny".
+    callback ask-answered(string, string);
     callback dismiss();
     callback tab-clicked(string);
     callback open-settings();
@@ -1557,7 +1621,7 @@ export component Island inherits Window {
                 opacity: root.show-notif ? 1 : 0;
                 animate opacity { duration: Ice.fade; }
                 visible: self.opacity > 0.01;
-                AppIcon { x: 12px; y: (parent.height - self.height) / 2; accent: root.front.accent; initial: root.front.initial; }
+                AppIcon { x: 12px; y: (parent.height - self.height) / 2; accent: root.front.accent; initial: root.front.initial; logo: root.front.logo; has-logo: root.front.has-logo; }
                 VerticalLayout {
                     x: 12px + 34px + 10px;
                     width: parent.width - self.x - 8px - notif-right.width - 22px;
@@ -1582,7 +1646,7 @@ export component Island inherits Window {
                 opacity: root.show-ask ? 1 : 0;
                 animate opacity { duration: Ice.fade; }
                 visible: self.opacity > 0.01;
-                AppIcon { x: 12px; y: (parent.height - self.height) / 2; accent: root.front.accent; initial: root.front.initial; }
+                AppIcon { x: 12px; y: (parent.height - self.height) / 2; accent: root.front.accent; initial: root.front.initial; logo: root.front.logo; has-logo: root.front.has-logo; }
                 VerticalLayout {
                     x: 12px + 34px + 10px;
                     width: parent.width - self.x - 8px - ask-actions.preferred-width - 16px;
@@ -1688,7 +1752,7 @@ export component Island inherits Window {
                         padding-right: 16px;
                         spacing: 10px;
                         if root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
-                        if root.front.icon == "" : AppIcon { size: 26px; accent: root.front.accent; initial: root.front.initial; y: (parent.height - self.height) / 2; }
+                        if root.front.icon == "" : AppIcon { size: 26px; accent: root.front.accent; initial: root.front.initial; logo: root.front.logo; has-logo: root.front.has-logo; y: (parent.height - self.height) / 2; }
                         VerticalLayout {
                             alignment: center;
                             horizontal-stretch: 1;
@@ -1712,7 +1776,7 @@ export component Island inherits Window {
                 spacing: 10px;
                 alignment: center;
                 if root.has-front && root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
-                if root.has-front && root.front.icon == "" : AppIcon { size: 26px; accent: root.front.accent; initial: root.front.initial; y: (parent.height - self.height) / 2; }
+                if root.has-front && root.front.icon == "" : AppIcon { size: 26px; accent: root.front.accent; initial: root.front.initial; logo: root.front.logo; has-logo: root.front.has-logo; y: (parent.height - self.height) / 2; }
                 if !root.has-front && root.idle-left != "" : IdleSlot { kind: root.idle-left; date: root.date; net: root.status-net; battery: root.status-battery; level: root.status-battery-level; charging: root.status-charging; }
                 Text {
                     text: root.has-front ? root.front.title : root.clock;
@@ -1822,7 +1886,7 @@ export component Island inherits Window {
                     QuickButton {
                         glyph: Glyphs.bell;
                         on: root.active-tab == "notifications";
-                        badge: root.notifications.length;
+                        badge: root.notifications.length + root.asks.length;
                         clicked => { root.tab-clicked("notifications"); }
                     }
                     QuickButton { glyph: Glyphs.gear; clicked => { root.open-settings(); } }
@@ -1836,7 +1900,13 @@ export component Island inherits Window {
                     height: parent.height - self.y - 14px - 1px;
                     Page {
                         shown: root.active-tab == "notifications";
-                        NotifPage { items: root.notifications; clicked(i) => { root.notif-clicked(i); } clear => { root.notif-clear(); } }
+                        NotifPage {
+                            items: root.notifications;
+                            asks: root.asks;
+                            clicked(i) => { root.notif-clicked(i); }
+                            clear => { root.notif-clear(); }
+                            answered(id, a) => { root.ask-answered(id, a); }
+                        }
                     }
                     Page {
                         shown: root.active-tab == "music";

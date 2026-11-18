@@ -91,6 +91,8 @@ const EXPANDED: (f32, f32) = (EXPANDED_W, EXPANDED_CHROME + PAGE_H);
 const NOTIF_HEADER_H: f32 = 28.0;
 const NOTIF_ROW_PITCH: f32 = 50.0;
 const NOTIF_ROWS_MAX: usize = 6;
+/// Claude Code's questions shown at the top of the Notifications page.
+const ASK_ROWS_MAX: usize = 3;
 /// Accounts: one column per app, its title and its chips stacked.
 const ACCOUNT_PAD: f32 = 8.0;
 const ACCOUNT_TITLE_H: f32 = 20.0;
@@ -235,6 +237,9 @@ struct State {
     /// Claude Code permission requests waiting for a click: activity id → answer.
     pending: HashMap<String, island_webhook::Reply>,
     ask_seq: u64,
+    /// Apps' logos as images (by AUMID), made once on the UI thread from
+    /// notif's pixels: refreshes reuse them.
+    logos: HashMap<String, slint::Image>,
     confirm: Option<ConfirmWindow>,
     /// A file is being dragged over the island.
     drop_hover: bool,
@@ -360,7 +365,7 @@ fn kind_name(k: Kind) -> &'static str {
     }
 }
 
-fn item(a: &Activity) -> Item {
+fn item(a: &Activity, logo: Option<slint::Image>) -> Item {
     let actions: Vec<ActionInfo> = a.actions.iter().map(|x| ActionInfo { id: x.id.as_str().into(), label: x.label.as_str().into() }).collect();
     Item {
         actions: ModelRc::new(VecModel::from(actions)),
@@ -374,7 +379,105 @@ fn item(a: &Activity) -> Item {
         has_progress: a.progress.is_some(),
         accent: accent(a),
         initial: initial(&a.source).into(),
+        has_logo: logo.is_some(),
+        logo: logo.unwrap_or_default(),
     }
+}
+
+/// The app behind an activity, by AUMID: Claude Code's events wear the Claude
+/// app's logo, a notification its own app's; "" when unknown.
+fn activity_aumid(notifications: &VecDeque<notif::Notif>, a: &Activity) -> String {
+    if a.id.starts_with("claude:") || a.source.to_lowercase().contains("claude") {
+        return notif::CLAUDE_AUMID.into();
+    }
+    if let Some(n) = a.id.strip_prefix("notif:").and_then(|x| x.parse::<u32>().ok()).and_then(|x| notifications.iter().find(|n| n.id == x)) {
+        return n.aumid.clone();
+    }
+    notifications.iter().find(|n| n.app == a.source).map(|n| n.aumid.clone()).or_else(|| notif::seen_apps().get(&a.source).cloned()).unwrap_or_default()
+}
+
+/// An app's logo as an image with rounded corners, made once per app on the
+/// UI thread; None (the initial is drawn) while notif has no pixels for it.
+fn logo_image(cache: &mut HashMap<String, slint::Image>, aumid: &str) -> Option<slint::Image> {
+    if aumid.is_empty() {
+        return None;
+    }
+    if let Some(img) = cache.get(aumid) {
+        return Some(img.clone());
+    }
+    let px = notif::logo(aumid)?;
+    let n = notif::LOGO_PX;
+    if px.len() != (n * n * 4) as usize {
+        return None;
+    }
+    let mut rounded = px.to_vec();
+    // A square tile gets rounded corners; a logo with its own shape (its
+    // corners already transparent) is left as drawn.
+    let corner_alpha = |x: u32, y: u32| px[((y * n + x) * 4 + 3) as usize];
+    if [(0, 0), (n - 1, 0), (0, n - 1), (n - 1, n - 1)].iter().any(|&(x, y)| corner_alpha(x, y) > 128) {
+        round_cover(&mut rounded, n);
+    }
+    let img = slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rounded, n, n));
+    cache.insert(aumid.to_string(), img.clone());
+    Some(img)
+}
+
+/// Claude Code's open questions (asks still live), newest first, for the
+/// top of the Notifications page.
+fn ask_rows(arbiter: &Arbiter, logos: &mut HashMap<String, slint::Image>) -> Vec<AskRow> {
+    let logo = logo_image(logos, notif::CLAUDE_AUMID);
+    let mut asks: Vec<&Activity> = arbiter.ranked().into_iter().filter(|a| a.kind == Kind::Ask).collect();
+    asks.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    asks.iter()
+        .map(|a| {
+            // The body is "project\ncommand" (claude::plan).
+            let (project, command) = a.body.split_once('\n').unwrap_or((a.body.as_str(), ""));
+            AskRow {
+                id: a.id.as_str().into(),
+                title: a.title.as_str().into(),
+                project: project.trim().into(),
+                command: command.trim().into(),
+                accent: accent(a),
+                initial: initial(&a.source).into(),
+                has_logo: logo.is_some(),
+                logo: logo.clone().unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
+/// Answers a question (from the capsule or the Notifications page): the
+/// user's "allow" / "deny" goes back to Claude Code, and the question ends.
+fn answer(state: &mut State, id: &str, action: &str, now: u64) {
+    if let Some(reply) = state.pending.remove(id) {
+        // Only what the user clicked goes back: "allow" or "deny".
+        if action == "allow" || action == "deny" {
+            let _ = reply.0.send(action.to_string());
+        }
+    }
+    state.arbiter.end(id, now);
+}
+
+/// The demo notifications' apps and their AUMIDs (KANMURI_DEMO_NOTIFS).
+const DEMO_APPS: [(&str, &str); 3] = [
+    ("Claude", notif::CLAUDE_AUMID),
+    ("Discord", "com.squirrel.Discord.Discord"),
+    ("WhatsApp", "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"),
+];
+
+/// A made-up logo for a demo app Windows doesn't have: a tile in its colour
+/// with a pale diagonal band, LOGO_PX square RGBA.
+fn demo_logo(c: slint::Color) -> Vec<u8> {
+    let n = notif::LOGO_PX;
+    let mut px = Vec::with_capacity((n * n * 4) as usize);
+    for y in 0..n {
+        for x in 0..n {
+            let band = (x as i32 - y as i32).abs() < (n as i32 / 6);
+            let mix = |v: u8| if band { ((v as u32 + 255 * 2) / 3) as u8 } else { v };
+            px.extend([mix(c.red()), mix(c.green()), mix(c.blue()), 255]);
+        }
+    }
+    px
 }
 
 /// An app's first letter, for its round icon.
@@ -734,7 +837,8 @@ fn refresh(ui: &Island) {
         let front_sig = view.front.map(|a| format!("{}|{}|{}|{:?}", a.id, a.title, a.body, a.progress)).unwrap_or_default();
         ui.set_has_front(view.front.is_some());
         if let Some(front) = view.front {
-            ui.set_front(item(front));
+            let logo = logo_image(&mut state.logos, &activity_aumid(&state.notifications, front));
+            ui.set_front(item(front, logo));
         }
         // A Windows notification with a message shows it (v1's taller chip).
         // So does the music's notice (song, play, pause, stop).
@@ -747,7 +851,7 @@ fn refresh(ui: &Island) {
             .into_iter()
             .filter(|a| Some(&a.id) != front_id.as_ref())
             .take(OTHERS_MAX)
-            .map(item)
+            .map(|a| item(a, logo_image(&mut state.logos, &activity_aumid(&state.notifications, a))))
             .collect();
         ui.set_others(ModelRc::new(VecModel::from(others)));
         // KANMURI_DEMO_PRAYER: the header's clock says the pretend time too.
@@ -759,7 +863,8 @@ fn refresh(ui: &Island) {
         // them), Accounts (with NotchDeck).
         let has_lyrics = state.lyrics.as_ref().is_some_and(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty());
         let mut tab_ids: Vec<(&str, &str)> = Vec::new();
-        if !state.notifications.is_empty() || !state.music.has_session {
+        let asks = ask_rows(&state.arbiter, &mut state.logos);
+        if !state.notifications.is_empty() || !asks.is_empty() || !state.music.has_session {
             tab_ids.push(("notifications", "Notifications"));
         }
         if state.music.has_session {
@@ -783,19 +888,27 @@ fn refresh(ui: &Island) {
         ui.set_tabs(ModelRc::new(VecModel::from(tabs)));
         ui.set_active_tab(state.active_tab.as_str().into());
         let lyrics_on = state.settings.music.lyrics || state.settings.music.lyrics_youtube;
+        let logos = &mut state.logos;
         let rows: Vec<NotifRow> = state
             .notifications
             .iter()
-            .map(|n| NotifRow {
-                app: n.app.as_str().into(),
-                title: n.title.as_str().into(),
-                body: n.body.as_str().into(),
-                time: n.time.as_str().into(),
-                accent: accent_of(&n.app, Kind::Alert),
-                initial: initial(&n.app).into(),
+            .map(|n| {
+                let logo = logo_image(logos, &n.aumid);
+                NotifRow {
+                    app: n.app.as_str().into(),
+                    title: n.title.as_str().into(),
+                    body: n.body.as_str().into(),
+                    time: n.time.as_str().into(),
+                    accent: accent_of(&n.app, Kind::Alert),
+                    initial: initial(&n.app).into(),
+                    has_logo: logo.is_some(),
+                    logo: logo.unwrap_or_default(),
+                }
             })
             .collect();
         ui.set_notifications(ModelRc::new(VecModel::from(rows)));
+        let ask_count = asks.len();
+        ui.set_asks(ModelRc::new(VecModel::from(asks)));
 
         let left = state.focus.left(now);
         let length = state.focus_plan.length_ms(state.focus.phase);
@@ -954,12 +1067,14 @@ fn refresh(ui: &Island) {
                     "music" | "prayer" => PAGE_H,
                     "lyrics" => PAGE_TALL_H,
                     "accounts" => accounts_h.max(PAGE_H),
-                    _ if state.notifications.is_empty() => PAGE_H,
+                    _ if state.notifications.is_empty() && ask_count == 0 => PAGE_H,
                     _ => {
-                        // Two columns (one for a single notification).
+                        // Claude Code's questions first, one a row; then the
+                        // notifications in two columns (one for a single one).
+                        let q = ask_count.min(ASK_ROWS_MAX);
                         let n = state.notifications.len().min(NOTIF_ROWS_MAX);
                         let cols = if n == 1 { 1 } else { 2 };
-                        (NOTIF_HEADER_H + n.div_ceil(cols) as f32 * NOTIF_ROW_PITCH).max(PAGE_H)
+                        (NOTIF_HEADER_H + (q + n.div_ceil(cols)) as f32 * NOTIF_ROW_PITCH).max(PAGE_H)
                     }
                 };
                 (EXPANDED.0, (EXPANDED_CHROME + page).min(EXPANDED_MAX_H))
@@ -2529,6 +2644,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             data: store::load_data(),
             pending: HashMap::new(),
             ask_seq: 0,
+            logos: HashMap::new(),
             confirm: None,
             drop_hover: false,
             timer: Timer::default(),
@@ -2552,6 +2668,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if over && asking {
                 state.hide_at = None;
             } else if over || inside {
+                // Opening while Claude Code waits for an answer: its question
+                // is at the top of the Notifications page.
+                if state.mode != Mode::Expanded && state.arbiter.ranked().iter().any(|a| a.kind == Kind::Ask) {
+                    state.active_tab = "notifications".into();
+                }
                 state.mode = Mode::Expanded;
                 state.hide_at = None;
                 state.watch_hover = false;
@@ -2774,13 +2895,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 state.active_tab = "water".into();
                 return;
             }
-            if let Some(reply) = state.pending.remove(&id) {
-                // Only what the user clicked goes back: "allow" or "deny".
-                if action == "allow" || action == "deny" {
-                    let _ = reply.0.send(action.to_string());
-                }
+            answer(state, &id, &action, now);
+        });
+        refresh(&ui);
+    });
+
+    // A question answered from its row on the Notifications page.
+    let weak = ui.as_weak();
+    ui.on_ask_answered(move |id, action| {
+        let Some(ui) = weak.upgrade() else { return };
+        with_state(|state| {
+            let now = now_ms(state.started);
+            if state.arbiter.ranked().iter().any(|a| a.id == id.as_str() && a.kind == Kind::Ask) {
+                answer(state, &id, &action, now);
             }
-            state.arbiter.end(&id, now);
         });
         refresh(&ui);
     });
@@ -2931,6 +3059,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         *NOTIF_APPS.lock().unwrap_or_else(|e| e.into_inner()) = with_state(|s| s.settings.notifications.filter()).unwrap_or_default();
         start_notifications(&ui);
     }
+    // The Claude app's logo for Claude Code's questions and notices: read once,
+    // off the UI thread (a notification from an app brings its own).
+    if !snapshot_mode() {
+        let weak = ui.as_weak();
+        notif::preload(vec![notif::CLAUDE_AUMID.into()], move || {
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    refresh(&ui);
+                }
+            });
+        });
+    }
     // A newly installed app gets a key from Windows: its banners follow too.
     if !snapshot_mode() {
         banners::watch(banners::SETTINGS, || {
@@ -3000,12 +3140,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 (2, "Discord", "Ren", "Pushed the fix, have a look when you can", "10:12"),
                 (1, "WhatsApp", "Mum", "Call me later", "09:58"),
             ] {
-                state.notifications.push_back(notif::Notif { id, app: app.into(), aumid: String::new(), title: title.into(), body: body.into(), time: time.into() });
+                let aumid = DEMO_APPS.iter().find(|(a, _)| *a == app).map_or("", |(_, id)| id);
+                state.notifications.push_back(notif::Notif { id, app: app.into(), aumid: aumid.into(), title: title.into(), body: body.into(), time: time.into() });
             }
             // the newest one up on the capsule, as a real one would be
             upsert_json(state, serde_json::json!({ "id": "notif:6", "source": "Claude", "kind": "alert",
                 "title": "Build finished", "body": "All 214 tests passed on the release branch, ready to ship" }), 0);
         });
+    }
+    if std::env::var_os("KANMURI_DEMO_ASK").is_some() {
+        // A question from Claude Code waiting for Allow / Deny (nobody gets the answer).
+        with_state(|state| {
+            let p = serde_json::json!({ "session_id": "demo", "cwd": "C:\\Codingers\\kanmuri", "tool_name": "Bash",
+                "tool_input": { "command": "cargo build --workspace && cargo test --workspace" } });
+            if let claude::Plan::Show(list) = claude::plan("PermissionRequest", &p, "claude:demo:ask:1") {
+                for json in list {
+                    upsert_json(state, json, 0);
+                }
+            }
+        });
+    }
+    if std::env::var_os("KANMURI_DEMO_NOTIFS").is_some() || std::env::var_os("KANMURI_DEMO_ASK").is_some() {
+        // The demo apps' logos: the real ones where Windows has the app, else a
+        // made-up tile in the app's colour (snapshots wait for them).
+        let ids: Vec<String> = DEMO_APPS.iter().map(|(_, id)| id.to_string()).collect();
+        if let Some(t) = notif::preload(ids, || {}) {
+            let _ = t.join();
+        }
+        for (app, id) in DEMO_APPS {
+            if notif::logo(id).is_none() {
+                notif::put_logo(id, demo_logo(accent_of(app, Kind::Alert)));
+            }
+        }
     }
     // KANMURI_DEMO_VOLUME=<0..100>: a player volume, to see the music
     // card's volume row (Kanmuri doesn't read the player's volume yet).

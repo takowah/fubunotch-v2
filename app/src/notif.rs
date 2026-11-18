@@ -114,6 +114,50 @@ pub fn logo(aumid: &str) -> Option<Arc<Vec<u8>>> {
     LOGOS.lock().unwrap_or_else(|e| e.into_inner()).as_ref()?.get(aumid).cloned().flatten()
 }
 
+/// The Claude desktop app: Claude Code's questions and notices wear its logo.
+pub const CLAUDE_AUMID: &str = "Claude_pzs8sxrjxfjjc!Claude";
+
+/// An app's logo by AUMID even before it sent a notification: kept when it is
+/// known, else read from the icon Start shows for it (and kept). Needs COM on
+/// the calling thread and touches the shell, so not on the UI thread: see `preload`.
+/// A miss is not kept, so a later notification can still bring the logo.
+pub fn ensure_logo(aumid: &str) -> Option<Arc<Vec<u8>>> {
+    if aumid.is_empty() {
+        return None;
+    }
+    if let Some(px) = logo(aumid) {
+        return Some(px);
+    }
+    let px = Arc::new(shell_icon(aumid)?);
+    LOGOS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(aumid.to_string(), Some(px.clone()));
+    Some(px)
+}
+
+/// Keeps a logo made elsewhere (the demo's stand-ins in snapshots).
+pub fn put_logo(aumid: &str, px: Vec<u8>) {
+    if px.len() == (LOGO_PX * LOGO_PX * 4) as usize {
+        LOGOS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(aumid.to_string(), Some(Arc::new(px)));
+    }
+}
+
+/// Reads the logos of `aumids` on a thread of its own (with COM), then calls
+/// `done`. Join the handle to wait for them (snapshots).
+pub fn preload(aumids: Vec<String>, done: impl FnOnce() + Send + 'static) -> Option<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("kanmuri-logos".into())
+        .spawn(move || {
+            let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+            for a in &aumids {
+                let _ = ensure_logo(a);
+            }
+            if com.is_ok() {
+                unsafe { CoUninitialize() };
+            }
+            done();
+        })
+        .ok()
+}
+
 fn keep_logo(aumid: &str, info: &windows::ApplicationModel::AppInfo) {
     if aumid.is_empty() {
         return;
