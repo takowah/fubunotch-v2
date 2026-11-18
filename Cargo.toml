@@ -31,3 +31,16 @@ debug = 0
 
 [profile.dev.package."*"]
 debug = 0
+
+# Day-to-day builds of the installed app (`cargo build --profile fast`): the
+# libraries (Slint's renderer, windows, ...) optimised as release, built once and
+# kept; the app crate itself unoptimised and incremental, so a one-line change
+# rebuilds in about a minute instead of 6-8 (18 Nov 2026).
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 256
+incremental = true
+
+[profile.fast.package.kanmuri]
+opt-level = 0

@@ -8,7 +8,7 @@
 #   4. starts Kanmuri
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$src = Join-Path $repo 'target\release\kanmuri.exe'
+$src = Join-Path $repo 'target\fast\kanmuri.exe'
 $dir = Join-Path $env:LOCALAPPDATA 'Kanmuri'
 $exe = Join-Path $dir 'kanmuri.exe'
 Remove-Item (Join-Path $env:LOCALAPPDATA 'Kanmuri') -Recurse -Force -ErrorAction SilentlyContinue
@@ -17,7 +17,7 @@ Get-Process kanmuri, fubunotch-v2 -ErrorAction SilentlyContinue | Stop-Process -
 New-Item -ItemType Directory -Force $dir | Out-Null
 # The island and the relay Claude Code's hooks run (kanmuri-hook.exe, next to it).
 # A killed copy lets go of its exe a moment later: try for up to 10 s.
-foreach ($pair in @(@($src, $exe), @((Join-Path $repo 'target\release\kanmuri-hook.exe'), (Join-Path $dir 'kanmuri-hook.exe')))) {
+foreach ($pair in @(@($src, $exe), @((Join-Path $repo 'target\fast\kanmuri-hook.exe'), (Join-Path $dir 'kanmuri-hook.exe')))) {
     for ($i = 0; ; $i++) {
         try { Copy-Item $pair[0] $pair[1] -Force -ErrorAction Stop; break }
         catch { if ($i -ge 20) { throw }; Start-Sleep -Milliseconds 500 }
