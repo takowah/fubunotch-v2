@@ -1,4 +1,4 @@
-// Talks to FubuNotch v2 on this PC: posts YouTube Music's shuffle/repeat to
+// Talks to Kanmuri on this PC: posts YouTube Music's shuffle/repeat to
 // http://127.0.0.1:47821/ytm/state, and waits on /ytm/command (a long poll)
 // for the island's clicks, which it hands to the YouTube Music tab.
 const BASE = "http://127.0.0.1:47821";
@@ -11,7 +11,7 @@ function post(path, body) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  }).catch(() => {}); // FubuNotch isn't running: nothing to do
+  }).catch(() => {}); // Kanmuri isn't running: nothing to do
 }
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
@@ -33,7 +33,7 @@ async function poll() {
       try {
         r = await fetch(`${BASE}/ytm/command`, { method: "POST", cache: "no-store" }); // a GET would go without the Origin the island checks
       } catch {
-        await sleep(5000); // FubuNotch isn't running
+        await sleep(5000); // Kanmuri isn't running
         continue;
       }
       if (r.status === 200) {

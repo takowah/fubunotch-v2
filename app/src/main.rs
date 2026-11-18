@@ -1,4 +1,4 @@
-// FubuNotch v2: the island. Activities come in through the local webhook
+// Kanmuri: the island. Activities come in through the local webhook
 // (island-webhook) and the modules; the arbiter (island-core) picks the front
 // one; the user's settings decide which modules run and which tabs the
 // expanded island shows. One timer: the arbiter's next wake, or the clock's
@@ -162,7 +162,7 @@ struct State {
     hide_at: Option<u64>,
     /// The front activity last shown, to pop the island up for a new one.
     last_front: Option<String>,
-    /// Keeps the island expanded (FUBUNOTCH_V2_EXPANDED): screenshots without the mouse.
+    /// Keeps the island expanded (KANMURI_EXPANDED): screenshots without the mouse.
     pinned: bool,
     /// Music's Hold: the island stays open when the pointer leaves (let go
     /// on leaving the Music tab, so it can't stay stuck open).
@@ -286,7 +286,7 @@ fn take_drops() {
 /// Puts the island back where it belongs: top centre of its monitor, above
 /// every window, its region matching what it shows. After a monitor came or
 /// went (screen off after idle, a dock, a resolution change), a wake from
-/// sleep, or FubuNotch started again while running.
+/// sleep, or Kanmuri started again while running.
 fn recover_island(ui: &Island) {
     place(ui);
     if let Some(hwnd) = island_hwnd(ui) {
@@ -750,8 +750,8 @@ fn refresh(ui: &Island) {
             .map(item)
             .collect();
         ui.set_others(ModelRc::new(VecModel::from(others)));
-        // FUBUNOTCH_V2_DEMO_PRAYER: the header's clock says the pretend time too.
-        let clock = if std::env::var_os("FUBUNOTCH_V2_DEMO_PRAYER").is_some() { prayer::hh_mm(prayer_now().3 / 60) } else { local_time::clock_text() };
+        // KANMURI_DEMO_PRAYER: the header's clock says the pretend time too.
+        let clock = if std::env::var_os("KANMURI_DEMO_PRAYER").is_some() { prayer::hh_mm(prayer_now().3 / 60) } else { local_time::clock_text() };
         ui.set_clock(SharedString::from(clock));
 
         // Tabs, as Mini Island's list: Notifications (when there are some, or
@@ -868,8 +868,8 @@ fn refresh(ui: &Island) {
         let front_changed = front_id.is_some() && front_id != state.last_front;
         state.last_front = front_id.clone();
         if state.pinned {
-            // FUBUNOTCH_V2_EXPANDED=compact pins the capsule instead (checks).
-            state.mode = if std::env::var("FUBUNOTCH_V2_EXPANDED").is_ok_and(|v| v == "compact") { Mode::Compact } else { Mode::Expanded };
+            // KANMURI_EXPANDED=compact pins the capsule instead (checks).
+            state.mode = if std::env::var("KANMURI_EXPANDED").is_ok_and(|v| v == "compact") { Mode::Compact } else { Mode::Expanded };
             state.hide_at = None;
         } else if front_changed
             && !quiet
@@ -1443,7 +1443,7 @@ fn is_call(title: &str, body: &str) -> bool {
     ["call", "panggilan", "telepon", "memanggil"].iter().any(|w| text.contains(w))
 }
 
-/// FUBUNOTCH_V2_SNAPSHOT: a picture is drawn and the app quits.
+/// KANMURI_SNAPSHOT: a picture is drawn and the app quits.
 /// A browser's video picture-in-picture window docked under the island
 /// (found by the WinEvent hook; none for a snapshot's demo).
 struct Watching {
@@ -1451,7 +1451,7 @@ struct Watching {
     title: String,
     /// When it was docked (ms since start).
     since: u64,
-    /// Where FubuNotch last put it (physical pixels): elsewhere means the
+    /// Where Kanmuri last put it (physical pixels): elsewhere means the
     /// user dragged it, and it is let go.
     placed: Option<(i32, i32)>,
 }
@@ -1555,7 +1555,7 @@ fn follow_watch(ui: &Island, state: &mut State, now: u64) {
 }
 
 fn snapshot_mode() -> bool {
-    std::env::var_os("FUBUNOTCH_V2_SNAPSHOT").is_some()
+    std::env::var_os("KANMURI_SNAPSHOT").is_some()
 }
 
 /// A new notification: into the history, and up on the island if pop-ups are on.
@@ -1787,10 +1787,10 @@ fn daily_wake(state: &State, now: u64) -> u64 {
 // ── Prayer ────────────────────────────────────────────────────────────────────
 
 /// Now for the Prayer module: (year, month, day, seconds since midnight).
-/// FUBUNOTCH_V2_DEMO_PRAYER=HH:MM pretends it is that time today (snapshots).
+/// KANMURI_DEMO_PRAYER=HH:MM pretends it is that time today (snapshots).
 fn prayer_now() -> (i32, u32, u32, u32) {
     static DEMO: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
-    let demo = *DEMO.get_or_init(|| std::env::var("FUBUNOTCH_V2_DEMO_PRAYER").ok().and_then(|v| parse_hh_mm(&v)));
+    let demo = *DEMO.get_or_init(|| std::env::var("KANMURI_DEMO_PRAYER").ok().and_then(|v| parse_hh_mm(&v)));
     let (y, m, d, secs) = local_time::now_parts();
     (y, m, d, demo.map_or(secs, |min| min * 60))
 }
@@ -2354,7 +2354,7 @@ fn ask_claude_hooks(ui: &Island, install: bool) {
         }
     };
     if install && claude::relay_command("x").is_none() {
-        store::log("claude hooks: fubunotch-v2-hook.exe is not next to the app");
+        store::log("claude hooks: kanmuri-hook.exe is not next to the app");
         return;
     }
     let new = match claude::merged(&current, install, |e| claude::relay_command(e).unwrap_or_default()) {
@@ -2368,7 +2368,7 @@ fn ask_claude_hooks(ui: &Island, install: bool) {
     let path = claude::settings_path().display().to_string();
     let message = if install {
         format!(
-            "Adds Kanmuri's hooks for {} to:\n{path}\n\nA backup of the file is saved first (settings.json.bak-fubunotch-v2-<date>). Your other settings and hooks, FubuNotch v1's included, stay as they are. If both v1 and v2 are running, both islands may ask for the same permission.",
+            "Adds Kanmuri's hooks for {} to:\n{path}\n\nA backup of the file is saved first (settings.json.bak-kanmuri-<date>). Your other settings and hooks, FubuNotch v1's included, stay as they are. If both v1 and v2 are running, both islands may ask for the same permission.",
             events.join(", ")
         )
     } else {
@@ -2464,16 +2464,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui = Island::new()?;
     ISLAND.with(|i| *i.borrow_mut() = Some(ui.as_weak()));
     island_lyrics::set_logger(store::log);
-    let pinned = std::env::var_os("FUBUNOTCH_V2_EXPANDED").is_some();
-    let first_tab = std::env::var("FUBUNOTCH_V2_TAB").unwrap_or_else(|_| "home".into());
+    let pinned = std::env::var_os("KANMURI_EXPANDED").is_some();
+    let first_tab = std::env::var("KANMURI_TAB").unwrap_or_else(|_| "home".into());
     let mut settings = store::load();
     *SCREEN.lock().unwrap_or_else(|e| e.into_inner()) = settings.general.screen.clone();
-    // FUBUNOTCH_V2_THEME: a theme for this run only (checks of each look).
-    if let Ok(t) = std::env::var("FUBUNOTCH_V2_THEME") {
+    // KANMURI_THEME: a theme for this run only (checks of each look).
+    if let Ok(t) = std::env::var("KANMURI_THEME") {
         settings.look.theme = t;
     }
-    // FUBUNOTCH_V2_BG: a background picture for this run only.
-    if let Ok(b) = std::env::var("FUBUNOTCH_V2_BG") {
+    // KANMURI_BG: a background picture for this run only.
+    if let Ok(b) = std::env::var("KANMURI_BG") {
         settings.look.background = b;
     }
     let (focus_plan, water_plan) = (settings.focus.plan(), settings.water.plan());
@@ -2488,9 +2488,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             held: false,
             line_held: false,
             music_events: 0,
-            dnd: std::env::var_os("FUBUNOTCH_V2_DND").is_some(),
-            // FUBUNOTCH_V2_DEMO_WATCH: a docked video, for snapshots.
-            watching: std::env::var_os("FUBUNOTCH_V2_DEMO_WATCH")
+            dnd: std::env::var_os("KANMURI_DND").is_some(),
+            // KANMURI_DEMO_WATCH: a docked video, for snapshots.
+            watching: std::env::var_os("KANMURI_DEMO_WATCH")
                 .map(|_| Watching { hwnd: None, title: "Demo stream".into(), since: 0, placed: None }),
             watch_held: false,
             watch_hover: false,
@@ -2940,7 +2940,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    if std::env::var_os("FUBUNOTCH_V2_DEMO_WATER").is_some() {
+    if std::env::var_os("KANMURI_DEMO_WATER").is_some() {
         // A day with some glasses, in memory only.
         with_state(|state| {
             let mut day = island_core::daily::WaterDay { date: local_time::today(), ..Default::default() };
@@ -2950,7 +2950,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.data.water = day;
         });
     }
-    if std::env::var_os("FUBUNOTCH_V2_DEMO_FOCUS").is_some() {
+    if std::env::var_os("KANMURI_DEMO_FOCUS").is_some() {
         // Today's rounds, in memory only.
         with_state(|state| {
             let today = local_time::today();
@@ -2960,7 +2960,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect();
         });
     }
-    if std::env::var_os("FUBUNOTCH_V2_DEMO_TODO").is_some() {
+    if std::env::var_os("KANMURI_DEMO_TODO").is_some() {
         // A long list, in memory only (never saved), for checks of the To-do page.
         with_state(|state| {
             let mut todo = island_core::daily::Todo::default();
@@ -2973,8 +2973,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for i in [1, 4, 7] {
                 todo.toggle(ids[i], &stamp_now());
             }
-            // FUBUNOTCH_V2_DEMO_TODO=log: some cleared ones too, over three days.
-            if std::env::var("FUBUNOTCH_V2_DEMO_TODO").is_ok_and(|v| v == "log") {
+            // KANMURI_DEMO_TODO=log: some cleared ones too, over three days.
+            if std::env::var("KANMURI_DEMO_TODO").is_ok_and(|v| v == "log") {
                 let today = local_time::today();
                 for (date, min, text) in [
                     ("2026-11-08", 600, "Order the poster prints"),
@@ -2986,9 +2986,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             state.data.todo = todo;
         });
-        ui.set_todo_show_log(std::env::var_os("FUBUNOTCH_V2_TODO_LOG").is_some());
+        ui.set_todo_show_log(std::env::var_os("KANMURI_TODO_LOG").is_some());
     }
-    if std::env::var_os("FUBUNOTCH_V2_DEMO_NOTIFS").is_some() {
+    if std::env::var_os("KANMURI_DEMO_NOTIFS").is_some() {
         // A few notifications, for checks of the page without real ones.
         with_state(|state| {
             // Newest first, more than the list shows (its header counts them).
@@ -3007,12 +3007,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "title": "Build finished", "body": "All 214 tests passed on the release branch, ready to ship" }), 0);
         });
     }
-    // FUBUNOTCH_V2_DEMO_VOLUME=<0..100>: a player volume, to see the music
-    // card's volume row (FubuNotch doesn't read the player's volume yet).
-    if let Some(v) = std::env::var("FUBUNOTCH_V2_DEMO_VOLUME").ok().and_then(|v| v.parse::<f32>().ok()) {
+    // KANMURI_DEMO_VOLUME=<0..100>: a player volume, to see the music
+    // card's volume row (Kanmuri doesn't read the player's volume yet).
+    if let Some(v) = std::env::var("KANMURI_DEMO_VOLUME").ok().and_then(|v| v.parse::<f32>().ok()) {
         ui.set_volume((v / 100.0).clamp(0.0, 1.0));
     }
-    if std::env::var_os("FUBUNOTCH_V2_DEMO_MUSIC").is_some() {
+    if std::env::var_os("KANMURI_DEMO_MUSIC").is_some() {
         // A song with lyrics, for checks of the Music page without touching the player.
         with_state(|state| {
             state.music = music::Snapshot {
@@ -3021,8 +3021,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 artist: "Shirakami Fubuki".into(),
                 app: "demo".into(),
                 playing: true,
-                // FUBUNOTCH_V2_DEMO_POS: seconds in (11 by default), to see the wave grown.
-                position: std::env::var("FUBUNOTCH_V2_DEMO_POS").ok().and_then(|v| v.parse().ok()).unwrap_or(11.0),
+                // KANMURI_DEMO_POS: seconds in (11 by default), to see the wave grown.
+                position: std::env::var("KANMURI_DEMO_POS").ok().and_then(|v| v.parse().ok()).unwrap_or(11.0),
                 duration: 207.0,
                 at_unix_ms: music::now_unix_ms(),
                 shuffle: Some(false),
@@ -3032,9 +3032,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Now playing, as a real song would be (the capsule's song pill).
             upsert_json(state, serde_json::json!({ "id": "music:now", "source": "demo", "kind": "ambient",
                 "title": format!("♪ {}", state.music.title), "body": state.music.artist }), 0);
-            // A made-up cover in one colour (FUBUNOTCH_V2_DEMO_ART=rrggbb, pink by default):
+            // A made-up cover in one colour (KANMURI_DEMO_ART=rrggbb, pink by default):
             // a diagonal shade and a pale disc, enough to check the island taking its colour.
-            let hex = std::env::var("FUBUNOTCH_V2_DEMO_ART").unwrap_or_else(|_| "ff5fa2".into());
+            let hex = std::env::var("KANMURI_DEMO_ART").unwrap_or_else(|_| "ff5fa2".into());
             let c = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(0xff5fa2);
             let (cr, cg, cb) = ((c >> 16) as f32, ((c >> 8) & 0xff) as f32, (c & 0xff) as f32);
             let n = music::ART_PX;
@@ -3053,16 +3053,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             round_cover(&mut rounded, n);
             state.music_art = Some(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rounded, n, n)));
             state.music.art = Some(art);
-            // =nolyrics: the song without; FUBUNOTCH_V2_LINE: Line on.
-            state.line_held = std::env::var_os("FUBUNOTCH_V2_LINE").is_some();
-            if std::env::var("FUBUNOTCH_V2_DEMO_MUSIC").is_ok_and(|v| v == "nolyrics") {
+            // =nolyrics: the song without; KANMURI_LINE: Line on.
+            state.line_held = std::env::var_os("KANMURI_LINE").is_some();
+            if std::env::var("KANMURI_DEMO_MUSIC").is_ok_and(|v| v == "nolyrics") {
                 state.lyrics = Some(island_lyrics::Lyrics { status: island_lyrics::Status::None, lines: vec![], duration: 0.0 });
                 return;
             }
             // =ja: the lines in Japanese (the lyrics card then offers あ and Ro).
             let latin = ["koko wa kitto yume no naka ne", "", "mezameta no wa uso mitai da, hontou no kimi wa doko ni iru no ka mada wakaranai mama", "kimi no koe ga kikoeru", "tooku made"];
             let japanese = ["ここはきっと夢の中ね", "", "目覚めたのは嘘みたいだ", "君の声が聞こえる", "遠くまで"];
-            let words = if std::env::var("FUBUNOTCH_V2_DEMO_MUSIC").is_ok_and(|v| v == "ja") { japanese } else { latin };
+            let words = if std::env::var("KANMURI_DEMO_MUSIC").is_ok_and(|v| v == "ja") { japanese } else { latin };
             state.lyrics = Some(island_lyrics::Lyrics {
                 status: island_lyrics::Status::Found,
                 lines: words
@@ -3074,28 +3074,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         });
     } else if with_state(|s| s.settings.is_on("music")).unwrap_or(false) {
-        with_state(|s| s.line_held = std::env::var_os("FUBUNOTCH_V2_LINE").is_some());
+        with_state(|s| s.line_held = std::env::var_os("KANMURI_LINE").is_some());
         start_music(&ui);
     }
 
     // Tray: Settings and Quit.
-    // FUBUNOTCH_V2_SNAPSHOT: draw the island (or Settings, with
-    // FUBUNOTCH_V2_SETTINGS) into a PNG and stop; nothing is shown.
+    // KANMURI_SNAPSHOT: draw the island (or Settings, with
+    // KANMURI_SETTINGS) into a PNG and stop; nothing is shown.
     if let Some(path) = snapshot {
         // The watcher threads (notifications, music) report in real time.
         std::thread::sleep(std::time::Duration::from_millis(2000));
         // The first refresh ran before the demo data: a tab that only exists
         // with it (Lyrics) fell back to the first one. Ask for it again.
-        if let Ok(tab) = std::env::var("FUBUNOTCH_V2_TAB") {
+        if let Ok(tab) = std::env::var("KANMURI_TAB") {
             with_state(|s| s.active_tab = tab);
         }
         refresh(&ui);
         snapshot::advance(1500);
         refresh(&ui);
         snapshot::advance(1500);
-        if std::env::var_os("FUBUNOTCH_V2_SETTINGS").is_some() {
+        if std::env::var_os("KANMURI_SETTINGS").is_some() {
             open_settings(&ui);
-            if let Some(page) = std::env::var("FUBUNOTCH_V2_SETTINGS").ok().filter(|p| p.len() > 1) {
+            if let Some(page) = std::env::var("KANMURI_SETTINGS").ok().filter(|p| p.len() > 1) {
                 if let Some(w) = with_state(|s| s.settings_window.as_ref().map(|w| w.as_weak())).flatten().and_then(|w| w.upgrade()) {
                     w.set_page(page.into());
                 }
@@ -3123,7 +3123,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     tray.on_quit(|| {
-        // Closed, FubuNotch can't show notifications: Windows' banners come
+        // Closed, Kanmuri can't show notifications: Windows' banners come
         // back as they were (and go again at the next start).
         with_state(|state| {
             if banners::give_back(banners::SETTINGS, &mut state.data.banners, |_| true) {
@@ -3148,7 +3148,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     });
     if let Err(err) = served {
-        // The port is taken: FubuNotch is already running (its island hidden,
+        // The port is taken: Kanmuri is already running (its island hidden,
         // moved off screen, or under something). Bring that one back rather
         // than quit without a word.
         let shown = island_webhook::ask_to_show(island_webhook::PORT, &token);
@@ -3168,8 +3168,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     tray.show()?;
     refresh(&ui);
-    // FUBUNOTCH_V2_CYCLE switches tabs on its own (checks of tab changes without the mouse).
-    if std::env::var_os("FUBUNOTCH_V2_CYCLE").is_some() {
+    // KANMURI_CYCLE switches tabs on its own (checks of tab changes without the mouse).
+    if std::env::var_os("KANMURI_CYCLE").is_some() {
         let weak = ui.as_weak();
         let n = std::cell::Cell::new(0usize);
         let cycle = Timer::default();
@@ -3187,8 +3187,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The native window only exists once the event loop runs: a position set
     // before that is lost, so place the island again right after.
     let weak = ui.as_weak();
-    // FUBUNOTCH_V2_SETTINGS opens Settings at start (checks without the mouse).
-    let settings_at_start = std::env::var_os("FUBUNOTCH_V2_SETTINGS").is_some();
+    // KANMURI_SETTINGS opens Settings at start (checks without the mouse).
+    let settings_at_start = std::env::var_os("KANMURI_SETTINGS").is_some();
     Timer::single_shot(std::time::Duration::from_millis(80), move || {
         if let Some(ui) = weak.upgrade() {
             place(&ui);

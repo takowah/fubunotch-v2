@@ -366,7 +366,7 @@ mod tests {
         assert_eq!(lines.iter().map(|l| (l.time, l.text.as_str())).collect::<Vec<_>>(), [(0.25, "ここはきっと夢の中ね"), (4.78, ""), (10.0, "目覚めたのは")]);
     }
 
-    /// Asks YouTube Music for real: `cargo test -p fubunotch -- --ignored --nocapture live_ytm`
+    /// Asks YouTube Music for real: `cargo test -p island-lyrics -- --ignored --nocapture live_ytm`
     #[test]
     #[ignore]
     fn live_ytm_finds_foxxxroom() {

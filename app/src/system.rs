@@ -388,7 +388,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
 
 fn start_keyboard() {
     std::thread::Builder::new()
-        .name("fubunotch-keyboard".into())
+        .name("kanmuri-keyboard".into())
         .spawn(|| unsafe {
             LAST_LAYOUT.store(foreground_layout(), Ordering::Relaxed);
             CAPS_ON.store(GetKeyState(VK_CAPITAL.0 as i32) & 1 == 1, Ordering::Relaxed);

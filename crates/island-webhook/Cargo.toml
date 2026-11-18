@@ -1,6 +1,6 @@
 [package]
 name = "island-webhook"
-description = "FubuNotch v2: the local webhook (127.0.0.1) that turns HTTP into activities"
+description = "Kanmuri: the local webhook (127.0.0.1) that turns HTTP into activities"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

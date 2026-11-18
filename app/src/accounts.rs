@@ -32,10 +32,10 @@ fn notchdeck_exe() -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
-/// FUBUNOTCH_V2_DEMO_ACCOUNTS: made-up accounts (and NotchDeck counted as
+/// KANMURI_DEMO_ACCOUNTS: made-up accounts (and NotchDeck counted as
 /// installed), for snapshots of the Accounts tab without NotchDeck.
 fn demo() -> bool {
-    std::env::var_os("FUBUNOTCH_V2_DEMO_ACCOUNTS").is_some()
+    std::env::var_os("KANMURI_DEMO_ACCOUNTS").is_some()
 }
 
 pub fn installed() -> bool {

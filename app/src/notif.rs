@@ -215,7 +215,7 @@ fn read(n: &UserNotification) -> Option<Notif> {
 
 /// Starts watching; `allowed_now` is asked for the current app list each time,
 /// `sink` gets each new allowed notification. Dropping the Watcher stops it.
-/// Whether Windows lets FubuNotch read notifications (known once the watcher ran).
+/// Whether Windows lets Kanmuri read notifications (known once the watcher ran).
 pub fn has_access() -> bool {
     ACCESS.load(Ordering::Relaxed)
 }
@@ -230,7 +230,7 @@ pub fn start(
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     std::thread::Builder::new()
-        .name("fubunotch-notifications".into())
+        .name("kanmuri-notifications".into())
         .spawn(move || {
             let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
             run(&flag, allowed_now, sink, ready);

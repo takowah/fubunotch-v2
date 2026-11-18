@@ -2,7 +2,7 @@
 # the process owns (new ones, shown/hidden, style), and focus changes, to
 # catch what makes a title bar appear over the island.
 #   Start-Process powershell -WindowStyle Hidden -ArgumentList '-File', '.\scripts\watch-hang.ps1'
-# Log: %APPDATA%\FubuNotch v2\hang-watch.log
+# Log: %APPDATA%\Kanmuri\hang-watch.log
 Add-Type @'
 using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
 public static class HW {
@@ -29,12 +29,12 @@ public static class HW {
   }
 }
 '@
-$log = Join-Path $env:APPDATA 'FubuNotch v2\hang-watch.log'
+$log = Join-Path $env:APPDATA 'Kanmuri\hang-watch.log'
 function Log($m) { Add-Content $log ("{0:HH:mm:ss.fff} {1}" -f (Get-Date), $m) }
 Log 'watch started'
 $seen = @{}; $lastFg = ''; $tick = 0
 while ($true) {
-  $p = Get-Process fubunotch-v2 -ErrorAction SilentlyContinue | Select-Object -First 1
+  $p = Get-Process kanmuri -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $p) { Start-Sleep -Milliseconds 1000; continue }
   $now = [HW]::Windows([uint32]$p.Id)
   foreach ($k in $now.Keys) { if ($seen[$k] -ne $now[$k]) { Log ("win {0:X} {1}" -f $k, $now[$k]); $seen[$k] = $now[$k] } }

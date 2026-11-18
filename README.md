@@ -1,4 +1,4 @@
-# FubuNotch v2
+# Kanmuri
 
 A small "dynamic island" for Windows: a capsule at the top of the screen that shows what is going on — the song playing (with synced lyrics), your notifications, volume and device changes, a Pomodoro, water reminders, a to-do list, a shelf for files, and Claude Code's permission questions — and a pixel mascot who lives in it.
 
@@ -10,15 +10,15 @@ Native Rust, no browser engine: about 40 MB of RAM and next to no CPU while it s
 
 ## Download and install
 
-1. Go to **[Releases](../../releases)** and download `FubuNotch-v2-windows-x64.zip`.
-2. Unzip it anywhere (for example `Documents\FubuNotch v2`). Keep the two `.exe` files together.
-3. Run `fubunotch-v2.exe`.
+1. Go to **[Releases](../../releases)** and download `Kanmuri-windows-x64.zip`.
+2. Unzip it anywhere (for example `Documents\Kanmuri`). Keep the two `.exe` files together.
+3. Run `kanmuri.exe`.
    - Windows SmartScreen may say "Windows protected your PC" because the app is not signed: click **More info → Run anyway**.
    - The first time, Windows asks whether the app may read your notifications: allow it if you want them on the island.
 4. A thin bar appears at the top centre of the screen. Point at it to open the island. Right-click the tray icon (bottom right) for **Settings** and **Quit**.
 
 To start it with Windows: Settings → General → Start with Windows.
-To remove it: Quit from the tray, delete the folder, and delete `%APPDATA%\FubuNotch v2` (its settings).
+To remove it: Quit from the tray, delete the folder, and delete `%APPDATA%\Kanmuri` (its settings).
 
 Windows 10/11, 64-bit.
 
@@ -26,8 +26,8 @@ Windows 10/11, 64-bit.
 
 | | |
 |---|---|
-| ![Music](docs/screens/music.png) | **Music** — whatever is playing in Spotify, YouTube Music in a browser, or any player that shows in Windows' media controls. Play/pause, next, previous; shuffle and repeat when the player allows it; for YouTube Music in Chrome or Edge, add the small [extension](extension/ytm) (browsers don't pass shuffle and repeat to Windows). Like/dislike (kept on your PC). Synced lyrics from LRCLIB, or YouTube Music when LRCLIB has none, with Japanese in romaji. **Hold** keeps the island open while you read along; **Line** keeps it a small capsule with just the line being sung. A new song, play, pause and stop show for a moment in the small capsule. **Watch in island**: put any video in Chrome or Edge into picture-in-picture (YouTube's own button, right-click the video twice, or the picture-in-picture button in Chrome's media controls, the note icon in the toolbar) and FubuNotch docks the little window under the island at once, sized to it. It shows while the island is open (or while you keep it with the island's screen button) and hides with it, still playing; right-clicking the island's screen button closes it, as Chrome's ✕ does. Live streams get no lyrics. |
-| ![Notifications](docs/screens/notifications.png) | **Notifications** — Windows notifications, mirrored on the island; a switch per app in Settings, as in Windows. A click opens the app. While the module is on, Windows' own pop-up banners stay off for those apps (every app in the Start menu up front, so even a first notification shows only on the island; they still reach Windows' notification centre); turning the module off, or quitting FubuNotch, puts every app back as it was. **Do not disturb** (the moon beside ⚙) keeps the island down for notifications, calls excepted; it comes on by itself while a Focus round runs. |
+| ![Music](docs/screens/music.png) | **Music** — whatever is playing in Spotify, YouTube Music in a browser, or any player that shows in Windows' media controls. Play/pause, next, previous; shuffle and repeat when the player allows it; for YouTube Music in Chrome or Edge, add the small [extension](extension/ytm) (browsers don't pass shuffle and repeat to Windows). Like/dislike (kept on your PC). Synced lyrics from LRCLIB, or YouTube Music when LRCLIB has none, with Japanese in romaji. **Hold** keeps the island open while you read along; **Line** keeps it a small capsule with just the line being sung. A new song, play, pause and stop show for a moment in the small capsule. **Watch in island**: put any video in Chrome or Edge into picture-in-picture (YouTube's own button, right-click the video twice, or the picture-in-picture button in Chrome's media controls, the note icon in the toolbar) and Kanmuri docks the little window under the island at once, sized to it. It shows while the island is open (or while you keep it with the island's screen button) and hides with it, still playing; right-clicking the island's screen button closes it, as Chrome's ✕ does. Live streams get no lyrics. |
+| ![Notifications](docs/screens/notifications.png) | **Notifications** — Windows notifications, mirrored on the island; a switch per app in Settings, as in Windows. A click opens the app. While the module is on, Windows' own pop-up banners stay off for those apps (every app in the Start menu up front, so even a first notification shows only on the island; they still reach Windows' notification centre); turning the module off, or quitting Kanmuri, puts every app back as it was. **Do not disturb** (the moon beside ⚙) keeps the island down for notifications, calls excepted; it comes on by itself while a Focus round runs. |
 | ![Water](docs/screens/water.png) | **Water** — a glass at a time toward a daily goal, reminders after a while without one, only inside your active hours. |
 | ![Focus](docs/screens/focus.png) | **Focus** — Pomodoro rounds and breaks, with a log of how long each round really was. |
 | ![To-do](docs/screens/todo.png) | **To-do** — tick to strike through (done ones sink to the bottom), drag the dots to reorder; the island grows for a long list. |
@@ -42,20 +42,20 @@ Five themes, each with its own colours and pixel mascot: **Fubuki**, **Mio**, **
 
 ### Privacy
 
-Nothing leaves your PC except what you turn on: lyrics look-ups send the song's title, artist, album and length to LRCLIB (and YouTube Music if that switch is on). No telemetry, no account. Settings and data stay in `%APPDATA%\FubuNotch v2`.
+Nothing leaves your PC except what you turn on: lyrics look-ups send the song's title, artist, album and length to LRCLIB (and YouTube Music if that switch is on). No telemetry, no account. Settings and data stay in `%APPDATA%\Kanmuri`.
 
 ## For developers
 
 ```
-cargo run -p fubunotch-v2          # the island
+cargo run -p kanmuri          # the island
 cargo test --workspace             # the checks
 .\scripts\try.ps1                  # three sample activities through the local webhook (-Clear ends them)
 python scripts\sprites.py          # redraw the mascots from pixel-art\holo-tiny\build.py
 ```
 
-Needs Rust (stable) and the MSVC Build Tools ("Desktop development with C++"). UI in [Slint](https://slint.dev) with its software renderer. `crates/island-core` holds the activity contract and the arbiter (no UI, no I/O), `crates/island-webhook` a local webhook on `127.0.0.1:47821` that scripts and other apps can post activities to (bearer token in `%APPDATA%\FubuNotch v2\token`), `crates/island-lyrics` the lyrics. `CLAUDE.md` has the house rules.
+Needs Rust (stable) and the MSVC Build Tools ("Desktop development with C++"). UI in [Slint](https://slint.dev) with its software renderer. `crates/island-core` holds the activity contract and the arbiter (no UI, no I/O), `crates/island-webhook` a local webhook on `127.0.0.1:47821` that scripts and other apps can post activities to (bearer token in `%APPDATA%\Kanmuri\token`), `crates/island-lyrics` the lyrics. `CLAUDE.md` has the house rules.
 
-Checks without a screen: `FUBUNOTCH_V2_SNAPSHOT=out.png` draws the island into a PNG and exits (see `CLAUDE.md` for the switches that go with it).
+Checks without a screen: `KANMURI_SNAPSHOT=out.png` draws the island into a PNG and exits (see `CLAUDE.md` for the switches that go with it).
 
 ## License and credits
 

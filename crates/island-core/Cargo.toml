@@ -1,6 +1,6 @@
 [package]
 name = "island-core"
-description = "FubuNotch v2: the activity contract and the priority arbiter, no UI"
+description = "Kanmuri: the activity contract and the priority arbiter, no UI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

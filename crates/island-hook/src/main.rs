@@ -1,13 +1,13 @@
-//! fubunotch-v2-hook: what Claude Code runs on each hook event.
+//! kanmuri-hook: what Claude Code runs on each hook event.
 //!
-//!   fubunotch-v2-hook <EventName>   (the event's JSON on stdin)
+//!   kanmuri-hook <EventName>   (the event's JSON on stdin)
 //!
-//! It posts the JSON to FubuNotch v2's webhook (127.0.0.1:47821/claude/<Event>)
+//! It posts the JSON to Kanmuri's webhook (127.0.0.1:47821/claude/<Event>)
 //! and, for a PermissionRequest, waits for the island's answer and prints the
 //! documented `hookSpecificOutput`. The rules:
 //! - never block Claude Code: if the app isn't running, it exits at once;
 //! - never allow anything a human didn't click: no answer prints nothing, and
-//!   Claude Code asks in its terminal as if FubuNotch weren't there.
+//!   Claude Code asks in its terminal as if Kanmuri weren't there.
 
 
 use std::io::{Read, Write};

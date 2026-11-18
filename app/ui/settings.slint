@@ -37,7 +37,7 @@ export struct SettingsView {
     lyrics-youtube: bool,
     romaji: bool,
     notif-popups: bool,
-    // Windows lets FubuNotch read notifications.
+    // Windows lets Kanmuri read notifications.
     notif-access: bool,
     notif-list: [AppSwitch],
     sys-volume: bool,
@@ -998,7 +998,7 @@ export component Tray inherits SystemTrayIcon {
     }
 }
 
-/// A yes/no question before something is written outside FubuNotch.
+/// A yes/no question before something is written outside Kanmuri.
 export component ConfirmWindow inherits Window {
     default-font-family: "Segoe UI";
     title: "Kanmuri";

@@ -39,7 +39,7 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
     std::fs::rename(&tmp, settings_path())
 }
 
-/// One line in %APPDATA%\FubuNotch v2\fubunotch-v2.log, with the local time.
+/// One line in %APPDATA%\Kanmuri\kanmuri.log, with the local time.
 pub fn log(line: &str) {
     use std::io::Write;
     let dir = data_dir();
@@ -63,7 +63,7 @@ pub struct Data {
     pub notif_apps: std::collections::BTreeMap<String, String>,
     /// Focus rounds, oldest first.
     pub focus_log: Vec<island_core::daily::FocusRound>,
-    /// The apps whose Windows banners FubuNotch turned off (AUMID → what
+    /// The apps whose Windows banners Kanmuri turned off (AUMID → what
     /// they had): put back as they were.
     pub banners: std::collections::BTreeMap<String, crate::banners::Kept>,
 }

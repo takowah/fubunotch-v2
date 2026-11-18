@@ -304,7 +304,7 @@ mod tests {
         assert_eq!(strip_readings("開いたまま(ひら"), "開いたまま(ひら");
     }
 
-    /// Prints a few lines of real lyrics: `cargo test -p fubunotch -- --ignored --nocapture romaji_samples`
+    /// Prints a few lines of real lyrics: `cargo test -p island-lyrics -- --ignored --nocapture romaji_samples`
     #[test]
     #[ignore]
     fn romaji_samples() {

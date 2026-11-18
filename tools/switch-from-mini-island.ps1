@@ -1,26 +1,29 @@
 # Daffa's laptops: Kanmuri (this fork of FubuNotch v2, drawn as Mini Island) takes over from Mini Island.
 # Run it through switch-from-mini-island.bat via explorer.exe (Claude's own shell lives in the
 # app's MSIX container, whose %LOCALAPPDATA% / %APPDATA% / HKCU writes nobody else sees).
-#   1. copies the release exe to %LOCALAPPDATA%\FubuNotch (so a rebuild never fights a running copy)
+#   1. copies the release exe to %LOCALAPPDATA%\Kanmuri (so a rebuild never fights a running copy)
 #   2. settings: lyrics + YouTube Music lyrics + romaji on, Graphite look, no mascot, start with Windows
 #   3. Mini Island: stopped, its Startup shortcut moved aside (Mini Island itself stays installed;
 #      put the shortcut back from %LOCALAPPDATA%\MiniIsland\startup-off to undo)
 #   4. starts Kanmuri
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$src = Join-Path $repo 'target\release\fubunotch-v2.exe'
+$src = Join-Path $repo 'target\release\kanmuri.exe'
 $dir = Join-Path $env:LOCALAPPDATA 'Kanmuri'
 $exe = Join-Path $dir 'kanmuri.exe'
-Remove-Item (Join-Path $env:LOCALAPPDATA 'FubuNotch') -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $env:LOCALAPPDATA 'Kanmuri') -Recurse -Force -ErrorAction SilentlyContinue
 
-Get-Process fubunotch-v2, kanmuri -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process kanmuri, fubunotch-v2 -ErrorAction SilentlyContinue | Stop-Process -Force
 New-Item -ItemType Directory -Force $dir | Out-Null
+# The island and the relay Claude Code's hooks run (kanmuri-hook.exe, next to it).
 # A killed copy lets go of its exe a moment later: try for up to 10 s.
-for ($i = 0; ; $i++) {
-    try { Copy-Item $src $exe -Force -ErrorAction Stop; break }
-    catch { if ($i -ge 20) { throw }; Start-Sleep -Milliseconds 500 }
+foreach ($pair in @(@($src, $exe), @((Join-Path $repo 'target\release\kanmuri-hook.exe'), (Join-Path $dir 'kanmuri-hook.exe')))) {
+    for ($i = 0; ; $i++) {
+        try { Copy-Item $pair[0] $pair[1] -Force -ErrorAction Stop; break }
+        catch { if ($i -ge 20) { throw }; Start-Sleep -Milliseconds 500 }
+    }
 }
-"exe: $exe"
+"exe: $exe (+ kanmuri-hook.exe)"
 
 $data = Join-Path $env:APPDATA 'Kanmuri'
 $old = Join-Path $env:APPDATA 'FubuNotch v2'

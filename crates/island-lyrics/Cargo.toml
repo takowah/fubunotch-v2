@@ -1,6 +1,6 @@
 [package]
 name = "island-lyrics"
-description = "FubuNotch v2: synced lyrics (LRCLIB, YouTube Music) and romaji, blocking"
+description = "Kanmuri: synced lyrics (LRCLIB, YouTube Music) and romaji, blocking"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

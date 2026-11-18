@@ -22,12 +22,12 @@
     const key = JSON.stringify(state);
     if (force || key !== last) {
       last = key;
-      window.postMessage({ fubunotch: "state", state }, location.origin);
+      window.postMessage({ kanmuri: "state", state }, location.origin);
     }
   }
 
   window.addEventListener("message", (e) => {
-    if (e.source !== window || !e.data || e.data.fubunotch !== "command") return;
+    if (e.source !== window || !e.data || e.data.kanmuri !== "command") return;
     const b = bar();
     const button = b && b.querySelector(e.data.command === "shuffle" ? ".shuffle button" : ".repeat button");
     if (button) {
