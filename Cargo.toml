@@ -14,7 +14,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # Small and fast: the island must stay light.
 [profile.release]
 opt-level = "s"
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 16
 panic = "abort"
 strip = true

@@ -9,6 +9,12 @@
 // Space Mono (SIL OFL 1.1, assets/fonts/OFL.txt), built into the app.
 import "../assets/fonts/SpaceMono-Regular.ttf";
 import "../assets/fonts/SpaceMono-Bold.ttf";
+// Allo (SIL OFL 1.1, assets/fonts/OFL-Allo.txt): the window's text.
+import "../assets/fonts/Allo-Regular.otf";
+import "../assets/fonts/Allo-Medium.otf";
+import "../assets/fonts/Allo-SemiBold.otf";
+import "../assets/fonts/Allo-Bold.otf";
+import "../assets/fonts/Allo-ExtraBold.otf";
 import { Button, Palette } from "std-widgets.slint";
 import { Ice } from "theme.slint";
 
@@ -64,6 +70,21 @@ export struct SettingsView {
     background-name: string,
     background-preview: image,
     background-dim: int,
+    // Look: "black" | "color" | "wallpaper" | "glass" | "frosted".
+    look-style: string,
+    look-color: color,
+    // "#1f2a52", for the custom colour's field.
+    look-color-hex: string,
+    // The wallpaper's colour as the island would take it (black until read).
+    wallpaper-color: color,
+    night-warm: bool,
+    night-warmth: int,
+    closed-opacity: int,
+    idle-w: int,
+    idle-h: int,
+    expanded-w: int,
+    expanded-h: int,
+    expanded-tall-h: int,
     water-reminders: bool,
     water-goal: int,
     water-glass: int,
@@ -523,10 +544,164 @@ component ThemeCard inherits Rectangle {
     a := TouchArea { mouse-cursor: pointer; clicked => { root.picked(); } }
 }
 
+// A value along a track: drag or click anywhere on it; the value and its
+// unit on the right.
+component Slider inherits Rectangle {
+    in property <int> value;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> step: 1;
+    in property <string> unit;
+    callback changed(int);
+    width: 250px;
+    height: 30px;
+    property <length> knob: 18px;
+    property <length> track-w: self.width - 62px;
+    property <length> travel: self.track-w - self.knob;
+    property <float> frac: clamp((root.value - root.minimum) / max(1, root.maximum - root.minimum), 0, 1);
+    function pick(x: length) {
+        let f = clamp((x - root.knob / 2) / root.travel, 0, 1);
+        let v = root.minimum + round(f * (root.maximum - root.minimum) / root.step) * root.step;
+        if v != root.value {
+            root.changed(v);
+        }
+    }
+    // The track, and the part up to the knob in the accent.
+    Rectangle {
+        x: root.knob / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.travel;
+        height: 4px;
+        border-radius: 2px;
+        background: K.fill-hover;
+    }
+    Rectangle {
+        x: root.knob / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.travel * root.frac;
+        height: 4px;
+        border-radius: 2px;
+        background: Ice.glow;
+    }
+    Rectangle {
+        x: root.travel * root.frac;
+        y: (parent.height - self.height) / 2;
+        width: root.knob;
+        height: root.knob;
+        border-radius: root.knob / 2;
+        background: area.pressed || area.has-hover ? #ffffff : #ececf0;
+        border-width: 1px;
+        border-color: #00000040;
+    }
+    area := TouchArea {
+        width: root.track-w;
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                root.pick(self.mouse-x);
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.pick(self.mouse-x);
+            }
+        }
+    }
+    Text {
+        x: root.track-w + 8px;
+        width: parent.width - self.x;
+        height: parent.height;
+        text: root.value + (root.unit == "" ? "" : " " + root.unit);
+        color: K.ink;
+        font-size: 12.5px;
+        font-weight: 600;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+    }
+}
+
+// One of the island's Looks: a small desk with the island on it, its name.
+component LookCard inherits Rectangle {
+    in property <string> id;
+    in property <string> name;
+    in property <bool> chosen;
+    // The island's body in the preview, and its ink.
+    in property <color> body;
+    in property <color> ink: #ffffff;
+    // Frosted: the desk's colours show through softened.
+    in property <bool> frosted;
+    callback picked();
+    min-width: 100px;
+    height: 108px;
+    border-radius: 12px;
+    background: a.has-hover && !chosen ? #232326 : K.card;
+    border-width: chosen ? 2px : 1px;
+    border-color: chosen ? Ice.glow : K.card-edge;
+    animate background { duration: 140ms; }
+    // The desk, with three colours on it so see-through shows.
+    Rectangle {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        height: 64px;
+        border-radius: 8px;
+        background: #26222e;
+        border-width: 1px;
+        border-color: #ffffff0d;
+        Rectangle { x: 6px; y: 8px; width: parent.width * 0.42; height: 22px; border-radius: 11px; background: #b0408a; }
+        Rectangle { x: parent.width * 0.5; y: 4px; width: parent.width * 0.44; height: 18px; border-radius: 9px; background: #e09a2c; }
+        Rectangle { x: parent.width * 0.2; y: 34px; width: parent.width * 0.6; height: 20px; border-radius: 10px; background: #2f7fd0; }
+        Rectangle {
+            y: 10px;
+            width: parent.width - 28px;
+            x: 14px;
+            height: 24px;
+            border-radius: 12px;
+            background: root.frosted ? #8a8a96.with-alpha(0.55) : root.body;
+            border-width: 1px;
+            border-color: root.ink.with-alpha(0.18);
+            if root.frosted : Rectangle { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; border-radius: 11px; background: #1c1c22.with-alpha(0.55); }
+            Text { text: "9:41"; color: root.ink; font-size: 11.5px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+    HorizontalLayout {
+        y: 76px;
+        height: 26px;
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 4px;
+        Text { text: root.name; color: K.ink; font-size: 12px; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+        if root.chosen : Glyph { text: SetGlyphs.check; font-size: 11px; color: Ice.glow; width: 14px; }
+    }
+    a := TouchArea { mouse-cursor: pointer; clicked => { root.picked(); } }
+}
+
+// A round colour to pick for the Color look.
+component Swatch inherits Rectangle {
+    in property <color> c;
+    in property <bool> chosen;
+    callback picked();
+    width: 30px;
+    height: 30px;
+    border-radius: 15px;
+    background: chosen ? Ice.glow : a.has-hover ? #ffffff40 : transparent;
+    Rectangle {
+        x: 3px;
+        y: 3px;
+        width: 24px;
+        height: 24px;
+        border-radius: 12px;
+        background: root.c;
+        border-width: 1px;
+        border-color: #ffffff30;
+    }
+    a := TouchArea { mouse-cursor: pointer; clicked => { root.picked(); } }
+}
+
 // ── The window ───────────────────────────────────────────────────────────────
 
 export component SettingsWindow inherits Window {
-    default-font-family: "Segoe UI";
+    default-font-family: "Allo";
     title: "Kanmuri · Settings";
     preferred-width: 900px;
     preferred-height: 620px;
@@ -552,12 +727,23 @@ export component SettingsWindow inherits Window {
     callback apps-changed(string);
     callback notif-app-toggled(string, bool);
     callback theme-picked(string);
+    // Appearance → Look, and the Color look's colour ("#rrggbb").
+    callback look-picked(string);
+    callback color-picked(string);
     callback screen-picked(string);
     callback place-picked(string);
     callback slot-picked(string, string);
     /// "background.pick", "background.clear", "open-data-folder".
     callback action(string);
     callback claude-connect(bool);
+    // A byte as two hex digits: the swatches' "#rrggbb".
+    pure function hex(v: int) -> string {
+        return root.digit(floor(v / 16)) + root.digit(mod(v, 16));
+    }
+    pure function digit(v: int) -> string {
+        return v == 0 ? "0" : v == 1 ? "1" : v == 2 ? "2" : v == 3 ? "3" : v == 4 ? "4" : v == 5 ? "5" : v == 6 ? "6" : v == 7 ? "7"
+            : v == 8 ? "8" : v == 9 ? "9" : v == 10 ? "a" : v == 11 ? "b" : v == 12 ? "c" : v == 13 ? "d" : v == 14 ? "e" : "f";
+    }
 
     HorizontalLayout {
         // ── Sidebar ──
@@ -645,7 +831,7 @@ export component SettingsWindow inherits Window {
                         }
                         Text {
                             text: root.page == "general" ? "How the island behaves. Changes apply at once."
-                                : root.page == "look" ? "A theme and a picture behind the island."
+                                : root.page == "look" ? "The island's body, its size, an accent and a picture behind it."
                                 : root.page == "modules" ? "On or off, and the order of their tabs in the island."
                                 : root.page == "music" ? "Now playing from any player, and synced lyrics."
                                 : root.page == "notifications" ? "Windows notifications from the apps you choose."
@@ -772,6 +958,122 @@ export component SettingsWindow inherits Window {
                 }
 
                 // ── Appearance ──
+                if root.page == "look" : Heading { text: "LOOK"; }
+                if root.page == "look" : HorizontalLayout {
+                    spacing: 10px;
+                    LookCard { id: "black"; name: "Black"; body: #0b0b0d; chosen: root.s.look-style == self.id; picked => { root.look-picked(self.id); } }
+                    LookCard {
+                        id: "color";
+                        name: "Color";
+                        body: root.s.look-color;
+                        ink: (0.2126 * root.s.look-color.red + 0.7152 * root.s.look-color.green + 0.0722 * root.s.look-color.blue) / 255 > 0.55 ? #141416 : #ffffff;
+                        chosen: root.s.look-style == self.id;
+                        picked => { root.look-picked(self.id); }
+                    }
+                    LookCard { id: "wallpaper"; name: "Wallpaper"; body: root.s.wallpaper-color; chosen: root.s.look-style == self.id; picked => { root.look-picked(self.id); } }
+                    LookCard { id: "glass"; name: "Glass"; body: #0b0b0d8c; chosen: root.s.look-style == self.id; picked => { root.look-picked(self.id); } }
+                    LookCard { id: "frosted"; name: "Frosted"; frosted: true; chosen: root.s.look-style == self.id; picked => { root.look-picked(self.id); } }
+                }
+                if root.page == "look" : Rectangle {
+                    height: 30px;
+                    Text {
+                        x: 6px;
+                        width: parent.width - 12px;
+                        vertical-alignment: center;
+                        color: K.hint;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                        text: root.s.look-style == "color" ? "The island in the colour picked below. Light colours get dark text."
+                            : root.s.look-style == "wallpaper" ? "The island takes your wallpaper's colour, darkened so text stays readable."
+                            : root.s.look-style == "glass" ? "See-through: the desktop shows behind the island."
+                            : root.s.look-style == "frosted" ? "See-through, with Windows blurring what is behind the island."
+                            : "A solid black island.";
+                    }
+                }
+                if root.page == "look" : Heading { text: "COLOR"; }
+                if root.page == "look" : Card {
+                    SettingRow {
+                        title: "Island colour";
+                        hint: "For the Color look. Picking one switches to it.";
+                        HorizontalLayout {
+                            spacing: 4px;
+                            for c in [#1f2a52, #5e2a84, #0f4c4a, #5c1624, #2c2c2e, #f5f5f7, #ff9fc7, #ffd60a] : Swatch {
+                                c: c;
+                                chosen: root.s.look-style == "color" && root.s.look-color == c;
+                                picked => { root.color-picked("#" + root.hex(c.red) + root.hex(c.green) + root.hex(c.blue)); }
+                            }
+                        }
+                    }
+                    SettingRow {
+                        title: "Custom colour";
+                        hint: "A hex colour, e.g. #3a6ea5, then Enter.";
+                        last: true;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Rectangle {
+                                width: 24px;
+                                height: 24px;
+                                y: 3px;
+                                border-radius: 12px;
+                                background: root.s.look-color;
+                                border-width: 1px;
+                                border-color: #ffffff30;
+                            }
+                            Rectangle {
+                                width: 110px;
+                                height: 30px;
+                                border-radius: 8px;
+                                background: K.fill;
+                                border-width: 1px;
+                                border-color: hex-input.has-focus ? Ice.glow : transparent;
+                                hex-input := TextInput {
+                                    x: 10px;
+                                    width: parent.width - 20px;
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                    text: root.s.look-color-hex;
+                                    color: K.ink;
+                                    font-size: 12.5px;
+                                    font-family: "Space Mono";
+                                    single-line: true;
+                                    accepted => { root.color-picked(self.text); }
+                                }
+                            }
+                        }
+                    }
+                }
+                if root.page == "look" : Heading { text: "NIGHT"; }
+                if root.page == "look" : Card {
+                    SettingRow {
+                        title: "Warmer colors at night";
+                        hint: "After sunset the island eases warmer over 45 min, back at sunrise. Sunset from the Prayer module's place, else 18:00 to 06:00.";
+                        tall: true;
+                        Toggle { on: root.s.night-warm; toggled(v) => { root.flag-changed("look.night_warm", v); } }
+                    }
+                    SettingRow {
+                        title: "Night warmth";
+                        last: true;
+                        Slider { value: root.s.night-warmth; minimum: 0; maximum: 100; step: 5; unit: "%"; changed(v) => { root.number-changed("look.night_warmth", v); } }
+                    }
+                }
+                if root.page == "look" : Heading { text: "CLOSED ISLAND"; }
+                if root.page == "look" : Card {
+                    SettingRow {
+                        title: "Opacity when closed";
+                        hint: "The quiet capsule lets the screen show through; solid while hovered, open or showing an alert.";
+                        tall: true;
+                        last: true;
+                        Slider { value: root.s.closed-opacity; minimum: 20; maximum: 100; step: 5; unit: "%"; changed(v) => { root.number-changed("look.closed_opacity", v); } }
+                    }
+                }
+                if root.page == "look" : Heading { text: "SIZE"; }
+                if root.page == "look" : Card {
+                    SettingRow { title: "Idle width"; Slider { value: root.s.idle-w; minimum: 140; maximum: 260; step: 2; unit: "px"; changed(v) => { root.number-changed("look.idle_w", v); } } }
+                    SettingRow { title: "Idle height"; Slider { value: root.s.idle-h; minimum: 36; maximum: 56; unit: "px"; changed(v) => { root.number-changed("look.idle_h", v); } } }
+                    SettingRow { title: "Open width"; Slider { value: root.s.expanded-w; minimum: 600; maximum: 760; step: 4; unit: "px"; changed(v) => { root.number-changed("look.expanded_w", v); } } }
+                    SettingRow { title: "Open height"; hint: "Music, Prayer and other normal pages."; Slider { value: root.s.expanded-h; minimum: 170; maximum: 260; step: 2; unit: "px"; changed(v) => { root.number-changed("look.expanded_h", v); } } }
+                    SettingRow { title: "Open height, tall pages"; hint: "Lyrics."; last: true; Slider { value: root.s.expanded-tall-h; minimum: 220; maximum: 360; step: 2; unit: "px"; changed(v) => { root.number-changed("look.expanded_tall_h", v); } } }
+                }
                 if root.page == "look" : Heading { text: "THEME"; }
                 if root.page == "look" : GridLayout {
                     spacing: 10px;
@@ -1000,7 +1302,7 @@ export component Tray inherits SystemTrayIcon {
 
 /// A yes/no question before something is written outside Kanmuri.
 export component ConfirmWindow inherits Window {
-    default-font-family: "Segoe UI";
+    default-font-family: "Allo";
     title: "Kanmuri";
     preferred-width: 480px;
     in property <bool> repaint;
