@@ -839,6 +839,8 @@ fn refresh(ui: &Island) {
         let ytm = ytm_live(state, now);
         let capsule_line = if line { capsule_lyric(state) } else { String::new() };
         ui.set_capsule_line(capsule_line.as_str().into());
+        let capsule_ro = if line { capsule_lyric_line(state).map(|l| l.romaji.clone()).unwrap_or_default() } else { String::new() };
+        ui.set_capsule_romaji(capsule_ro.as_str().into());
         let capsule_long = lyric_width(&capsule_line) > LYRIC_ONE_LINE;
         ui.set_capsule_long(capsule_long);
         ui.set_music(music_view(&state.music, &state.music_art, state.music_accent, &state.lyrics, lines, lyrics_on, state.lyrics_nudge, rating, ytm.as_ref()));
@@ -1145,7 +1147,7 @@ fn lyric_lines(state: &mut State) -> Option<ModelRc<LyricLine>> {
     let rows: Vec<LyricLine> = l
         .lines
         .iter()
-        .map(|x| LyricLine { text: if x.text.trim().is_empty() { "♪".into() } else { x.text.as_str().into() }, current: false })
+        .map(|x| LyricLine { text: if x.text.trim().is_empty() { "♪".into() } else { x.text.as_str().into() }, romaji: x.romaji.as_str().into(), current: false })
         .collect();
     let model = ModelRc::new(VecModel::from(rows));
     state.lyrics_model = Some((key, model.clone()));
@@ -1156,14 +1158,15 @@ fn lyric_lines(state: &mut State) -> Option<ModelRc<LyricLine>> {
 /// nothing (the capsule then runs the song's title and artist, as Mini
 /// Island's small pill does between lines).
 fn capsule_lyric(state: &State) -> String {
+    capsule_lyric_line(state).map(|l| l.text.trim().to_string()).unwrap_or_default()
+}
+
+/// The line being sung now, for the capsule (its text and romaji).
+fn capsule_lyric_line(state: &State) -> Option<&island_lyrics::Line> {
     let snap = &state.music;
-    if let Some(l) = state.lyrics.as_ref().filter(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty()) {
-        let shift = island_lyrics::intro_shift(snap.duration, l.duration) + state.lyrics_nudge;
-        if let Some(i) = island_lyrics::line_at(&l.lines, snap.position_now() - shift) {
-            return l.lines[i].text.trim().to_string();
-        }
-    }
-    String::new()
+    let l = state.lyrics.as_ref().filter(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty())?;
+    let shift = island_lyrics::intro_shift(snap.duration, l.duration) + state.lyrics_nudge;
+    island_lyrics::line_at(&l.lines, snap.position_now() - shift).map(|i| &l.lines[i])
 }
 
 /// A line's width in Latin characters: kana and kanji count twice.
@@ -2862,7 +2865,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 lines: words
                     .iter()
                     .zip([0.25, 4.78, 10.0, 14.5, 18.0])
-                    .map(|(t, s)| island_lyrics::Line { time: s, text: t.to_string(), ..Default::default() })
+                    .map(|(t, s)| island_lyrics::Line { time: s, text: t.to_string(), romaji: if island_lyrics::romaji::is_japanese(t) { island_lyrics::romaji::line_to_romaji(t) } else { String::new() } })
                     .collect(),
                 duration: 0.0,
             });

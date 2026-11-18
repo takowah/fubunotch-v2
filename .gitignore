@@ -2,3 +2,4 @@
 *.log
 scripts/pixel/.cache/
 __pycache__/
+.claude/worktrees/

@@ -126,6 +126,8 @@ export struct NotifRow {
 
 export struct LyricLine {
     text: string,
+    // A Japanese line's reading in Latin letters ("" otherwise), shown under it.
+    romaji: string,
     current: bool,
 }
 
@@ -879,8 +881,8 @@ component LyricsPage inherits Rectangle {
                 padding-top: 5px;
                 padding-bottom: 5px;
                 opacity: self.edge;
-                // Romaji: the line's own when the lyrics carry it (none yet).
-                property <string> ro: "";
+                // Romaji: the line's own reading (empty for a non-Japanese line).
+                property <string> ro: line.romaji;
                 Text {
                     text: line.text;
                     wrap: word-wrap;
