@@ -51,12 +51,22 @@ fn post(event: &str, body: &[u8], token: &str, wait: Duration) -> Option<String>
     Some(rest.split_once("\r\n\r\n").map(|(_, b)| b.trim().to_string()).unwrap_or_default())
 }
 
-/// The documented PermissionRequest output for a clicked "allow" / "deny".
+/// The documented PermissionRequest output for a clicked "allow" / "deny",
+/// or "input:<json>": a question's option clicked, sent back as the tool's
+/// input with its answer (allow + `updatedInput`). The JSON comes from the
+/// island (serde, one line); only an object is passed on.
 fn decision_json(decision: &str) -> Option<String> {
-    let behavior = match decision.trim() {
-        "allow" => r#"{"behavior":"allow"}"#,
-        "deny" => r#"{"behavior":"deny","message":"Denied from Kanmuri"}"#,
-        _ => return None,
+    let d = decision.trim();
+    let behavior = match d {
+        "allow" => r#"{"behavior":"allow"}"#.to_string(),
+        "deny" => r#"{"behavior":"deny","message":"Denied from Kanmuri"}"#.to_string(),
+        _ => {
+            let input = d.strip_prefix("input:")?.trim();
+            if !(input.starts_with('{') && input.ends_with('}')) || input.contains('\n') {
+                return None;
+            }
+            format!(r#"{{"behavior":"allow","updatedInput":{input}}}"#)
+        }
     };
     Some(format!(r#"{{"hookSpecificOutput":{{"hookEventName":"PermissionRequest","decision":{behavior}}}}}"#))
 }
@@ -95,6 +105,12 @@ mod tests {
         assert!(decision_json("deny").unwrap().contains(r#""behavior":"deny""#));
         assert_eq!(decision_json(""), None, "no click: silence, Claude Code asks itself");
         assert_eq!(decision_json("always allow everything"), None);
+        // A question answered from the island.
+        assert_eq!(
+            decision_json(r#"input:{"questions":[],"answers":{"Which?":"A"}}"#).as_deref(),
+            Some(r#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedInput":{"questions":[],"answers":{"Which?":"A"}}}}}"#)
+        );
+        assert_eq!(decision_json("input:not json"), None);
     }
 
     #[test]

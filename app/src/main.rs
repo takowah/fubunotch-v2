@@ -67,6 +67,9 @@ const COMPACT_SONG: (f32, f32) = (222.0, 42.0);
 /// A notification: Mini Island's popup ($WIDE_W x $NOTIF_H), a full pill.
 const COMPACT_NOTICE: (f32, f32) = (340.0, 56.0);
 const NOTICE_RADIUS: f32 = 28.0;
+/// A multiple-choice question from Claude Code: the question, its options under it.
+const COMPACT_QUESTION: (f32, f32) = (420.0, 88.0);
+const QUESTION_RADIUS: f32 = 24.0;
 /// The music's notice (a new song, play, pause): the song's popup card.
 const COMPACT_MEDIA: (f32, f32) = (340.0, 88.0);
 const MEDIA_RADIUS: f32 = 24.0;
@@ -263,6 +266,8 @@ struct State {
     data: store::Data,
     /// Claude Code permission requests waiting for a click: activity id → answer.
     pending: HashMap<String, island_webhook::Reply>,
+    /// AskUserQuestion's input per question activity, to answer it with the option clicked.
+    ask_inputs: HashMap<String, serde_json::Value>,
     ask_seq: u64,
     /// Apps' logos as images (by AUMID), made once on the UI thread from
     /// notif's pixels: refreshes reuse them.
@@ -407,6 +412,12 @@ fn kind_name(k: Kind) -> &'static str {
     }
 }
 
+/// A multiple-choice question from Claude Code: an ask whose buttons are its
+/// options (claude::question_plan), not Allow / Deny.
+fn is_question(a: &Activity) -> bool {
+    a.kind == Kind::Ask && a.actions.first().is_some_and(|x| x.id.starts_with("answer:"))
+}
+
 /// `logo` at LOGO_NOTICE, `logo_small` at LOGO_CAPSULE (each drawn 1:1).
 fn item(a: &Activity, logo: Option<slint::Image>, logo_small: Option<slint::Image>) -> Item {
     let actions: Vec<ActionInfo> = a.actions.iter().map(|x| ActionInfo { id: x.id.as_str().into(), label: x.label.as_str().into() }).collect();
@@ -430,6 +441,7 @@ fn item(a: &Activity, logo: Option<slint::Image>, logo_small: Option<slint::Imag
         has_logo: logo.is_some(),
         logo: logo.unwrap_or_default(),
         logo_small: logo_small.unwrap_or_default(),
+        question: is_question(a),
     }
 }
 
@@ -537,6 +549,8 @@ fn ask_rows(arbiter: &Arbiter, logos: &mut HashMap<String, slint::Image>, scale:
                 initial: initial(&a.source).into(),
                 has_logo: logo.is_some(),
                 logo: logo.clone().unwrap_or_default(),
+                // Allow / Deny, or a question's options.
+                actions: ModelRc::new(VecModel::from(a.actions.iter().map(|x| ActionInfo { id: x.id.as_str().into(), label: x.label.as_str().into() }).collect::<Vec<_>>())),
             }
         })
         .collect()
@@ -545,10 +559,16 @@ fn ask_rows(arbiter: &Arbiter, logos: &mut HashMap<String, slint::Image>, scale:
 /// Answers a question (from the capsule or the Notifications page): the
 /// user's "allow" / "deny" goes back to Claude Code, and the question ends.
 fn answer(state: &mut State, id: &str, action: &str, now: u64) {
+    let input = state.ask_inputs.remove(id);
     if let Some(reply) = state.pending.remove(id) {
-        // Only what the user clicked goes back: "allow" or "deny".
+        // Only what the user clicked goes back: "allow", "deny", or a
+        // question's option as its answer ("input:" + the answered input).
         if action == "allow" || action == "deny" {
             let _ = reply.0.send(action.to_string());
+        } else if let Some(i) = action.strip_prefix("answer:").and_then(|i| i.parse::<usize>().ok()) {
+            if let Some(answered) = input.as_ref().and_then(|v| claude::answered_input(v, i)) {
+                let _ = reply.0.send(format!("input:{answered}"));
+            }
         }
     }
     state.arbiter.end(id, now);
@@ -1310,6 +1330,8 @@ fn refresh(ui: &Island) {
         // Modes: a new notice pops the hidden island up; the compact island
         // goes up hide_after() later unless someone waits for an answer.
         let front_kind = view.front.map(|a| a.kind);
+        // A multiple-choice question (its options as answers): two rows, question over options.
+        let front_question = view.front.is_some_and(is_question);
         // Claude Code busy running a tool doesn't hide the song: the lyric stays,
         // its count shows as "+N". Questions and "finished" notices still come first.
         let song_over = state.music.has_session
@@ -1457,6 +1479,7 @@ fn refresh(ui: &Island) {
             }
             Mode::Compact if notice && front_id.as_deref().is_some_and(|id| id.starts_with("music:event")) => COMPACT_MEDIA,
             Mode::Compact if notice => COMPACT_NOTICE,
+            Mode::Compact if front_question => COMPACT_QUESTION,
             Mode::Compact if front_kind == Some(Kind::Ask) => COMPACT_NOTICE,
             Mode::Compact if (front_kind == Some(Kind::Ambient) || song_over) && state.music.has_session => COMPACT_SONG,
             Mode::Compact if front_id.is_some() => COMPACT_BUSY,
@@ -1594,6 +1617,7 @@ fn end_prefix(state: &mut State, prefix: &str, now: u64) {
     for id in ids {
         state.arbiter.end(&id, now);
         state.pending.remove(&id);
+        state.ask_inputs.remove(&id);
     }
 }
 
@@ -1615,7 +1639,19 @@ fn on_claude(state: &mut State, event: &str, payload: &serde_json::Value, reply:
                 if let Some(r) = reply {
                     state.pending.insert(ask_id.clone(), r);
                 }
+                // A question: its input, to answer it with the option clicked.
+                if payload.get("tool_name").and_then(|t| t.as_str()) == Some("AskUserQuestion") {
+                    if let Some(input) = payload.get("tool_input") {
+                        state.ask_inputs.insert(ask_id.clone(), input.clone());
+                    }
+                }
             }
+            shows(state, list);
+        }
+        // Told, not asked: the reply is dropped at once, so the hook prints
+        // nothing and Claude Code asks in its terminal.
+        claude::Plan::Tell(list) => {
+            drop(reply);
             shows(state, list);
         }
         claude::Plan::End(ids, prefix) => {
@@ -3051,7 +3087,7 @@ fn update_background(ui: &Island) {
         }
         let scale = ui.window().scale_factor().max(0.5);
         let (w, h) = state.size_to;
-        let r = if state.mode == Mode::Expanded || (w, h) == COMPACT_MEDIA { MEDIA_RADIUS } else if (w, h) == COMPACT_NOTICE { NOTICE_RADIUS } else { h / 2.0 };
+        let r = if state.mode == Mode::Expanded || (w, h) == COMPACT_MEDIA { MEDIA_RADIUS } else if (w, h) == COMPACT_NOTICE { NOTICE_RADIUS } else if (w, h) == COMPACT_QUESTION { QUESTION_RADIUS } else { h / 2.0 };
         // The picture is dimmed toward the island's body (the Look's colour).
         let tint = state.look_shown.as_ref().map_or((0x0b, 0x0b, 0x0d), |c| c.base);
         let key = format!("{}|{w}x{h}|{scale}|{}|{tint:?}", look.background, look.background_dim);
@@ -3520,6 +3556,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             data: store::load_data(),
             pending: HashMap::new(),
+            ask_inputs: HashMap::new(),
             ask_seq: 0,
             logos: HashMap::new(),
             confirm: None,
@@ -3588,6 +3625,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 state.arbiter.end(&id, now);
                 // A dismissed permission request: Claude Code asks in its terminal.
                 state.pending.remove(&id);
+                state.ask_inputs.remove(&id);
             }
         });
         refresh(&ui);
@@ -4162,10 +4200,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         on_flash(&ui, flash::Flash { app: "WeChat".into(), exe });
     }
     if std::env::var_os("KANMURI_DEMO_ASK").is_some() {
-        // A question from Claude Code waiting for Allow / Deny (nobody gets the answer).
+        // A question from Claude Code waiting for Allow / Deny (nobody gets the answer);
+        // KANMURI_DEMO_ASK=question: a multiple-choice AskUserQuestion instead.
+        let question = std::env::var("KANMURI_DEMO_ASK").is_ok_and(|v| v == "question");
         with_state(|state| {
-            let p = serde_json::json!({ "session_id": "demo", "cwd": "C:\\Codingers\\kanmuri", "tool_name": "Bash",
-                "tool_input": { "command": "cargo build --workspace && cargo test --workspace" } });
+            let p = if question {
+                serde_json::json!({ "session_id": "demo", "cwd": "C:\\Codingers\\kanmuri", "tool_name": "AskUserQuestion",
+                    "tool_input": { "questions": [{ "question": "Where should the build run?", "header": "Build in", "multiSelect": false,
+                        "options": [{ "label": "Install here", "description": "" }, { "label": "Office PC", "description": "" }, { "label": "NotchDeck first", "description": "" }] }] } })
+            } else {
+                serde_json::json!({ "session_id": "demo", "cwd": "C:\\Codingers\\kanmuri", "tool_name": "Bash",
+                    "tool_input": { "command": "cargo build --workspace && cargo test --workspace" } })
+            };
             if let claude::Plan::Show(list) = claude::plan("PermissionRequest", &p, "claude:demo:ask:1") {
                 for json in list {
                     upsert_json(state, json, 0);

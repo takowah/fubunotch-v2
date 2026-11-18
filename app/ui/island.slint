@@ -44,6 +44,9 @@ export struct Item {
     logo: image,
     logo-small: image,
     has-logo: bool,
+    // A multiple-choice question (its options are the actions): the question
+    // on top, the options in a row under it.
+    question: bool,
 }
 
 export struct TabInfo {
@@ -214,8 +217,9 @@ export struct NotifRow {
     index: int,
 }
 
-// A question from Claude Code waiting for Allow / Deny, at the top of the
-// Notifications page: "Allow Bash?", the project, the command.
+// A question from Claude Code, at the top of the Notifications page: "Allow
+// Bash?" with Allow / Deny, or a multiple-choice question with its options;
+// the project and the command (or the question's header).
 export struct AskRow {
     id: string,
     title: string,
@@ -225,6 +229,7 @@ export struct AskRow {
     initial: string,
     logo: image,
     has-logo: bool,
+    actions: [ActionInfo],
 }
 
 export struct LyricLine {
@@ -1215,8 +1220,7 @@ component NotifPage inherits Rectangle {
             width: self.preferred-width;
             height: 24px;
             spacing: 6px;
-            ActionPill { label: "Allow"; clicked => { root.answered(q.id, "allow"); } }
-            ActionPill { label: "Deny"; clicked => { root.answered(q.id, "deny"); } }
+            for a in q.actions : ActionPill { label: a.label; clicked => { root.answered(q.id, a.id); } }
         }
     }
     for n[i] in root.items : Rectangle {
@@ -1901,10 +1905,10 @@ export component Island inherits Window {
     property <length> island-w: target-w;
     property <length> island-h: target-h;
     animate island-w, island-h { duration: Ice.morph; easing: cubic-bezier(0.22, 1.18, 0.36, 1); }
-    property <length> island-r: root.hidden ? 2px : root.expanded || root.show-media ? 24px : root.show-line && root.line-notice ? 22px : self.island-h / 2;
+    property <length> island-r: root.hidden ? 2px : root.expanded || root.show-media || (root.show-ask && root.front.question) ? 24px : root.show-line && root.line-notice ? 22px : self.island-h / 2;
     animate island-r { duration: Ice.morph; easing: ease-out; }
     // The radius it springs to (Rust cuts Liquid Glass' picture with it).
-    out property <length> target-r: root.hidden ? 2px : root.expanded || root.show-media ? 24px : root.show-line && root.line-notice ? 22px : root.target-h / 2;
+    out property <length> target-r: root.hidden ? 2px : root.expanded || root.show-media || (root.show-ask && root.front.question) ? 24px : root.show-line && root.line-notice ? 22px : root.target-h / 2;
     property <length> ix: (root.width - self.island-w) / 2;
     property <length> body-y: root.hidden ? 2px : Ice.top;
 
@@ -2055,9 +2059,37 @@ export component Island inherits Window {
                 TouchArea { clicked => { root.front-clicked(); } }
             }
 
+            // Compact, a multiple-choice question: the question and where it
+            // comes from on top, its options in a row under it.
+            Rectangle {
+                opacity: root.show-ask && root.front.question ? 1 : 0;
+                animate opacity { duration: Ice.fade; }
+                visible: self.opacity > 0.01;
+                AppIcon { x: 14px; y: 10px; size: 34px; accent: root.front.accent; initial: root.front.initial; logo: root.front.logo; has-logo: root.front.has-logo; }
+                VerticalLayout {
+                    x: 14px + 34px + 10px;
+                    y: 10px;
+                    width: parent.width - self.x - 18px;
+                    height: 34px;
+                    alignment: center;
+                    spacing: 1px;
+                    Text { text: root.front.title; color: Mini.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+                    if root.front.body != "" : Text { text: root.front.body; color: Mini.text-2; font-size: 11px; overflow: elide; }
+                }
+                HorizontalLayout {
+                    x: 14px + 34px + 10px;
+                    y: parent.height - 12px - 26px;
+                    width: parent.width - self.x - 18px;
+                    height: 26px;
+                    spacing: 6px;
+                    alignment: start;
+                    for a in root.front.actions : ActionPill { label: a.label; clicked => { root.action-clicked(a.id); } }
+                }
+            }
+
             // Compact, a question: the popup with its answers on the right.
             Rectangle {
-                opacity: root.show-ask ? 1 : 0;
+                opacity: root.show-ask && !root.front.question ? 1 : 0;
                 animate opacity { duration: Ice.fade; }
                 visible: self.opacity > 0.01;
                 AppIcon { x: 12px; y: (parent.height - self.height) / 2; accent: root.front.accent; initial: root.front.initial; logo: root.front.logo; has-logo: root.front.has-logo; }

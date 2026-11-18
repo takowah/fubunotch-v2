@@ -72,7 +72,64 @@ pub enum Plan {
     End(Vec<String>, Option<String>),
     /// Both, in that order: end first.
     EndThenShow(Vec<String>, Vec<Value>),
+    /// A permission request the island can only tell about (answered in
+    /// Claude Code's terminal): shown, and no answer is held for it.
+    Tell(Vec<Value>),
     Nothing,
+}
+
+/// The longest option label on a button.
+const OPTION_LABEL: usize = 22;
+
+/// Claude Code's AskUserQuestion is a multiple-choice question, not a tool to
+/// allow (the owner, 18 Nov 2026: "tadi kan multiple choice"). One question
+/// with one answer to pick: its options are the buttons, and a click answers
+/// it (main.rs `answer_question`). Anything else (several questions, several
+/// answers): a notice, answered in Claude Code.
+fn question_plan(payload: &Value, ask_id: &str, project: &str) -> Plan {
+    let qs = payload.get("tool_input").and_then(|i| i.get("questions")).and_then(Value::as_array).cloned().unwrap_or_default();
+    let first = qs.first();
+    let text = first.and_then(|q| q.get("question")).and_then(Value::as_str).unwrap_or("Claude Code has a question");
+    let options: Vec<&str> = first
+        .and_then(|q| q.get("options"))
+        .and_then(Value::as_array)
+        .map(|o| o.iter().filter_map(|x| x.get("label").and_then(Value::as_str)).collect())
+        .unwrap_or_default();
+    let multi = first.and_then(|q| q.get("multiSelect")).and_then(Value::as_bool).unwrap_or(false);
+    if qs.len() == 1 && !multi && (1..=4).contains(&options.len()) {
+        let actions: Vec<Value> = options.iter().enumerate().map(|(i, l)| json!({ "id": format!("answer:{i}"), "label": cut(l, OPTION_LABEL) })).collect();
+        return Plan::Show(vec![json!({
+            "id": ask_id,
+            "source": "Claude Code",
+            "kind": "ask",
+            "title": cut(text, 120),
+            // One line (the capsule has one under the question): "kanmuri · Build in".
+            "body": format!("{project} · {}", first.and_then(|q| q.get("header")).and_then(Value::as_str).unwrap_or("Question")),
+            "ttl_ms": 110_000,
+            "actions": actions,
+        })]);
+    }
+    let more = if qs.len() > 1 { format!(" (+{} more)", qs.len() - 1) } else { String::new() };
+    Plan::Tell(vec![json!({
+        "id": format!("{ask_id}:tell"),
+        "source": "Claude Code",
+        "kind": "alert",
+        "title": format!("{project} · answer in Claude Code"),
+        "body": cut(&format!("{text}{more}"), 200),
+    })])
+}
+
+/// The tool input with the clicked option as its answer, for the hook's
+/// `updatedInput` (AskUserQuestion reads `answers`: question text → label).
+pub fn answered_input(input: &Value, option: usize) -> Option<Value> {
+    let q = input.get("questions")?.as_array()?.first()?;
+    let question = q.get("question")?.as_str()?;
+    let label = q.get("options")?.as_array()?.get(option)?.get("label")?.as_str()?;
+    let mut out = input.clone();
+    let mut answers = Map::new();
+    answers.insert(question.to_string(), Value::String(label.to_string()));
+    out.as_object_mut()?.insert("answers".into(), Value::Object(answers));
+    Some(out)
 }
 
 /// The plan for `event`. `ask_id` names a permission request's activity.
@@ -86,6 +143,7 @@ pub fn plan(event: &str, payload: &Value, ask_id: &str) -> Plan {
             Plan::Show(vec![json!({ "id": work, "source": "Claude Code", "kind": "progress", "title": format!("{project} · working"), "body": cut(prompt, 160) })])
         }
         "PreToolUse" => Plan::Show(vec![json!({ "id": work, "source": "Claude Code", "kind": "progress", "title": format!("{project} · {}", tool_line(payload)) })]),
+        "PermissionRequest" if payload.get("tool_name").and_then(Value::as_str) == Some("AskUserQuestion") => question_plan(payload, ask_id, &project),
         "PermissionRequest" => Plan::Show(vec![json!({
             "id": ask_id,
             "source": "Claude Code",
@@ -206,6 +264,37 @@ pub fn write_settings(new: &Value, stamp: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn question(multi: bool, n_questions: usize) -> Value {
+        let q = json!({ "question": "Where should the build run?", "header": "Build in", "multiSelect": multi,
+            "options": [{ "label": "Install here" }, { "label": "Office PC" }] });
+        json!({ "session_id": "s", "cwd": "C:\\x\\kanmuri", "tool_name": "AskUserQuestion",
+            "tool_input": { "questions": vec![q; n_questions] } })
+    }
+
+    #[test]
+    fn a_multiple_choice_question_shows_its_options_not_allow_deny() {
+        let Plan::Show(list) = plan("PermissionRequest", &question(false, 1), "ask1") else { panic!("not shown") };
+        assert_eq!(list[0]["title"], "Where should the build run?");
+        assert_eq!(list[0]["actions"][0]["id"], "answer:0");
+        assert_eq!(list[0]["actions"][1]["label"], "Office PC");
+        assert_eq!(list[0]["actions"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn several_questions_or_answers_are_told_and_answered_in_claude_code() {
+        assert!(matches!(plan("PermissionRequest", &question(true, 1), "a"), Plan::Tell(_)));
+        assert!(matches!(plan("PermissionRequest", &question(false, 2), "a"), Plan::Tell(_)));
+    }
+
+    #[test]
+    fn the_clicked_option_becomes_the_answer() {
+        let input = question(false, 1)["tool_input"].clone();
+        let out = answered_input(&input, 1).unwrap();
+        assert_eq!(out["answers"]["Where should the build run?"], "Office PC");
+        assert_eq!(out["questions"], input["questions"], "the questions go back as they were");
+        assert!(answered_input(&input, 5).is_none());
+    }
 
     fn cmd(e: &str) -> String {
         format!("\"C:/x/kanmuri-hook.exe\" {e}")
