@@ -346,7 +346,7 @@ mod tests {
     fn the_pick_is_the_song_of_about_the_length_not_its_instrumental() {
         let answer = json!({ "contents": [item("inst", "FOXXXROOM (Instrumental)", "3:27"), item("long", "FOXXXROOM", "4:30"), item("song", "FOXXXROOM", "3:27")] });
         let found = hits(&answer);
-        assert_eq!(found[0], Hit { video_id: "inst".into(), title: "FOXXXROOM (Instrumental)".into(), duration: Some(207.0) });
+        assert_eq!(found[0], Hit { video_id: "inst".into(), title: "FOXXXROOM (Instrumental)".into(), duration: Some(207.0), thumb: None });
         assert_eq!(pick(&found, &query("FOXXXROOM", 208.0)).unwrap().video_id, "song");
         assert_eq!(pick(&found, &query("FOXXXROOM (Instrumental)", 207.0)).unwrap().video_id, "inst");
         assert!(pick(&found, &query("FOXXXROOM", 100.0)).is_none(), "no hit of about the length");
