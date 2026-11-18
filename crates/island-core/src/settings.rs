@@ -92,11 +92,13 @@ pub struct SystemSettings {
     pub charger: bool,
     pub network: bool,
     pub audio_device: bool,
+    /// A dot on the capsule while an app uses the microphone (orange) or the camera (green).
+    pub mic_cam: bool,
 }
 
 impl Default for SystemSettings {
     fn default() -> Self {
-        SystemSettings { volume: true, caps_lock: true, keyboard_layout: true, charger: true, network: true, audio_device: true }
+        SystemSettings { volume: true, caps_lock: true, keyboard_layout: true, charger: true, network: true, audio_device: true, mic_cam: true }
     }
 }
 

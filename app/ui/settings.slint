@@ -52,6 +52,7 @@ export struct SettingsView {
     sys-charger: bool,
     sys-network: bool,
     sys-audio: bool,
+    sys-mic-cam: bool,
     autostart: bool,
     mascot: bool,
     // The idle island's preview: the time now, today's date, the connection
@@ -1288,7 +1289,8 @@ export component SettingsWindow inherits Window {
                     SettingRow { title: "Keyboard layout"; hint: ""; glyph: "\u{E765}"; Toggle { on: root.s.sys-layout; toggled(v) => { root.flag-changed("system.keyboard_layout", v); } } }
                     SettingRow { title: "Charger"; hint: ""; glyph: "\u{E945}"; Toggle { on: root.s.sys-charger; toggled(v) => { root.flag-changed("system.charger", v); } } }
                     SettingRow { title: "Network"; hint: ""; glyph: "\u{E701}"; Toggle { on: root.s.sys-network; toggled(v) => { root.flag-changed("system.network", v); } } }
-                    SettingRow { title: "Audio output"; hint: "Headphones connected or gone."; glyph: "\u{E7F6}"; last: true; Toggle { on: root.s.sys-audio; toggled(v) => { root.flag-changed("system.audio_device", v); } } }
+                    SettingRow { title: "Audio output"; hint: "Headphones connected or gone."; glyph: "\u{E7F6}"; Toggle { on: root.s.sys-audio; toggled(v) => { root.flag-changed("system.audio_device", v); } } }
+                    SettingRow { title: "Mic & camera dot"; hint: "Orange while an app uses the microphone, green for the camera."; glyph: "\u{E720}"; last: true; Toggle { on: root.s.sys-mic-cam; toggled(v) => { root.flag-changed("system.mic_cam", v); } } }
                 }
 
                 // ── Claude Code ──

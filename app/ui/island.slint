@@ -259,6 +259,10 @@ export struct Music {
     repeat: int,
     // 1 liked, -1 disliked, 0 neither.
     rating: int,
+    // The length the bar stands for (seconds, 0 unknown), and whether a click
+    // or drag on it moves the song.
+    length: float,
+    can-seek: bool,
 }
 
 // ── Mini Island's look ───────────────────────────────────────────────────────
@@ -336,6 +340,16 @@ global Paint {
     // Darker by f (a share of each channel).
     public pure function shade(c: color, f: float) -> color {
         return rgb(c.red * f, c.green * f, c.blue * f);
+    }
+}
+
+// "3:07" for seconds, as Rust's local_time::mm_ss (the time while dragging the bar).
+global Clock {
+    public pure function mm-ss(seconds: float) -> string {
+        let s = round(max(0, seconds));
+        let m = floor(s / 60);
+        let r = s - m * 60;
+        return m + ":" + (r < 10 ? "0" : "") + r;
     }
 }
 
@@ -535,13 +549,19 @@ component WaveBar inherits Rectangle {
     in property <color> tint: Mini.ink;
     // The small one (the capsule): a thin bar, a small knob, no waves.
     in property <bool> small;
+    // A click or drag moves the song (the player can seek): the knob follows
+    // the pointer while held, `seek` (0..1) goes on release.
+    in property <bool> seekable;
+    callback seek(float);
+    out property <bool> dragging;
+    out property <float> drag-value;
     height: root.small ? 9px : 22px;
     property <length> bar-h: root.small ? 2px : 4px;
     property <length> knob: root.small ? 5px : 11px;
     // The bar's middle, near the bottom; the waves rise above it.
     property <float> base: self.height / 1px - (root.small ? 1.5 : 0) - self.bar-h / 1px / 2;
-    property <float> fill: max(0, self.width / 1px * clamp(root.value, 0, 1));
-    animate fill { duration: 300ms; easing: ease-out; }
+    property <float> fill: max(0, self.width / 1px * clamp(root.dragging ? root.drag-value : root.value, 0, 1));
+    animate fill { duration: root.dragging ? 0ms : 300ms; easing: ease-out; }
     property <float> t;
     Timer {
         interval: 50ms;
@@ -615,6 +635,28 @@ component WaveBar inherits Rectangle {
         background: root.tint;
         border-width: root.small ? 1.2px : 2px;
         border-color: Mini.wash;
+    }
+    if root.seekable && !root.small : TouchArea {
+        y: -4px;
+        height: parent.height + 8px;
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if e.button == PointerEventButton.left && e.kind == PointerEventKind.down {
+                root.drag-value = clamp(self.mouse-x / max(1px, self.width), 0, 1);
+                root.dragging = true;
+            } else if e.button == PointerEventButton.left && e.kind == PointerEventKind.up && root.dragging {
+                root.drag-value = clamp(self.mouse-x / max(1px, self.width), 0, 1);
+                root.dragging = false;
+                root.seek(root.drag-value);
+            } else if e.kind == PointerEventKind.cancel {
+                root.dragging = false;
+            }
+        }
+        moved => {
+            if root.dragging {
+                root.drag-value = clamp(self.mouse-x / max(1px, self.width), 0, 1);
+            }
+        }
     }
 }
 
@@ -949,17 +991,19 @@ component MusicCard inherits Rectangle {
         y: 58px;
         width: parent.width - 32px;
         height: 24px;
-        Text { text: root.music.elapsed; color: Mini.text-2; font-size: 10.5px; min-width: 28px; vertical-alignment: center; }
-        WaveBar {
+        Text { text: bar.dragging ? Clock.mm-ss(bar.drag-value * root.music.length) : root.music.elapsed; color: Mini.text-2; font-size: 10.5px; min-width: 28px; vertical-alignment: center; }
+        bar := WaveBar {
             horizontal-stretch: 1;
             y: 24px / 2 + 2px - self.height;
             value: root.music.position;
             playing: root.music.playing;
             live: root.live;
             tint: Mini.accent;
+            seekable: root.music.can-seek;
+            seek(f) => { root.command("seek:" + f); }
         }
         Rectangle { width: 6px; }
-        Text { text: root.music.remaining; color: Mini.text-2; font-size: 10.5px; min-width: 28px; horizontal-alignment: right; vertical-alignment: center; }
+        Text { text: bar.dragging ? "-" + Clock.mm-ss((1 - bar.drag-value) * root.music.length) : root.music.remaining; color: Mini.text-2; font-size: 10.5px; min-width: 28px; horizontal-alignment: right; vertical-alignment: center; }
         // Line: the song's lyric on the capsule (Mini Island's lyric switch).
         Rectangle {
             width: 28px;
@@ -1038,8 +1082,8 @@ component MusicWide inherits Rectangle {
         y: root.height - root.pad - 26px;
         width: root.width - root.text-x - root.pad;
         height: 26px;
-        Text { text: root.music.elapsed; color: Mini.text-2; font-size: 11px; min-width: 34px; vertical-alignment: center; }
-        WaveBar {
+        Text { text: bar.dragging ? Clock.mm-ss(bar.drag-value * root.music.length) : root.music.elapsed; color: Mini.text-2; font-size: 11px; min-width: 34px; vertical-alignment: center; }
+        bar := WaveBar {
             horizontal-stretch: 1;
             visible: root.music.remaining != "";
             y: 26px / 2 + 2px - self.height;
@@ -1047,9 +1091,11 @@ component MusicWide inherits Rectangle {
             playing: root.music.playing;
             live: root.live;
             tint: Mini.accent;
+            seekable: root.music.can-seek;
+            seek(f) => { root.command("seek:" + f); }
         }
         Rectangle { width: 8px; }
-        Text { text: root.music.remaining; color: Mini.text-2; font-size: 11px; min-width: 34px; horizontal-alignment: right; vertical-alignment: center; }
+        Text { text: bar.dragging ? "-" + Clock.mm-ss((1 - bar.drag-value) * root.music.length) : root.music.remaining; color: Mini.text-2; font-size: 11px; min-width: 34px; horizontal-alignment: right; vertical-alignment: center; }
         // Line: the song's lyric on the capsule (Mini Island's lyric switch).
         Rectangle {
             width: 34px;
@@ -1218,8 +1264,8 @@ component LyricsPage inherits Rectangle {
         y: root.pad + root.cover + 12px;
         width: root.side - root.pad - 14px;
         height: 22px;
-        Text { text: root.music.elapsed; color: Mini.text-2; font-size: 11px; min-width: 34px; vertical-alignment: center; }
-        WaveBar {
+        Text { text: bar.dragging ? Clock.mm-ss(bar.drag-value * root.music.length) : root.music.elapsed; color: Mini.text-2; font-size: 11px; min-width: 34px; vertical-alignment: center; }
+        bar := WaveBar {
             horizontal-stretch: 1;
             visible: root.music.remaining != "";
             y: 22px / 2 + 2px - self.height;
@@ -1227,9 +1273,11 @@ component LyricsPage inherits Rectangle {
             playing: root.music.playing;
             live: root.live;
             tint: Mini.accent;
+            seekable: root.music.can-seek;
+            seek(f) => { root.command("seek:" + f); }
         }
         Rectangle { width: 8px; }
-        Text { text: root.music.remaining; color: Mini.text-2; font-size: 11px; min-width: 34px; horizontal-alignment: right; vertical-alignment: center; }
+        Text { text: bar.dragging ? "-" + Clock.mm-ss((1 - bar.drag-value) * root.music.length) : root.music.remaining; color: Mini.text-2; font-size: 11px; min-width: 34px; horizontal-alignment: right; vertical-alignment: center; }
     }
     // Controls, centred under the progress.
     HorizontalLayout {
@@ -1746,6 +1794,9 @@ export component Island inherits Window {
     in property <bool> repaint;
     // Do not disturb: the island stays down for notifications (calls excepted).
     in property <bool> dnd;
+    // An app uses the microphone / the camera now (Settings → System → Mic & camera dot).
+    in property <bool> mic-on;
+    in property <bool> cam-on;
     callback dnd-clicked();
     // A YouTube video docked under the island ("Watch in island"), kept
     // shown (held) or following the island; its title.
@@ -2304,6 +2355,25 @@ export component Island inherits Window {
 
             }
         }
+    }
+
+    // The microphone (orange) and the camera (green) in use, as on a phone:
+    // small dots at the capsule's right end, in every compact state (Mini
+    // Island's MicDot / CamDot, 5 px at its normal size).
+    property <length> dot: 5px * Mini.k;
+    property <length> dots-y: root.body-y + min(root.island-h / 2, 22px);
+    for d in [{ on: root.mic-on, c: #ff9f0a }, { on: root.cam-on, c: #30d158 }] : Rectangle {
+        property <length> size: root.compact && d.on ? root.dot : 0px;
+        animate size { duration: 260ms; easing: ease-out; }
+        // Both on: the microphone above, the camera below.
+        property <length> shift: root.mic-on && root.cam-on ? (d.c == #ff9f0a ? -1 : 1) * (root.dot / 2 + 1.5px) : 0px;
+        x: root.ix + root.island-w - 9px - self.size / 2;
+        y: root.dots-y + self.shift - self.size / 2;
+        width: self.size;
+        height: self.size;
+        border-radius: self.size / 2;
+        background: d.c;
+        visible: self.size > 0.1px;
     }
 }
 

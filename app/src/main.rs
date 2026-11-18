@@ -20,6 +20,8 @@ mod glass;
 mod music;
 mod accent;
 mod notif;
+mod flash;
+mod sensors;
 mod system;
 mod shelf;
 mod snapshot;
@@ -233,6 +235,10 @@ struct State {
     /// The Notifications module: its watcher while on, and the newest first.
     notif_watcher: Option<notif::Watcher>,
     notifications: VecDeque<notif::Notif>,
+    /// Who uses the microphone and the camera now (sensors.rs).
+    sensors: sensors::InUse,
+    /// The next id for a notification of an app without Windows ones (flash.rs).
+    flash_id: u32,
     /// The daily modules.
     focus: Focus,
     focus_plan: FocusPlan,
@@ -1097,6 +1103,9 @@ fn refresh(ui: &Island) {
             state.dnd = focus_running;
         }
         ui.set_dnd(state.dnd);
+        let dots = state.settings.system.mic_cam && state.settings.is_on("system");
+        ui.set_mic_on(dots && !state.sensors.mic.is_empty());
+        ui.set_cam_on(dots && !state.sensors.cam.is_empty());
         // Quiet: nothing pops the island but a question or a call.
         let quiet = state.dnd && front_kind != Some(Kind::Ask) && !view.front.is_some_and(|a| a.id.starts_with("notif:") && is_call(&a.title, &a.body));
         let front_changed = front_id.is_some() && front_id != state.last_front;
@@ -1481,6 +1490,26 @@ fn ytm_live(state: &State, now: u64) -> Option<island_webhook::YtmState> {
     (browser && now.saturating_sub(*at) < 40_000).then(|| ytm.clone())
 }
 
+/// The song's length as the island shows it: a browser's (Apple Music on the
+/// web) is missing or 2x-6x the song, so the length the lyrics were timed for
+/// wins there, and anywhere the player's own is no use. 0 when unknown.
+fn song_length(snap: &music::Snapshot, position: f64, lyric_len: f64) -> f64 {
+    let browser = matches!(snap.app.to_lowercase().as_str(), "chrome" | "edge" | "firefox" | "brave" | "opera" | "vivaldi");
+    if (browser || snap.duration <= position + 0.5) && lyric_len > position {
+        lyric_len
+    } else if snap.duration > position + 0.5 {
+        snap.duration
+    } else {
+        0.0
+    }
+}
+
+/// A click or drag on the progress bar (0..1 of its width) as seconds into
+/// the song: None when the length is unknown or the player can't seek.
+fn seek_target(fraction: f64, length: f64, can_seek: bool) -> Option<f64> {
+    (can_seek && length > 0.0 && fraction.is_finite()).then(|| fraction.clamp(0.0, 1.0) * length)
+}
+
 fn music_view(
     snap: &music::Snapshot,
     art: &Option<slint::Image>,
@@ -1500,15 +1529,7 @@ fn music_view(
     // The song's length: a browser's (Apple Music on the web) is missing or 2x-6x
     // the song, so the length the lyrics were timed for wins there, and anywhere
     // the player's own is no use.
-    let lyric_len = lyrics.as_ref().map_or(0.0, |l| l.duration);
-    let browser = matches!(snap.app.to_lowercase().as_str(), "chrome" | "edge" | "firefox" | "brave" | "opera" | "vivaldi");
-    let length = if (browser || snap.duration <= position + 0.5) && lyric_len > position {
-        lyric_len
-    } else if snap.duration > position + 0.5 {
-        snap.duration
-    } else {
-        0.0
-    };
+    let length = song_length(snap, position, lyrics.as_ref().map_or(0.0, |l| l.duration));
     let fraction = if length > 0.0 { (position / length).min(1.0) as f32 } else { 0.0 };
     // The line being sung (none before the first); the list centres on it.
     let at = lyrics.as_ref().filter(|_| lines.is_some()).and_then(|l| island_lyrics::line_at(&l.lines, sung_at));
@@ -1552,6 +1573,8 @@ fn music_view(
             _ => 0,
         },
         rating: rating as i32,
+        length: length as f32,
+        can_seek: seek_target(0.0, length, snap.can_seek).is_some(),
     }
 }
 
@@ -1886,7 +1909,7 @@ fn on_notification(ui: &Island, n: notif::Notif) {
         // own AUMID, as some apps' settings sit in nested keys Windows makes
         // only then.
         let off_here = state.settings.notifications.off.iter().any(|o| o.eq_ignore_ascii_case(&n.app));
-        if !snapshot_mode() && state.settings.is_on("notifications") && notif::has_access() && !off_here && !n.aumid.is_empty() && !state.data.banners.contains_key(&n.aumid) {
+        if !snapshot_mode() && state.settings.is_on("notifications") && notif::has_access() && !off_here && !n.aumid.is_empty() && !n.aumid.starts_with(notif::FLASH_PREFIX) && !state.data.banners.contains_key(&n.aumid) {
             if banners::take(banners::SETTINGS, [n.aumid.as_str()], &mut state.data.banners) {
                 store::save_data(&state.data);
             }
@@ -1896,6 +1919,26 @@ fn on_notification(ui: &Island, n: notif::Notif) {
         state.notifications.truncate(NOTIF_HISTORY);
     });
     refresh(ui);
+}
+
+/// A new message in an app without Windows notifications (WeChat): a
+/// notification like any other, when the Notifications module is on and the
+/// app is allowed there.
+fn on_flash(ui: &Island, f: flash::Flash) {
+    let n = with_state(|state| {
+        let aumid = flash::key(&f.exe, &f.app);
+        let id = state.flash_id;
+        state.flash_id = state.flash_id.checked_add(1).unwrap_or(4_000_000_000);
+        let n = notif::Notif { id, app: f.app.clone(), aumid, title: "New message".into(), body: format!("Open {} to read it", f.app), time: local_time::clock_text() };
+        // Listed under Settings' per-app switches either way.
+        notif::note(&n);
+        let on = state.settings.is_on("notifications") && notif::allowed(&state.settings.notifications.filter(), &n.app, &n.aumid);
+        on.then_some(n)
+    })
+    .flatten();
+    if let Some(n) = n {
+        on_notification(ui, n);
+    }
 }
 
 /// The idle island's status icons, per Settings > General > Idle island.
@@ -2369,6 +2412,7 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         sys_charger: s.system.charger,
         sys_network: s.system.network,
         sys_audio: s.system.audio_device,
+        sys_mic_cam: s.system.mic_cam,
         autostart: s.autostart,
         mascot: s.look.mascot,
         clock: local_time::clock_text().into(),
@@ -2463,6 +2507,7 @@ fn set_flag(s: &mut Settings, key: &str, on: bool) {
         "system.charger" => s.system.charger = on,
         "system.network" => s.system.network = on,
         "system.audio_device" => s.system.audio_device = on,
+        "system.mic_cam" => s.system.mic_cam = on,
         "look.mascot" => s.look.mascot = on,
         "look.night_warm" => s.look.night_warm = on,
         "general.popups" => s.general.popups = on,
@@ -3185,6 +3230,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ytm: None,
             lyrics_nudge: 0.0,
             notif_watcher: None,
+            sensors: sensors::InUse::default(),
+            flash_id: 4_000_000_000,
             notifications: VecDeque::new(),
             focus: Focus::new(&focus_plan),
             focus_plan,
@@ -3354,6 +3401,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 island_webhook::ytm_command(&command);
                 return;
             }
+        }
+        // "seek:<0..1>": a click or drag on the progress bar, let go.
+        if let Some(f) = command.strip_prefix("seek:").and_then(|f| f.parse::<f64>().ok()) {
+            with_state(|state| {
+                let position = state.music.position_now();
+                let lyric_len = state.lyrics.as_ref().map_or(0.0, |l| l.duration);
+                let length = song_length(&state.music, position, lyric_len);
+                if let Some(at) = seek_target(f, length, state.music.can_seek) {
+                    music::seek(at);
+                    // Shown there at once; the player's own word follows.
+                    state.music.position = at;
+                    state.music.at_unix_ms = music::now_unix_ms();
+                }
+            });
+            return refresh(&ui);
         }
         if command.as_str() == "hold" {
             with_state(|state| {
@@ -3614,6 +3676,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     });
 
+    // Apps that send no Windows notification (WeChat) and the microphone /
+    // camera: both wait on Windows (a shell hook, a registry notification).
+    if !snapshot_mode() {
+        let weak = ui.as_weak();
+        flash::start(move |f| {
+            let weak = weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    on_flash(&ui, f);
+                }
+            });
+        });
+        let weak = ui.as_weak();
+        sensors::start(move |now| {
+            let weak = weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    with_state(|state| state.sensors = now);
+                    refresh(&ui);
+                }
+            });
+        });
+    }
     if with_state(|s| s.settings.is_on("notifications")).unwrap_or(false) {
         *NOTIF_APPS.lock().unwrap_or_else(|e| e.into_inner()) = with_state(|s| s.settings.notifications.filter()).unwrap_or_default();
         start_notifications(&ui);
@@ -3707,6 +3792,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "title": "Build finished", "body": "All 214 tests passed on the release branch, ready to ship" }), 0);
         });
     }
+    // KANMURI_DEMO_MIC=1|mic|cam|both: an app on the microphone (1 / mic),
+    // the camera, or both: the capsule's dots.
+    if let Ok(v) = std::env::var("KANMURI_DEMO_MIC") {
+        with_state(|state| {
+            let (mic, cam) = match v.as_str() {
+                "cam" => (false, true),
+                "both" => (true, true),
+                _ => (true, false),
+            };
+            state.sensors = sensors::InUse {
+                mic: if mic { vec!["Zoom".into()] } else { vec![] },
+                cam: if cam { vec!["Zoom".into()] } else { vec![] },
+            };
+        });
+    }
+    // KANMURI_DEMO_WECHAT=1: a WeChat message (its taskbar button flashed),
+    // with WeChat's own icon when it is installed, through the same path as a
+    // real one.
+    if std::env::var_os("KANMURI_DEMO_WECHAT").is_some() {
+        let exe = flash::installed_wechat().unwrap_or_default();
+        let key = flash::key(&exe, "WeChat");
+        if !exe.is_empty() {
+            let (k, e) = (key.clone(), exe.clone());
+            let _ = std::thread::spawn(move || {
+                let com = unsafe { windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED) };
+                notif::keep_file_logo(&k, &e);
+                if com.is_ok() {
+                    unsafe { windows::Win32::System::Com::CoUninitialize() };
+                }
+            })
+            .join();
+        }
+        if notif::logo(&key).is_none() {
+            notif::put_logo(&key, demo_logo(accent_of("WeChat", Kind::Alert)));
+        }
+        on_flash(&ui, flash::Flash { app: "WeChat".into(), exe });
+    }
     if std::env::var_os("KANMURI_DEMO_ASK").is_some() {
         // A question from Claude Code waiting for Allow / Deny (nobody gets the answer).
         with_state(|state| {
@@ -3752,6 +3874,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 at_unix_ms: music::now_unix_ms(),
                 shuffle: Some(false),
                 repeat: Some(music::Repeat::All),
+                can_seek: true,
                 ..Default::default()
             };
             // Now playing, as a real song would be (the capsule's song pill).
@@ -3941,6 +4064,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod prayer_tests {
     use super::*;
+
+    #[test]
+    fn a_click_on_the_bar_maps_to_seconds_of_the_length_shown() {
+        let spotify = music::Snapshot { app: "Spotify".into(), duration: 200.0, ..Default::default() };
+        assert_eq!(song_length(&spotify, 30.0, 0.0), 200.0);
+        // A browser whose length is wrong or missing: the lyrics' length.
+        let chrome = music::Snapshot { app: "Chrome".into(), duration: 900.0, ..Default::default() };
+        assert_eq!(song_length(&chrome, 30.0, 240.0), 240.0);
+        let unknown = music::Snapshot { app: "Chrome".into(), ..Default::default() };
+        assert_eq!(song_length(&unknown, 30.0, 0.0), 0.0);
+        assert_eq!(seek_target(0.25, 240.0, true), Some(60.0));
+        assert_eq!(seek_target(1.4, 240.0, true), Some(240.0));
+        assert_eq!(seek_target(-0.2, 240.0, true), Some(0.0));
+        assert_eq!(seek_target(0.5, 240.0, false), None, "the player can't seek");
+        assert_eq!(seek_target(0.5, 0.0, true), None, "length unknown");
+    }
 
     #[test]
     fn prayers_evenly_spaced_now_in_between() {

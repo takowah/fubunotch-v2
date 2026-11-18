@@ -38,6 +38,8 @@ pub struct Snapshot {
     pub shuffle: Option<bool>,
     /// None when the player doesn't let us change it.
     pub repeat: Option<Repeat>,
+    /// The player lets us move the position (PlaybackControls.IsPlaybackPositionEnabled).
+    pub can_seek: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -260,6 +262,7 @@ fn publish() {
         let can = |f: fn(&windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackControls) -> windows::core::Result<bool>| {
             controls.as_ref().and_then(|c| f(c).ok()).unwrap_or(false)
         };
+        snap.can_seek = can(|c| c.IsPlaybackPositionEnabled());
         if can(|c| c.IsShuffleEnabled()) {
             snap.shuffle = Some(info.IsShuffleActive().and_then(|r| r.Value()).unwrap_or(false));
         }
@@ -405,6 +408,25 @@ pub fn command(what: &str) {
     });
 }
 
+/// Where to send the player for `seconds` into the song: the song's own
+/// seconds plus the stream before it (`adjust`'s base). None when the island
+/// only counts the song itself (the player reports no position at all).
+pub fn player_position(track: &Track, seconds: f64) -> Option<f64> {
+    (!track.clock_only).then(|| track.base + seconds.max(0.0))
+}
+
+/// Moves the current player to `seconds` into the song (on a short-lived thread).
+pub fn seek(seconds: f64) {
+    let Some(at) = player_position(&TRACK.lock().unwrap_or_else(|e| e.into_inner()), seconds) else { return };
+    std::thread::spawn(move || {
+        let session = WATCH.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|w| w.session.as_ref().map(|(s, _)| s.clone()));
+        if let Some(s) = session {
+            // 100 ns ticks.
+            let _ = s.TryChangePlaybackPositionAsync((at * 1e7) as i64).and_then(|op| op.get());
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -486,6 +508,19 @@ mod tests {
         let mut b2 = playing("Spotify", "b", 40.0, 180.0, 41_000);
         adjust(&mut t, &mut b2, 41_000);
         assert_eq!((b.position, b2.position), (0.5, 40.0));
+    }
+
+    #[test]
+    fn a_seek_lands_in_the_players_own_stream() {
+        let mut t = Track::default();
+        adjust(&mut t, &mut playing("Chrome", "a", 30.0, 600.0, 0), 0);
+        adjust(&mut t, &mut playing("Chrome", "b", 592.0, 900.0, 1_000), 1_000);
+        assert_eq!(player_position(&t, 60.0), Some(652.0));
+        assert_eq!(player_position(&Track::default(), 42.0), Some(42.0));
+        assert_eq!(player_position(&Track::default(), -3.0), Some(0.0));
+        let mut counted = Track::default();
+        adjust(&mut counted, &mut playing("Chrome", "c", 0.0, 0.0, 0), 0);
+        assert_eq!(player_position(&counted, 10.0), None, "the island only counts: nothing to send");
     }
 
     #[test]

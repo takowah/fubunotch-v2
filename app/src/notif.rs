@@ -57,7 +57,7 @@ pub fn seen_apps() -> std::collections::BTreeMap<String, String> {
     SEEN.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
-fn note(n: &Notif) {
+pub fn note(n: &Notif) {
     if !n.app.is_empty() {
         SEEN.lock().unwrap_or_else(|e| e.into_inner()).insert(n.app.clone(), n.aumid.clone());
     }
@@ -173,14 +173,32 @@ fn keep_logo(aumid: &str, info: &windows::ApplicationModel::AppInfo) {
     map.get_or_insert_with(Default::default).insert(aumid.to_string(), px);
 }
 
+/// The AUMID slot of an app that sends no Windows notification (flash.rs):
+/// "flash:<its exe>". A click starts that exe (it brings its window forward),
+/// and Windows' banner settings are never touched for it.
+pub const FLASH_PREFIX: &str = "flash:";
+
+/// Keeps the icon of a file (an app's exe) as the logo of `key`. Needs COM
+/// on the calling thread.
+pub fn keep_file_logo(key: &str, path: &str) {
+    if let Some(px) = item_icon(path) {
+        LOGOS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(key.to_string(), Some(Arc::new(px)));
+    }
+}
+
 /// The icon Windows' app list (shell:AppsFolder) shows for an AUMID, as RGBA.
 fn shell_icon(aumid: &str) -> Option<Vec<u8>> {
+    item_icon(&format!("shell:AppsFolder\\{aumid}"))
+}
+
+/// The icon the shell shows for a parsing name (an AppsFolder entry, a file), as RGBA.
+fn item_icon(name: &str) -> Option<Vec<u8>> {
     use windows::core::HSTRING;
     use windows::Win32::Foundation::SIZE;
     use windows::Win32::Graphics::Gdi::{DeleteObject, GetDC, GetDIBits, ReleaseDC, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS};
     use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY};
     unsafe {
-        let factory: IShellItemImageFactory = SHCreateItemFromParsingName(&HSTRING::from(format!("shell:AppsFolder\\{aumid}")), None).ok()?;
+        let factory: IShellItemImageFactory = SHCreateItemFromParsingName(&HSTRING::from(name), None).ok()?;
         let n = LOGO_PX as i32;
         let bmp = factory.GetImage(SIZE { cx: n, cy: n }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK).ok()?;
         let mut info = BITMAPINFO::default();
@@ -413,7 +431,12 @@ pub fn open(n: &Notif) {
         let _ = AllowSetForegroundWindow(ASFW_ANY);
         let com = CoInitializeEx(None, COINIT_MULTITHREADED);
         let mut done = false;
-        if is_packaged(&n.aumid) {
+        // An app without Windows notifications (WeChat): start its exe again,
+        // which brings the running one forward.
+        if let Some(exe) = n.aumid.strip_prefix(FLASH_PREFIX).filter(|e| e.to_lowercase().ends_with(".exe")) {
+            done = std::process::Command::new(exe).spawn().is_ok();
+        }
+        if !done && is_packaged(&n.aumid) {
             let args = toast_launch(n.id).unwrap_or_default();
             if let Ok(manager) = CoCreateInstance::<_, IApplicationActivationManager>(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER) {
                 done = manager.ActivateApplication(&HSTRING::from(n.aumid.as_str()), &HSTRING::from(args), AO_NONE).is_ok();
@@ -421,7 +444,7 @@ pub fn open(n: &Notif) {
         }
         // Anything else (Discord): Windows starts it by its AUMID, which brings
         // a running app forward.
-        if !done && !n.aumid.is_empty() && n.aumid.chars().all(|c| !c.is_control() && c != '"') {
+        if !done && !n.aumid.is_empty() && !n.aumid.starts_with(FLASH_PREFIX) && n.aumid.chars().all(|c| !c.is_control() && c != '"') {
             let _ = std::process::Command::new("explorer.exe").arg(format!("shell:AppsFolder\\{}", n.aumid)).spawn();
         }
         if com.is_ok() {
