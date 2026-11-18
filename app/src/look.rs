@@ -12,7 +12,11 @@ const BLACK: Rgb = (0x0b, 0x0b, 0x0d);
 /// How solid each look's body is.
 const SOLID: f32 = 0.949;
 const GLASS: f32 = 0.55;
-const FROSTED: f32 = 0.42;
+/// Frosted: a frosted grey, more solid than Glass. Windows' blur behind the
+/// window is not used: it ignores the window region and blurred the whole
+/// (much bigger) window as a square around the island (seen live 18 Nov 2026).
+const FROSTED: f32 = 0.78;
+const FROST: Rgb = (0x3a, 0x3a, 0x40);
 
 /// What the island draws with: set on its Mini global.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,7 +43,7 @@ pub fn colors(look: &LookSettings, wallpaper: Option<Rgb>, warmth: f32) -> Color
         "color" => (look.color_rgb(), SOLID),
         "wallpaper" => (wallpaper.unwrap_or(BLACK), SOLID),
         "glass" => (BLACK, GLASS),
-        "frosted" => (BLACK, FROSTED),
+        "frosted" => (FROST, FROSTED),
         _ => (BLACK, SOLID),
     };
     let light = look::wants_dark_ink(body);
@@ -51,7 +55,7 @@ pub fn colors(look: &LookSettings, wallpaper: Option<Rgb>, warmth: f32) -> Color
         light,
         ink: ink.map(|c| look::warm(c, warmth * 0.8)),
         wash: if light { (0, 0, 0) } else { (255, 255, 255) },
-        frosted: style == "frosted",
+        frosted: false,
     }
 }
 
