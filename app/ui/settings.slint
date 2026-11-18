@@ -41,6 +41,15 @@ export struct AccountSetting {
     can-sign-in: bool,
 }
 
+// A part of a Claude Code setup to send (Settings > Accounts > Send setup):
+// picked or not, and what the sending account has of it ("12 skills").
+export struct SetupPart {
+    id: string,
+    label: string,
+    on: bool,
+    have: string,
+}
+
 // A screen the island can sit on (Settings > General > Screen).
 export struct ScreenRow {
     id: string,
@@ -469,6 +478,74 @@ component AccountsCard inherits Card {
     }
 }
 
+// Send setup (as NotchDeck's Tools): from one Claude Code account to
+// another, the parts picked. Merges, never overwrites (the model excepted);
+// files changed are backed up first; logins are never touched.
+component SendSetupCard inherits Card {
+    in property <[ScreenRow]> accounts;
+    in property <string> from;
+    in property <string> to;
+    // The eight parts, in two rows of four.
+    in property <[SetupPart]> parts-a;
+    in property <[SetupPart]> parts-b;
+    in property <string> report;
+    callback pick(string, string);
+    callback toggle(string);
+    callback send();
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 14px;
+        padding-top: 12px;
+        padding-bottom: 14px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 10px;
+            Text { width: 40px; text: "From"; color: K.label; font-size: 12.5px; vertical-alignment: center; }
+            HorizontalLayout { alignment: start; Segmented { choices: root.accounts; value: root.from; picked(id) => { root.pick("from", id); } } }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            Text { width: 40px; text: "To"; color: K.label; font-size: 12.5px; vertical-alignment: center; }
+            HorizontalLayout { alignment: start; Segmented { choices: root.accounts; value: root.to; picked(id) => { root.pick("to", id); } } }
+        }
+        // The parts, four a row: a click picks or drops one; under each what "From" has.
+        for row in [root.parts-a, root.parts-b] : HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            for p in row : Rectangle {
+                width: 150px;
+                height: 48px;
+                border-radius: 8px;
+                background: p.on ? #ffffff1f : pa.has-hover ? #ffffff10 : #ffffff08;
+                border-width: 1px;
+                border-color: p.on ? Ice.glow.with-alpha(0.7) : transparent;
+                animate background { duration: 120ms; }
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 8px;
+                    alignment: center;
+                    spacing: 2px;
+                    Text { text: (p.on ? "✓ " : "") + p.label; color: p.on ? K.ink : K.label; font-size: 12.5px; font-weight: 600; }
+                    Text { text: p.have; color: K.hint; font-size: 11px; overflow: elide; }
+                }
+                pa := TouchArea { mouse-cursor: pointer; clicked => { root.toggle(p.id); } }
+            }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            SmallButton { label: "Send"; primary: true; enabled: root.from != root.to; clicked => { root.send(); } }
+            Text {
+                horizontal-stretch: 1;
+                text: root.report != "" ? root.report : root.from == root.to ? "Pick two different accounts." : "Adds what the other account lacks; keeps what it has. A backup of each file is made first.";
+                color: K.hint;
+                font-size: 12px;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
 // A section's name above its card.
 component Heading inherits Rectangle {
     in property <string> text;
@@ -860,6 +937,14 @@ export component SettingsWindow inherits Window {
     in property <[AccountSetting]> accounts-codex;
     in property <string> account-note;
     callback account-act(string, string, string);
+    // Settings > Accounts > Send setup.
+    in property <[ScreenRow]> setup-accounts;
+    in property <string> setup-from;
+    in property <string> setup-to;
+    in property <[SetupPart]> setup-parts-a;
+    in property <[SetupPart]> setup-parts-b;
+    in property <string> setup-report;
+    callback setup-act(string, string);
     // A byte as two hex digits: the swatches' "#rrggbb".
     pure function hex(v: int) -> string {
         return root.digit(floor(v / 16)) + root.digit(mod(v, 16));
@@ -1470,6 +1555,18 @@ export component SettingsWindow inherits Window {
                     rows: root.accounts-claude;
                     add-hint: "A terminal opens to sign it in.";
                     act(a, id, v) => { root.account-act(a, id, v); }
+                }
+                if root.page == "accounts" : Heading { text: "SEND SETUP (CLAUDE CODE)"; }
+                if root.page == "accounts" : SendSetupCard {
+                    accounts: root.setup-accounts;
+                    from: root.setup-from;
+                    to: root.setup-to;
+                    parts-a: root.setup-parts-a;
+                    parts-b: root.setup-parts-b;
+                    report: root.setup-report;
+                    pick(which, id) => { root.setup-act("pick-" + which, id); }
+                    toggle(id) => { root.setup-act("toggle", id); }
+                    send => { root.setup-act("send", ""); }
                 }
                 if root.page == "accounts" : Heading { text: "CODEX"; }
                 if root.page == "accounts" : AccountsCard {

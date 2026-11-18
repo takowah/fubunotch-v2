@@ -26,6 +26,7 @@ mod system;
 mod shelf;
 mod snapshot;
 mod accounts;
+mod setup;
 mod weather;
 mod control;
 mod pixels;
@@ -237,6 +238,12 @@ struct State {
     weather_busy: bool,
     weather_failed: bool,
     keep_awake: bool,
+    /// Settings > Accounts > Send setup: the two accounts, the parts picked
+    /// (None: not yet, all but the model), what the last send did.
+    setup_from: String,
+    setup_to: String,
+    setup_parts: Option<Vec<String>>,
+    setup_report: String,
     settings: Settings,
     /// What is playing (the Music module), and its artwork as an image.
     music: music::Snapshot,
@@ -3476,6 +3483,37 @@ fn update_background(ui: &Island) {
     std::thread::spawn(work);
 }
 
+/// Settings > Accounts > Send setup: the accounts to pick from, the two
+/// picked, the parts picked (all but the model at first), what "From" has.
+fn fill_setup(win: &SettingsWindow) {
+    let claude: Vec<accounts::Managed> = accounts::managed().into_iter().filter(|m| m.service == "claude").collect();
+    let (from, to, parts, report) = with_state(|s| {
+        if !claude.iter().any(|m| m.id == s.setup_from) {
+            s.setup_from = claude.iter().find(|m| m.active).or(claude.first()).map(|m| m.id.clone()).unwrap_or_default();
+        }
+        if !claude.iter().any(|m| m.id == s.setup_to) || s.setup_to == s.setup_from {
+            s.setup_to = claude.iter().find(|m| m.id != s.setup_from).map(|m| m.id.clone()).unwrap_or_default();
+        }
+        if s.setup_parts.is_none() {
+            s.setup_parts = Some(setup::PARTS.iter().map(|p| p.0.to_string()).filter(|p| p != "model").collect());
+        }
+        (s.setup_from.clone(), s.setup_to.clone(), s.setup_parts.clone().unwrap_or_default(), s.setup_report.clone())
+    })
+    .unwrap_or_default();
+    let have = accounts::claude_slot(&from).map(|slot| setup::summary(&slot)).unwrap_or_default();
+    let chips: Vec<SetupPart> = setup::PARTS
+        .iter()
+        .enumerate()
+        .map(|(i, (id, label))| SetupPart { id: (*id).into(), label: (*label).into(), on: parts.iter().any(|p| p == id), have: have.get(i).map(|h| h.1.as_str()).unwrap_or("").into() })
+        .collect();
+    win.set_setup_accounts(ModelRc::new(VecModel::from(claude.iter().map(|m| ScreenRow { id: m.id.as_str().into(), label: m.name.as_str().into() }).collect::<Vec<_>>())));
+    win.set_setup_from(from.into());
+    win.set_setup_to(to.into());
+    win.set_setup_parts_a(ModelRc::new(VecModel::from(chips[..4].to_vec())));
+    win.set_setup_parts_b(ModelRc::new(VecModel::from(chips[4..].to_vec())));
+    win.set_setup_report(report.into());
+}
+
 /// Settings > Accounts' three lists, read now, and a line after a failed change.
 fn fill_accounts(win: &SettingsWindow, note: &str) {
     let all = accounts::managed();
@@ -3499,6 +3537,7 @@ fn fill_accounts(win: &SettingsWindow, note: &str) {
     win.set_accounts_claude(rows("claude"));
     win.set_accounts_codex(rows("codex"));
     win.set_account_note(note.into());
+    fill_setup(win);
 }
 
 fn open_settings(ui: &Island) {
@@ -3711,6 +3750,52 @@ fn open_settings(ui: &Island) {
         }
         fill_accounts(&win, &done.err().map(|e| format!("Couldn't {action}: {e}")).unwrap_or_default());
         refresh(&ui);
+    });
+    let me = win.as_weak();
+    win.on_setup_act(move |action, id| {
+        let Some(win) = me.upgrade() else { return };
+        match action.as_str() {
+            "pick-from" => {
+                with_state(|s| {
+                    s.setup_from = id.to_string();
+                    s.setup_report.clear();
+                });
+            }
+            "pick-to" => {
+                with_state(|s| {
+                    s.setup_to = id.to_string();
+                    s.setup_report.clear();
+                });
+            }
+            "toggle" => {
+                with_state(|s| {
+                    let parts = s.setup_parts.get_or_insert_with(Vec::new);
+                    if let Some(i) = parts.iter().position(|p| p == id.as_str()) {
+                        parts.remove(i);
+                    } else {
+                        parts.push(id.to_string());
+                    }
+                });
+            }
+            "send" => {
+                let (from, to, parts) = with_state(|s| (s.setup_from.clone(), s.setup_to.clone(), s.setup_parts.clone().unwrap_or_default())).unwrap_or_default();
+                let report = match (accounts::claude_slot(&from), accounts::claude_slot(&to)) {
+                    (Some(f), Some(t)) => {
+                        let picked: Vec<&str> = parts.iter().map(|p| p.as_str()).collect();
+                        match setup::send(&picked, &f, &t) {
+                            Ok(lines) if lines.is_empty() => "Nothing picked to send.".to_string(),
+                            Ok(lines) => format!("Sent: {}.", lines.join(", ")),
+                            Err(e) => format!("Couldn't send: {e}"),
+                        }
+                    }
+                    _ => "Pick two Claude Code accounts.".to_string(),
+                };
+                store::log(&format!("setup: {from} -> {to}: {report}"));
+                with_state(|s| s.setup_report = report);
+            }
+            _ => {}
+        }
+        fill_setup(&win);
     });
     let _ = win.show();
     let weak = win.as_weak();
@@ -3926,6 +4011,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             weather_busy: false,
             weather_failed: false,
             keep_awake: false,
+            setup_from: String::new(),
+            setup_to: String::new(),
+            setup_parts: None,
+            setup_report: String::new(),
             settings,
             music: music::Snapshot::default(),
             music_art: None,

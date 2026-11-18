@@ -232,6 +232,20 @@ pub fn managed() -> Vec<Managed> {
     out
 }
 
+/// A Claude Code account's folders for Send setup: its config folder and
+/// its `.claude.json` (beside the folder for the default one).
+pub fn claude_slot(id: &str) -> Option<crate::setup::Slot> {
+    let state = read_json(&state_path())?;
+    let a = state.get("accounts")?.as_array()?.iter().find(|a| a.get("id").and_then(|x| x.as_str()) == Some(id))?.clone();
+    if a.get("service").and_then(|x| x.as_str()) != Some("claude") {
+        return None;
+    }
+    let is_default = a.get("isDefault").and_then(|x| x.as_bool()).unwrap_or(false);
+    let dir = account_dir(&a, id);
+    let state_file = if is_default { home().join(".claude.json") } else { dir.join(".claude.json") };
+    Some(crate::setup::Slot { dir, state: state_file })
+}
+
 /// Changes the state file: `f` gets its accounts list and active map.
 fn edit_state(f: impl FnOnce(&mut Vec<Value>, &mut serde_json::Map<String, Value>) -> Result<(), String>) -> Result<(), String> {
     let path = state_path();
