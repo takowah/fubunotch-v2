@@ -232,6 +232,32 @@ export struct AskRow {
     actions: [ActionInfo],
 }
 
+// An output or microphone on the Control page.
+export struct ControlDevice {
+    id: string,
+    name: string,
+    on: bool,
+}
+
+// The Control page (as Poni's, like Windows' Quick Settings), read by Rust.
+export struct ControlView {
+    has-volume: bool,
+    volume: float,
+    muted: bool,
+    has-mic: bool,
+    mic-muted: bool,
+    has-brightness: bool,
+    brightness: float,
+    has-wifi: bool,
+    wifi: bool,
+    has-bluetooth: bool,
+    bluetooth: bool,
+    outputs: [ControlDevice],
+    mics: [ControlDevice],
+    // A line under the page: what went wrong last ("" for nothing).
+    note: string,
+}
+
 export struct LyricLine {
     text: string,
     // A Japanese line's reading in Latin letters ("" otherwise), shown under it.
@@ -394,7 +420,7 @@ global Glyphs {
     // Not in Segoe Fluent: a mosque, drawn (a dome, its spire, a door).
     out property <string> mosque: "M 3 20.5 H 21 M 6 20.5 V 13.5 A 6 6 0 0 1 18 13.5 V 20.5 M 12 7.5 V 4 M 10.5 20.5 V 17.5 A 1.5 1.5 0 0 1 13.5 17.5 V 20.5";
     public pure function tab(id: string) -> string {
-        return id == "day" ? "\u{EB05}" : id == "notifications" ? "\u{EA8F}" : id == "music" ? "\u{EC4F}" : id == "lyrics" ? "\u{E8E4}" : id == "accounts" ? "\u{E716}" : "\u{E8D6}";
+        return id == "day" ? "\u{EB05}" : id == "notifications" ? "\u{EA8F}" : id == "music" ? "\u{EC4F}" : id == "lyrics" ? "\u{E8E4}" : id == "accounts" ? "\u{E716}" : id == "control" ? "\u{E9E9}" : "\u{E8D6}";
     }
     public pure function service(title: string) -> string {
         return title == "Claude Desktop" ? "\u{E7F4}" : title == "Claude Code" ? "\u{E756}" : "\u{E943}";
@@ -704,6 +730,107 @@ component VolumeSlider inherits Rectangle {
         border-radius: 5.5px;
         background: Mini.wash;
     }
+}
+
+// A slider you can drag (Control's volume and brightness): a track, the part
+// up to the value, a knob. `moved` while dragging (and on a click), `done`
+// when let go; while pressed it shows where the pointer is, not `value`.
+component DragSlider inherits Rectangle {
+    in property <float> value;
+    in property <color> tint: Mini.accent;
+    in property <bool> enabled: true;
+    callback moved(float);
+    callback done(float);
+    property <float> at: area.pressed ? clamp(area.mouse-x / max(1px, self.width), 0, 1) : clamp(root.value, 0, 1);
+    height: 22px;
+    Rectangle { y: (parent.height - self.height) / 2; height: 6px; border-radius: 3px; background: Mini.wash.with-alpha(min(1, 0.18 * Mini.wk)); }
+    Rectangle {
+        x: 0;
+        y: (parent.height - self.height) / 2;
+        width: max(6px, parent.width * root.at);
+        height: 6px;
+        border-radius: 3px;
+        background: root.enabled ? root.tint : Mini.wash.with-alpha(min(1, 0.3 * Mini.wk));
+    }
+    Rectangle {
+        x: clamp(parent.width * root.at - self.width / 2, 0, parent.width - self.width);
+        y: (parent.height - self.height) / 2;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: Mini.light ? #ffffff : Mini.wash;
+        border-width: Mini.light ? 1px : 0;
+        border-color: Mini.wash.with-alpha(0.25);
+    }
+    area := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        moved => { root.moved(clamp(self.mouse-x / max(1px, root.width), 0, 1)); }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) { root.moved(clamp(self.mouse-x / max(1px, root.width), 0, 1)); }
+            if (e.kind == PointerEventKind.up) { root.done(clamp(self.mouse-x / max(1px, root.width), 0, 1)); }
+        }
+    }
+}
+
+// A round toggle with an icon and a name under it (Control's Wi-Fi,
+// Bluetooth, microphone): lit while on.
+component ToggleTile inherits VerticalLayout {
+    in property <string> glyph;
+    in property <string> label;
+    in property <bool> on;
+    in property <bool> enabled: true;
+    callback clicked();
+    spacing: 5px;
+    alignment: center;
+    HorizontalLayout {
+        alignment: center;
+        Rectangle {
+            width: 40px;
+            height: 40px;
+            border-radius: 20px;
+            opacity: root.enabled ? 1 : 0.4;
+            background: root.on ? (Mini.light ? Mini.ink : Mini.wash.with-alpha(0.92)) : area.has-hover ? Mini.wash.with-alpha(min(1, 0.26 * Mini.wk)) : Mini.wash.with-alpha(min(1, 0.14 * Mini.wk));
+            animate background { duration: 140ms; }
+            Glyph { text: root.glyph; font-size: 15px; color: root.on ? (Mini.light ? #ffffff : Mini.base) : Mini.ink; }
+            area := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { root.clicked(); } }
+        }
+    }
+    Text { text: root.label; color: Mini.text-3; font-size: 10.5px; font-weight: 600; horizontal-alignment: center; overflow: elide; }
+}
+
+// One output or microphone in Control's lists: a dot (filled for the one in
+// use) and its name; a click makes it the one in use.
+component DeviceRow inherits Rectangle {
+    in property <string> name;
+    in property <bool> on;
+    callback clicked();
+    height: 26px;
+    border-radius: 13px;
+    background: area.has-hover && !root.on ? Mini.wash.with-alpha(min(1, 0.1 * Mini.wk)) : root.on ? Mini.wash.with-alpha(min(1, 0.14 * Mini.wk)) : transparent;
+    animate background { duration: 120ms; }
+    Rectangle {
+        x: 9px;
+        y: (parent.height - self.height) / 2;
+        width: 10px;
+        height: 10px;
+        border-radius: 5px;
+        border-width: 1.5px;
+        border-color: root.on ? Mini.accent : Mini.text-3;
+        background: root.on ? Mini.accent : transparent;
+    }
+    Text {
+        x: 27px;
+        width: parent.width - self.x - 8px;
+        height: 100%;
+        text: root.name;
+        color: root.on ? Mini.ink : Mini.text-2;
+        font-size: 12px;
+        font-weight: root.on ? 600 : 400;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    area := TouchArea { enabled: !root.on; mouse-cursor: root.on ? default : pointer; clicked => { root.clicked(); } }
 }
 
 // A round media button: clear until pointed at (`ring`: always a faint disc).
@@ -1478,6 +1605,97 @@ component AccountBlock inherits VerticalLayout {
     }
 }
 
+// Control: sound and brightness sliders and the radios on the left, the
+// outputs and microphones on the right (heights in main.rs CONTROL_*).
+component ControlPage inherits Rectangle {
+    in property <ControlView> c;
+    // The song's colour for the sliders (the island's accent otherwise).
+    in property <color> tint;
+    callback volume(float);
+    callback brightness(float);
+    callback toggle(string);
+    callback device(string, string);
+    property <length> gap: 10px;
+    property <length> left-w: 300px;
+    // Left: sliders, then the radios.
+    Rectangle {
+        x: 0;
+        width: root.left-w;
+        height: parent.height;
+        border-radius: 14px;
+        background: Mini.wash.with-alpha(min(1, 0.039 * Mini.wk));
+        VerticalLayout {
+            padding: 12px;
+            spacing: 10px;
+            alignment: start;
+            // Volume: the speaker (a click mutes), the slider, the level.
+            HorizontalLayout {
+                spacing: 8px;
+                height: 28px;
+                MediaButton {
+                    y: 0;
+                    glyph: root.c.muted ? "\u{E74F}" : "\u{E767}";
+                    glyph-size: 13px;
+                    ring: root.c.muted;
+                    clicked => { root.toggle("mute"); }
+                }
+                DragSlider {
+                    y: 3px;
+                    horizontal-stretch: 1;
+                    enabled: root.c.has-volume;
+                    value: root.c.muted ? 0 : root.c.volume;
+                    tint: root.tint;
+                    moved(v) => { root.volume(v); }
+                    done(v) => { root.volume(v); }
+                }
+                Text { width: 34px; text: root.c.has-volume ? (root.c.muted ? "Off" : round(root.c.volume * 100) + "%") : "–"; color: Mini.text-2; font-size: 11px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+            }
+            // Brightness: set when let go (Windows takes a moment).
+            HorizontalLayout {
+                spacing: 8px;
+                height: 28px;
+                Rectangle { width: 28px; Glyph { text: "\u{E706}"; font-size: 13px; color: root.c.has-brightness ? Mini.ink : Mini.text-3; } }
+                DragSlider {
+                    y: 3px;
+                    horizontal-stretch: 1;
+                    enabled: root.c.has-brightness;
+                    value: root.c.brightness;
+                    tint: root.tint;
+                    done(v) => { root.brightness(v); }
+                }
+                Text { width: 34px; text: root.c.has-brightness ? round(root.c.brightness * 100) + "%" : "–"; color: Mini.text-2; font-size: 11px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+            }
+            HorizontalLayout {
+                padding-top: 4px;
+                spacing: 10px;
+                alignment: space-around;
+                ToggleTile { glyph: "\u{E701}"; label: "Wi-Fi"; on: root.c.wifi; enabled: root.c.has-wifi; clicked => { root.toggle("wifi"); } }
+                ToggleTile { glyph: "\u{E702}"; label: "Bluetooth"; on: root.c.bluetooth; enabled: root.c.has-bluetooth; clicked => { root.toggle("bluetooth"); } }
+                ToggleTile { glyph: root.c.mic-muted ? "\u{EC54}" : "\u{E720}"; label: root.c.mic-muted ? "Mic off" : "Mic on"; on: !root.c.mic-muted; enabled: root.c.has-mic; clicked => { root.toggle("mic"); } }
+            }
+        }
+    }
+    // Right: where the sound goes and which microphone listens.
+    Rectangle {
+        x: root.left-w + root.gap;
+        width: parent.width - self.x;
+        height: parent.height;
+        border-radius: 14px;
+        background: Mini.wash.with-alpha(min(1, 0.039 * Mini.wk));
+        VerticalLayout {
+            padding: 10px;
+            spacing: 3px;
+            alignment: start;
+            Text { height: 18px; x: 4px; text: "Output"; color: Mini.label; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+            for d in root.c.outputs : DeviceRow { name: d.name; on: d.on; clicked => { root.device("output", d.id); } }
+            Rectangle { height: 6px; }
+            Text { height: 18px; x: 4px; text: "Microphone"; color: Mini.label; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+            for d in root.c.mics : DeviceRow { name: d.name; on: d.on; clicked => { root.device("mic", d.id); } }
+            if root.c.note != "" : Text { text: root.c.note; color: Mini.warn; font-size: 11px; overflow: elide; }
+        }
+    }
+}
+
 component AccountsPage inherits Rectangle {
     in property <[AccountGroup]> groups;
     in property <string> pending;
@@ -1890,6 +2108,12 @@ export component Island inherits Window {
     callback hover-changed(bool);
     callback front-clicked();
     callback notif-clicked(int);
+    // The Control page.
+    in property <ControlView> control;
+    callback control-volume(float);
+    callback control-brightness(float);
+    callback control-toggle(string);
+    callback control-device(string, string);
     // The Music page's big cover measured itself (Rust sizes its picture to it).
     callback music-cover-size(length);
     callback notif-clear();
@@ -2426,6 +2650,19 @@ export component Island inherits Window {
                     Page {
                         shown: root.active-tab == "day";
                         DayPage { width: parent.width; height: parent.height; d: root.day; }
+                    }
+                    Page {
+                        shown: root.active-tab == "control";
+                        ControlPage {
+                            width: parent.width;
+                            height: parent.height;
+                            c: root.control;
+                            tint: root.song-accent;
+                            volume(v) => { root.control-volume(v); }
+                            brightness(v) => { root.control-brightness(v); }
+                            toggle(t) => { root.control-toggle(t); }
+                            device(kind, id) => { root.control-device(kind, id); }
+                        }
                     }
                     Page {
                         shown: root.active-tab == "accounts";

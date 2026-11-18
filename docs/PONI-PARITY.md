@@ -20,8 +20,12 @@ Status: done · doing · todo. "Have" = Kanmuri already did it before this list.
       double right-click tucks it to a handle. Have: hide when idle, slides away for fullscreen.
 - [ ] Dashboard tab: weather (Open-Meteo, a switch: network only when on), quick toggles (Wi-Fi,
       Bluetooth, keep awake, dark mode, mute mic, lock), app launcher, day progress, prayer times.
-- [ ] Control tab (like Windows Quick Settings): Wi-Fi and Bluetooth lists (join / connect),
+- [~] Control tab (like Windows Quick Settings): Wi-Fi and Bluetooth lists (join / connect),
       toggles, brightness and volume sliders, sound output and microphone pickers, device battery.
+      Done 18 Nov 2026 (control.rs): volume + mute, brightness (WMI, built-in screen), output and
+      microphone pickers (IPolicyConfig), Wi-Fi / Bluetooth radio switches, microphone mute; tested
+      live and put back (volume, mic mute, output, brightness). Left: the Wi-Fi network list and
+      joining, Bluetooth devices (connect / disconnect, battery).
 - [ ] System stats: CPU / GPU load and temperatures (when Windows shares them), memory, disk.
 
 ## 2. Productivity

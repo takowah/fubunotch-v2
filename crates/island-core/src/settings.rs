@@ -16,6 +16,7 @@ pub const MODULES: &[ModuleInfo] = &[
     ModuleInfo { id: "todo", name: "To-do", has_tab: true, default_on: true },
     ModuleInfo { id: "shelf", name: "Shelf", has_tab: true, default_on: true },
     ModuleInfo { id: "claude", name: "Claude Code", has_tab: false, default_on: true },
+    ModuleInfo { id: "control", name: "Control", has_tab: true, default_on: true },
     ModuleInfo { id: "accounts", name: "Accounts", has_tab: true, default_on: true },
     ModuleInfo { id: "prayer", name: "Prayer", has_tab: true, default_on: true },
     ModuleInfo { id: "day", name: "Day Progress", has_tab: true, default_on: true },

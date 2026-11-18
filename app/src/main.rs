@@ -26,6 +26,7 @@ mod system;
 mod shelf;
 mod snapshot;
 mod accounts;
+mod control;
 mod pixels;
 mod stats;
 mod usage;
@@ -223,6 +224,12 @@ struct State {
     account_hint: (String, String),
     /// The Accounts page was open at the last refresh (its usage is read when it opens).
     accounts_open: bool,
+    /// The Control page: what it shows, a line after a failed change, the
+    /// page open at the last refresh, and the worker that reads and changes.
+    control: control::Snapshot,
+    control_note: String,
+    control_open: bool,
+    control_tx: Option<std::sync::mpsc::Sender<ControlJob>>,
     settings: Settings,
     /// What is playing (the Music module), and its artwork as an image.
     music: music::Snapshot,
@@ -1136,6 +1143,106 @@ fn set_accounts(ui: &Island, pending: &str, hint: &(String, String)) -> f32 {
     2.0 * ACCOUNT_PAD + tallest
 }
 
+/// Work for the Control worker: read (with the brightness or not), or a change.
+enum ControlJob {
+    Read(bool),
+    Do(control::Command),
+}
+
+/// Hands a job to the Control worker; in a snapshot, reads right here.
+fn control_send(tx: &Option<std::sync::mpsc::Sender<ControlJob>>, shown: &mut control::Snapshot, job: ControlJob) {
+    if snapshot_mode() {
+        if let ControlJob::Read(_) = job {
+            *shown = control::read();
+        }
+        return;
+    }
+    if let Some(tx) = tx {
+        let _ = tx.send(job);
+    }
+}
+
+/// The Control worker: one thread, jobs taken in batches (a volume drag sends
+/// many: only the last is applied), the page read again after each batch.
+fn start_control_worker(ui: &Island) -> std::sync::mpsc::Sender<ControlJob> {
+    let (tx, rx) = std::sync::mpsc::channel::<ControlJob>();
+    let weak = ui.as_weak();
+    let _ = std::thread::Builder::new().name("kanmuri-control".into()).spawn(move || {
+        while let Ok(first) = rx.recv() {
+            let mut jobs = vec![first];
+            while let Ok(j) = rx.try_recv() {
+                jobs.push(j);
+            }
+            let last_volume = jobs.iter().rposition(|j| matches!(j, ControlJob::Do(control::Command::Volume(_))));
+            let mut note = String::new();
+            let mut brightness = false;
+            for (i, j) in jobs.iter().enumerate() {
+                match j {
+                    ControlJob::Read(b) => brightness |= *b,
+                    ControlJob::Do(control::Command::Volume(_)) if Some(i) != last_volume => {}
+                    ControlJob::Do(c) => {
+                        if matches!(c, control::Command::Brightness(_)) {
+                            brightness = true;
+                        }
+                        if let Err(e) = control::apply(c) {
+                            store::log(&format!("control: {c:?} failed: {e}"));
+                            note = format!("Couldn't change it: {e}");
+                        }
+                    }
+                }
+            }
+            let snap = control::read_with(brightness);
+            let weak = weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                with_state(|state| {
+                    let keep = state.control.brightness;
+                    state.control = snap;
+                    if !brightness {
+                        state.control.brightness = keep;
+                    }
+                    state.control_note = note;
+                });
+                refresh(&ui);
+            });
+        }
+    });
+    tx
+}
+
+/// The Control page's data for Slint.
+fn control_view(c: &control::Snapshot, note: &str) -> ControlView {
+    let devices = |list: &[control::Device]| {
+        ModelRc::new(VecModel::from(list.iter().take(CONTROL_LIST_MAX).map(|d| ControlDevice { id: d.id.as_str().into(), name: d.name.as_str().into(), on: d.default }).collect::<Vec<_>>()))
+    };
+    ControlView {
+        has_volume: c.volume.is_some(),
+        volume: c.volume.map_or(0.0, |v| v.0),
+        muted: c.volume.is_some_and(|v| v.1),
+        has_mic: c.mic_muted.is_some(),
+        mic_muted: c.mic_muted.unwrap_or(false),
+        has_brightness: c.brightness.is_some(),
+        brightness: c.brightness.map_or(0.0, |b| b as f32 / 100.0),
+        has_wifi: c.wifi.is_some(),
+        wifi: c.wifi.unwrap_or(false),
+        has_bluetooth: c.bluetooth.is_some(),
+        bluetooth: c.bluetooth.unwrap_or(false),
+        outputs: devices(&c.outputs),
+        mics: devices(&c.mics),
+        note: note.into(),
+    }
+}
+
+/// The most outputs / microphones listed.
+const CONTROL_LIST_MAX: usize = 4;
+
+/// The Control page's height: the device lists' column (the sliders' one is
+/// shorter): padding, two headings, a row each, the gap, a note.
+fn control_height(c: &control::Snapshot) -> f32 {
+    let rows = c.outputs.len().min(CONTROL_LIST_MAX) + c.mics.len().min(CONTROL_LIST_MAX);
+    20.0 + 2.0 * 21.0 + rows as f32 * 29.0 + 9.0 + 14.0
+}
+
 /// The Accounts tab just opened: read the plans and usage again (a snapshot
 /// inline and offline; otherwise on a thread, then refresh).
 fn accounts_opened(ui: &Island) {
@@ -1220,6 +1327,9 @@ fn refresh(ui: &Island) {
         if state.settings.is_on("day") {
             tab_ids.push(("day", "Day Progress"));
         }
+        if state.settings.is_on("control") {
+            tab_ids.push(("control", "Control"));
+        }
         if accounts::installed() {
             tab_ids.push(("accounts", "Accounts"));
         }
@@ -1301,6 +1411,14 @@ fn refresh(ui: &Island) {
         }
         state.accounts_open = accounts_open;
         let accounts_h = if state.active_tab == "accounts" { set_accounts(ui, &state.account_pending, &state.account_hint) } else { 0.0 };
+        // Control: read again each time the page opens (and after each change).
+        let control_open = state.mode == Mode::Expanded && state.active_tab == "control";
+        if control_open && !state.control_open {
+            control_send(&state.control_tx, &mut state.control, ControlJob::Read(true));
+        }
+        state.control_open = control_open;
+        ui.set_control(control_view(&state.control, &state.control_note));
+        let control_h = control_height(&state.control);
         ui.set_drop_hover(state.drop_hover);
         *NOTIF_APPS.lock().unwrap_or_else(|e| e.into_inner()) = state.settings.notifications.filter();
         let rating = state.data.ratings.get(&song_key(&state.music)).copied().unwrap_or(0);
@@ -1450,6 +1568,7 @@ fn refresh(ui: &Island) {
                     "music" if has_lyrics => sizes.expanded_tall_h - EXPANDED_CHROME,
                     "music" | "prayer" | "day" => page_h,
                     "accounts" => accounts_h.max(page_h),
+                    "control" => control_h.max(page_h),
                     _ if state.notifications.is_empty() && ask_count == 0 => page_h,
                     _ => {
                         // Claude Code's questions first, one a row; then the
@@ -2369,6 +2488,14 @@ fn on_system(ui: &Island, e: system::Event) {
     }
     if e == system::Event::Status {
         return;
+    }
+    // The volume changed elsewhere (keys, the tray): the Control page follows.
+    if let system::Event::Volume(v, muted) = e {
+        with_state(|state| {
+            if state.control.volume.is_some() {
+                state.control.volume = Some((v, muted));
+            }
+        });
     }
     with_state(|state| {
         let sys = &state.settings.system;
@@ -3645,6 +3772,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             account_pending: String::new(),
             account_hint: (String::new(), String::new()),
             accounts_open: false,
+            control: control::Snapshot::default(),
+            control_note: String::new(),
+            control_open: false,
+            control_tx: None,
             settings,
             music: music::Snapshot::default(),
             music_art: None,
@@ -3746,6 +3877,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
         refresh(&ui);
+    });
+
+    let tx = start_control_worker(&ui);
+    with_state(|state| state.control_tx = Some(tx));
+    let weak = ui.as_weak();
+    ui.on_control_volume(move |v| {
+        if weak.upgrade().is_none() {
+            return;
+        }
+        with_state(|state| {
+            // Shown at once; the worker applies the latest and reads back.
+            // Moving the slider of a muted output turns the sound back on.
+            let was_muted = state.control.volume.is_some_and(|x| x.1);
+            if let Some(vol) = state.control.volume.as_mut() {
+                vol.0 = v;
+                vol.1 = false;
+            }
+            control_send(&state.control_tx, &mut state.control, ControlJob::Do(control::Command::Volume(v)));
+            if was_muted {
+                control_send(&state.control_tx, &mut state.control, ControlJob::Do(control::Command::Mute(false)));
+            }
+        });
+    });
+    let weak = ui.as_weak();
+    ui.on_control_brightness(move |v| {
+        if weak.upgrade().is_none() {
+            return;
+        }
+        with_state(|state| {
+            state.control.brightness = Some((v * 100.0).round() as u32);
+            control_send(&state.control_tx, &mut state.control, ControlJob::Do(control::Command::Brightness((v * 100.0).round() as u32)));
+        });
+    });
+    let weak = ui.as_weak();
+    ui.on_control_toggle(move |what| {
+        let Some(ui) = weak.upgrade() else { return };
+        with_state(|state| {
+            let c = &state.control;
+            let cmd = match what.as_str() {
+                "mute" => c.volume.map(|v| control::Command::Mute(!v.1)),
+                "mic" => c.mic_muted.map(|m| control::Command::MicMute(!m)),
+                "wifi" => c.wifi.map(|w| control::Command::Wifi(!w)),
+                "bluetooth" => c.bluetooth.map(|b| control::Command::Bluetooth(!b)),
+                _ => None,
+            };
+            if let Some(cmd) = cmd {
+                control_send(&state.control_tx, &mut state.control, ControlJob::Do(cmd));
+            }
+        });
+        refresh(&ui);
+    });
+    let weak = ui.as_weak();
+    ui.on_control_device(move |kind, id| {
+        if weak.upgrade().is_none() {
+            return;
+        }
+        with_state(|state| {
+            let cmd = if kind == "mic" { control::Command::Mic(id.to_string()) } else { control::Command::Output(id.to_string()) };
+            control_send(&state.control_tx, &mut state.control, ControlJob::Do(cmd));
+        });
     });
 
     let weak = ui.as_weak();
