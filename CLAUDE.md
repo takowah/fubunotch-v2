@@ -26,7 +26,7 @@ Kanmuri: a rewrite of FubuNotch (v1) from scratch, native Rust. `crates/island-c
 
 ## Shipping
 
-- This laptop: build `--profile fast`, install with `tools/switch-from-mini-island.bat` via explorer.exe (keeps settings). Then push to `github` (private `Decka-tan/kanmuri`, branch main; never to `origin`, takowah's fubunotch-v2) and run `tools/release.ps1`: the home laptop installs only what is released (`tools/update.ps1`, task "Kanmuri update", at logon and every 3 hours; set up by notchdeck's `tools/setup-rumah.ps1`).
+- This laptop: build `--profile fast`, install with `tools/switch-from-mini-island.bat` via explorer.exe (keeps settings). Then push to `github` (private `Decka-tan/kanmuri`, branch main; never to `origin`, takowah's fubunotch-v2) and run `tools/release.ps1`: the home laptop installs only what is released (`tools/update.ps1`, task "Kanmuri update", at logon and every 3 hours; set up by `tools/setup-rumah.ps1`, see `docs/SETUP-RUMAH.md`; moved here from the notchdeck repo, archived 19 Nov 2026: Kanmuri switches accounts itself and the setup takes NotchDeck off).
 
 ## Rules carried over from v1
 
