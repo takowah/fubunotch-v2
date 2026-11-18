@@ -451,7 +451,8 @@ component Tinted inherits Rectangle {
         height: parent.height;
         r: root.border-radius;
         tint: root.tint;
-        strength: root.lit ? 0.37 : 0.18;
+        // Over Liquid Glass only a hint of the colour: a solid wash hid the glass.
+        strength: Mini.glass ? (root.lit ? 0.12 : 0.06) : root.lit ? 0.37 : 0.18;
         span: root.lit ? 1.0 : 0.95;
     }
     if root.lit : Fade {
@@ -1309,7 +1310,8 @@ component AccountChip inherits Rectangle {
     callback clicked();
     height: 34px;
     border-radius: 17px;
-    background: root.account.active ? Mini.wash.with-alpha(min(1, 0.949 * Mini.wk)) : area.has-hover ? Mini.wash.with-alpha(min(1, 0.227 * Mini.wk)) : root.pending ? Mini.wash.with-alpha(min(1, 0.271 * Mini.wk)) : Mini.wash.with-alpha(min(1, 0.122 * Mini.wk));
+    // The one in use: a white pill on a light body or glass (as the active tab), not a black slab.
+    background: root.account.active ? (Mini.light ? #ffffff : Mini.wash.with-alpha(0.949)) : area.has-hover ? Mini.wash.with-alpha(min(1, 0.227 * Mini.wk)) : root.pending ? Mini.wash.with-alpha(min(1, 0.271 * Mini.wk)) : Mini.wash.with-alpha(min(1, 0.122 * Mini.wk));
     animate background { duration: 150ms; }
     HorizontalLayout {
         x: 5px;
@@ -1320,13 +1322,13 @@ component AccountChip inherits Rectangle {
             height: 24px;
             y: (parent.height - self.height) / 2;
             border-radius: 12px;
-            background: root.account.active ? Mini.base : Mini.wash.with-alpha(min(1, 0.2 * Mini.wk));
-            Text { width: 100%; height: 100%; horizontal-alignment: center; vertical-alignment: center; text: root.account.initial; color: Mini.ink; font-size: 11.5px; font-weight: 700; }
+            background: root.account.active ? (Mini.light ? Mini.ink : Mini.base) : Mini.wash.with-alpha(min(1, 0.2 * Mini.wk));
+            Text { width: 100%; height: 100%; horizontal-alignment: center; vertical-alignment: center; text: root.account.initial; color: root.account.active && Mini.light ? #ffffff : Mini.ink; font-size: 11.5px; font-weight: 700; }
         }
         Text {
             horizontal-stretch: 1;
             text: root.pending && !root.account.active ? root.account.name + "  ..." : root.account.name;
-            color: root.account.active ? Mini.base : Mini.ink;
+            color: root.account.active && !Mini.light ? Mini.base : Mini.ink;
             font-size: 13px;
             font-weight: 600;
             vertical-alignment: center;
@@ -1338,7 +1340,7 @@ component AccountChip inherits Rectangle {
             width: badge.preferred-width + 14px;
             border-radius: 9px;
             background: root.account.active ? Mini.base.with-alpha(0.12) : Mini.wash.with-alpha(min(1, 0.16 * Mini.wk));
-            badge := Text { text: root.account.plan; color: root.account.active ? Mini.base : Mini.ink; font-size: 10.5px; font-weight: 700; vertical-alignment: center; horizontal-alignment: center; }
+            badge := Text { text: root.account.plan; color: root.account.active && !Mini.light ? Mini.base : Mini.ink; font-size: 10.5px; font-weight: 700; vertical-alignment: center; horizontal-alignment: center; }
         }
     }
     area := TouchArea { enabled: !root.account.active; mouse-cursor: root.account.active ? default : pointer; clicked => { root.clicked(); } }
@@ -1910,7 +1912,7 @@ export component Island inherits Window {
             visible: !root.hidden;
             r: root.island-r;
             tint: root.tint;
-            strength: 0.30;
+            strength: Mini.glass ? 0.08 : 0.30;
             span: 0.45;
         }
 
