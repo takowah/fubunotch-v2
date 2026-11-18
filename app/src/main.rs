@@ -399,7 +399,12 @@ fn item(a: &Activity, logo: Option<slint::Image>) -> Item {
         actions: ModelRc::new(VecModel::from(actions)),
         // System notices travel as "icon:<name>": the capsule draws that icon.
         source: if a.source.starts_with("icon:") { "system".into() } else { a.source.as_str().into() },
-        icon: a.source.strip_prefix("icon:").unwrap_or("").into(),
+        icon: match a.source.strip_prefix("icon:") {
+            Some(name) => name.into(),
+            // The island's own modules: a drawn icon (the owner: never a letter in a circle).
+            None if logo.is_none() => module_icon(&a.source).into(),
+            None => "".into(),
+        },
         title: a.title.as_str().into(),
         body: a.body.as_str().into(),
         kind: kind_name(a.kind).into(),
@@ -509,6 +514,21 @@ fn demo_logo(c: slint::Color) -> Vec<u8> {
 }
 
 /// An app's first letter, for its round icon.
+/// The drawn icon (SysIcon) for an activity of the island's own modules and
+/// anything else without a logo; "" leaves the app's logo or the app glyph.
+fn module_icon(source: &str) -> &'static str {
+    match source {
+        s if s.starts_with("water") => "water",
+        s if s.starts_with("focus") => "timer",
+        s if s.starts_with("todo") => "check",
+        s if s.starts_with("shelf") => "tray",
+        s if s.starts_with("prayer") => "prayer",
+        s if s.starts_with("music") => "note",
+        s if s.starts_with("claude") => "",
+        _ => "",
+    }
+}
+
 fn initial(app: &str) -> String {
     app.trim().chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().to_string()).unwrap_or_default()
 }

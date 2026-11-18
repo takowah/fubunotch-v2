@@ -471,19 +471,11 @@ component AppIcon inherits Rectangle {
     in property <length> size: 34px;
     width: root.size;
     height: root.size;
-    border-radius: root.size / 2;
-    background: root.has-logo ? transparent : root.accent;
+    border-radius: root.has-logo ? root.size / 2 : root.size * 0.28;
+    background: root.has-logo ? transparent : Mini.wash.with-alpha(min(1, 0.12 * Mini.wk));
     if root.has-logo : Image { width: parent.width; height: parent.height; source: root.logo; image-fit: contain; }
-    if !root.has-logo : Text {
-        width: 100%;
-        height: 100%;
-        text: root.initial == "" ? "?" : root.initial;
-        color: Mini.ink;
-        font-size: root.size * 0.45;
-        font-weight: 600;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
+    // No logo: the app glyph, never the app's initial (the owner, 18 Nov 2026).
+    if !root.has-logo : Glyph { text: "\u{ECAA}"; font-size: root.size * 0.5; color: Mini.text-2; }
 }
 
 // The song's cover, rounded (Rust rounds the picture's corners: the software
@@ -748,6 +740,12 @@ component SysIcon inherits Path {
         : name == "bolt" ? "M 13 2 L 5 13 H 11 L 10 22 L 19 10 H 13 Z"
         : name == "battery" ? "M 3 8 H 18 V 16 H 3 Z M 21 11 V 13 M 6 11 V 13"
         : name == "wifi" ? "M 2 9 A 15 15 0 0 1 22 9 M 5 12.5 A 10 10 0 0 1 19 12.5 M 8.5 16 A 5 5 0 0 1 15.5 16 M 12 19.5 V 20"
+        : name == "water" ? "M 12 3.5 C 12 3.5 6 10.5 6 14.5 A 6 6 0 0 0 18 14.5 C 18 10.5 12 3.5 12 3.5 Z"
+        : name == "timer" ? "M 12 8.5 V 13 L 14.5 15 M 10 2.5 H 14 M 12 21 A 7.5 7.5 0 1 1 12 6 A 7.5 7.5 0 1 1 12 21 Z"
+        : name == "check" ? "M 4.5 12.5 L 9.5 17.5 L 19.5 6.5"
+        : name == "tray" ? "M 3.5 13 H 8 L 9.5 15.5 H 14.5 L 16 13 H 20.5 M 6 5 H 18 L 20.5 13 V 19 H 3.5 V 13 Z"
+        : name == "note" ? "M 9 18 V 5.5 L 19 3.5 V 16 M 9 18 A 2.5 2.5 0 1 1 4 18 A 2.5 2.5 0 1 1 9 18 Z M 19 16 A 2.5 2.5 0 1 1 14 16 A 2.5 2.5 0 1 1 19 16 Z"
+        : name == "app" ? "M 4 4 H 10 V 10 H 4 Z M 14 4 H 20 V 10 H 14 Z M 4 14 H 10 V 20 H 4 Z M 14 14 H 20 V 20 H 14 Z"
         : name == "ethernet" ? "M 4 5 H 20 V 15 H 4 Z M 8 15 V 19 H 16 V 15 M 8 9 V 11 M 11 9 V 11 M 13 9 V 11 M 16 9 V 11"
         : name == "wifi-off" ? "M 2 9 A 15 15 0 0 1 22 9 M 5 12.5 A 10 10 0 0 1 19 12.5 M 8.5 16 A 5 5 0 0 1 15.5 16 M 3 3 L 21 21"
         : name == "keyboard" ? "M 3 6 H 21 V 18 H 3 Z M 7 10 H 8 M 11 10 H 12 M 15 10 H 16 M 8 14 H 16"

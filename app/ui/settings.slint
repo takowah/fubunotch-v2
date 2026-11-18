@@ -1317,7 +1317,10 @@ export component Tray inherits SystemTrayIcon {
 export component ConfirmWindow inherits Window {
     default-font-family: "Allo";
     title: "Kanmuri";
-    preferred-width: 480px;
+    preferred-width: 520px;
+    // Its wrapped message doesn't size the window: tall enough for it and the buttons.
+    preferred-height: 300px;
+    min-height: 260px;
     in property <bool> repaint;
     background: root.repaint ? Palette.background : Palette.background.with-alpha(0.999);
     in property <string> heading;
