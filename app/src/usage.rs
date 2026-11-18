@@ -404,6 +404,48 @@ fn read_creds(dir: &Path, now: i64) -> Option<Creds> {
     Some(Creds { plan: claude_plan(&s("rateLimitTier"), &s("subscriptionType")), token: s("accessToken"), expired: expires_ms / 1000 <= now + 30 })
 }
 
+/// Claude Code's own OAuth client and token endpoint: the refresh it does itself.
+const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/token";
+
+/// An expired token made fresh the way Claude Code does it, and written back
+/// to the same `.credentials.json` (new access and refresh token, expiry),
+/// so `claude` keeps working with what it finds there. The owner asked for
+/// this on 18 Nov 2026: Claude Code inside Claude Desktop never refreshes the
+/// terminal's token, so usage never showed. The file is replaced atomically;
+/// tokens never reach a log. Returns the new access token.
+fn refresh(dir: &Path) -> Option<String> {
+    let path = dir.join(".credentials.json");
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
+    let refresh_token = v.get("claudeAiOauth")?.get("refreshToken")?.as_str()?.to_string();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(15)))
+        .user_agent("kanmuri")
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let body = serde_json::json!({ "grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": CLIENT_ID });
+    let mut r = agent.post(TOKEN_URL).header("Content-Type", "application/json").send(body.to_string()).ok()?;
+    if !(200..300).contains(&r.status().as_u16()) {
+        crate::store::log(&format!("usage: token refresh refused (HTTP {})", r.status().as_u16()));
+        return None;
+    }
+    let answer: Value = serde_json::from_str(&r.body_mut().with_config().limit(64 * 1024).read_to_string().ok()?).ok()?;
+    let access = answer.get("access_token")?.as_str()?.to_string();
+    let o = v.get_mut("claudeAiOauth")?.as_object_mut()?;
+    o.insert("accessToken".into(), Value::String(access.clone()));
+    if let Some(rt) = answer.get("refresh_token").and_then(Value::as_str) {
+        o.insert("refreshToken".into(), Value::String(rt.to_string()));
+    }
+    let expires_in = answer.get("expires_in").and_then(Value::as_i64).unwrap_or(3600);
+    o.insert("expiresAt".into(), Value::from((now_s() + expires_in) * 1000));
+    let tmp = dir.join(format!(".credentials.json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, serde_json::to_vec(&v).ok()?).ok()?;
+    std::fs::rename(&tmp, &path).ok()?;
+    crate::store::log("usage: refreshed a Claude Code token");
+    Some(access)
+}
+
 /// GET the usage with the account's token. Errors never carry the token.
 fn fetch(token: &str) -> Result<Value, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -465,6 +507,15 @@ pub fn sweep(accounts: &[Account], online: bool) {
                 if usage.plan != c.plan {
                     usage.plan = c.plan.clone();
                     changed = true;
+                }
+                // Expired: made fresh first (Claude Desktop's Claude Code never does it).
+                let mut c = c;
+                if online && due && c.expired {
+                    if let Some(t) = refresh(&dir) {
+                        c.token = t;
+                        c.expired = false;
+                        with_store(|s| s.expired.insert(a.id.clone(), false));
+                    }
                 }
                 if online && due && !c.expired && !c.token.is_empty() {
                     with_store(|s| s.asked.insert(a.id.clone(), now));

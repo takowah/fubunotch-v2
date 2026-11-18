@@ -2014,6 +2014,10 @@ export component Island inherits Window {
                     line-probe := Text { visible: false; text: root.capsule-line; font-size: 11.5px * Mini.k; font-weight: 600; }
                     ro-probe := Text { visible: false; text: root.capsule-romaji; font-size: 8.5px * Mini.k; }
                     if lyric-box.lyric : VerticalLayout {
+                        x: 0;
+                        y: 0;
+                        width: lyric-box.width;
+                        height: lyric-box.height;
                         alignment: center;
                         spacing: 1px;
                         Text {

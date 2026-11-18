@@ -1049,7 +1049,8 @@ fn refresh(ui: &Island) {
         // Line stays switched on, but shows only while there is music (a
         // browser's session drops out for a moment between songs).
         // Like Mini Island: while a song plays the lyric shows by itself; Line keeps it when paused too.
-        let line = (state.line_held || state.music.playing) && state.music.has_session;
+        // A question from Claude Code takes the capsule (with its Allow / Deny) over the lyric.
+        let line = (state.line_held || state.music.playing) && state.music.has_session && !view.front.is_some_and(|a| a.kind == Kind::Ask);
         ui.set_line_held(line);
         let ytm = ytm_live(state, now);
         let capsule_line = if line { capsule_lyric(state) } else { String::new() };
@@ -1453,7 +1454,19 @@ fn music_view(
     // (and the user's nudge) moves them later.
     let shift = lyrics.as_ref().map_or(0.0, |l| island_lyrics::intro_shift(snap.duration, l.duration)) + nudge;
     let sung_at = position - shift;
-    let fraction = if snap.duration > 0.0 { (position / snap.duration) as f32 } else { 0.0 };
+    // The song's length: a browser's (Apple Music on the web) is missing or 2x-6x
+    // the song, so the length the lyrics were timed for wins there, and anywhere
+    // the player's own is no use.
+    let lyric_len = lyrics.as_ref().map_or(0.0, |l| l.duration);
+    let browser = matches!(snap.app.to_lowercase().as_str(), "chrome" | "edge" | "firefox" | "brave" | "opera" | "vivaldi");
+    let length = if (browser || snap.duration <= position + 0.5) && lyric_len > position {
+        lyric_len
+    } else if snap.duration > position + 0.5 {
+        snap.duration
+    } else {
+        0.0
+    };
+    let fraction = if length > 0.0 { (position / length).min(1.0) as f32 } else { 0.0 };
     // The line being sung (none before the first); the list centres on it.
     let at = lyrics.as_ref().filter(|_| lines.is_some()).and_then(|l| island_lyrics::line_at(&l.lines, sung_at));
     let note = match (lyrics_on, lyrics.as_ref().map(|l| l.status)) {
@@ -1472,7 +1485,7 @@ fn music_view(
         position: fraction,
         elapsed: local_time::mm_ss(position).into(),
         // A browser often reports no length (or a wrong one): no "-0:00" then.
-        remaining: if snap.duration > position + 0.5 { format!("-{}", local_time::mm_ss(snap.duration - position)).into() } else { SharedString::default() },
+        remaining: if length > 0.0 { format!("-{}", local_time::mm_ss((length - position).max(0.0))).into() } else { SharedString::default() },
         has_art: art.is_some(),
         art: art.clone().unwrap_or_default(),
         has_accent: accent.is_some(),
