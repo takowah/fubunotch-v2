@@ -101,36 +101,57 @@ pub fn line_to_ruby(text: &str) -> Vec<Ruby> {
     out
 }
 
-/// A word with kanji and its hiragana reading, its kana prefix and suffix
-/// (the same in both) left bare: 走る/はしる → 走(はし) る; お茶/おちゃ → お 茶(ちゃ).
-/// When the kana inside don't line up, the whole word takes the reading.
+/// A word with kanji and its hiragana reading, each run of kanji given its
+/// own reading and the kana around and between them left bare, by lining the
+/// kana up with the reading: 走る/はしる → 走(はし) る; お茶 → お 茶(ちゃ);
+/// 抜け出/ぬけだ → 抜(ぬ) け 出(だ). When they don't line up, the whole word
+/// takes the reading.
 fn split_okurigana(surface: &str, reading: &str) -> Vec<Ruby> {
-    let s: Vec<char> = surface.chars().collect();
+    // Runs of kanji and of everything else.
+    let mut runs: Vec<(String, bool)> = Vec::new();
+    for c in surface.chars() {
+        let k = is_kanji(c);
+        match runs.last_mut() {
+            Some((t, kk)) if *kk == k => t.push(c),
+            _ => runs.push((c.to_string(), k)),
+        }
+    }
     let r: Vec<char> = reading.chars().collect();
-    let same = |a: char, b: char| to_hiragana(a) == b;
-    let mut pre = 0;
-    while pre < s.len() && pre < r.len() && !is_kanji(s[pre]) && same(s[pre], r[pre]) {
-        pre += 1;
+    let mut readings: Vec<String> = Vec::new();
+    if fit(&runs, 0, &r, 0, &mut readings) {
+        return runs
+            .into_iter()
+            .zip(readings)
+            .map(|((text, kanji), ruby)| Ruby { ruby: if kanji && ruby != text { ruby } else { String::new() }, text })
+            .collect();
     }
-    let mut suf = 0;
-    while suf < s.len() - pre && suf < r.len() - pre && !is_kanji(s[s.len() - 1 - suf]) && same(s[s.len() - 1 - suf], r[r.len() - 1 - suf]) {
-        suf += 1;
+    vec![Ruby { text: surface.to_string(), ruby: reading.to_string() }]
+}
+
+/// Lines `runs` up with the reading `r` from `at`: a kana run must match it
+/// there; a kanji run takes one or more of its characters (the fewest that
+/// let the rest line up). Fills `out` with each run's part of the reading.
+fn fit(runs: &[(String, bool)], i: usize, r: &[char], at: usize, out: &mut Vec<String>) -> bool {
+    let Some((text, kanji)) = runs.get(i) else { return at == r.len() };
+    if !kanji {
+        let k: Vec<char> = text.chars().map(to_hiragana).collect();
+        if r.len() >= at + k.len() && r[at..at + k.len()] == k[..] {
+            out.push(text.clone());
+            if fit(runs, i + 1, r, at + k.len(), out) {
+                return true;
+            }
+            out.pop();
+        }
+        return false;
     }
-    let core: String = s[pre..s.len() - suf].iter().collect();
-    let core_reading: String = r[pre..r.len() - suf].iter().collect();
-    let mut out = Vec::new();
-    if pre > 0 {
-        out.push(Ruby { text: s[..pre].iter().collect(), ruby: String::new() });
+    for len in 1..=r.len().saturating_sub(at) {
+        out.push(r[at..at + len].iter().collect());
+        if fit(runs, i + 1, r, at + len, out) {
+            return true;
+        }
+        out.pop();
     }
-    if core_reading.is_empty() || core_reading == core {
-        out.push(Ruby { text: core, ruby: String::new() });
-    } else {
-        out.push(Ruby { text: core, ruby: core_reading });
-    }
-    if suf > 0 {
-        out.push(Ruby { text: s[s.len() - suf..].iter().collect(), ruby: String::new() });
-    }
-    out
+    false
 }
 
 /// Drops the kana readings some lyrics put in brackets after a word
@@ -350,7 +371,8 @@ mod tests {
         assert_eq!(split_okurigana("走る", "はしる"), vec![r("走", "はし"), r("る", "")]);
         assert_eq!(split_okurigana("お茶", "おちゃ"), vec![r("お", ""), r("茶", "ちゃ")]);
         assert_eq!(split_okurigana("運命", "うんめい"), vec![r("運命", "うんめい")]);
-        assert_eq!(split_okurigana("取り扱い", "とりあつかい"), vec![r("取り扱", "とりあつか"), r("い", "")], "kana inside: the whole core");
+        assert_eq!(split_okurigana("取り扱い", "とりあつかい"), vec![r("取", "と"), r("り", ""), r("扱", "あつか"), r("い", "")], "kana inside line up too");
+        assert_eq!(split_okurigana("抜け出", "ぬけだ"), vec![r("抜", "ぬ"), r("け", ""), r("出", "だ")]);
     }
 
     #[test]
@@ -361,6 +383,14 @@ mod tests {
         assert!(words.iter().any(|w| w.text == "君" && w.ruby == "きみ"), "{words:?}");
         assert!(words.iter().any(|w| w.text == "忘" && w.ruby == "わす"), "{words:?}");
         assert!(words.iter().filter(|w| !w.ruby.is_empty()).all(|w| has_kanji(&w.text)), "furigana only over kanji");
+        // The owner's line (平行線, 19 Nov 2026).
+        let line = "太陽系を抜け出して平行線で交わろう";
+        let words = line_to_ruby(line);
+        assert_eq!(words.iter().map(|w| w.text.as_str()).collect::<String>(), line);
+        let read: Vec<(String, String)> = words.iter().filter(|w| !w.ruby.is_empty()).map(|w| (w.text.clone(), w.ruby.clone())).collect();
+        assert!(read.iter().any(|(t, r)| t == "抜" && r == "ぬ") && read.iter().any(|(t, r)| t == "出" && r == "だ"), "{read:?}");
+        assert!(read.iter().any(|(t, r)| t == "交" && r == "まじ"), "{read:?}");
+        assert!(read.iter().any(|(t, r)| t.contains("平行") && r.starts_with("へいこう")), "{read:?}");
     }
 
     #[test]

@@ -88,6 +88,8 @@ const LYRIC_MAX_W: f32 = 570.0;
 const LYRIC_CHAR_W: f32 = 8.6;
 /// The row under Line's lyric: a notice with a message, and without.
 const LINE_NOTICE_H: f32 = 54.0;
+/// The capsule's Line with furigana: the readings' row over the line.
+const CAPSULE_RUBY_H: f32 = 10.0;
 const LINE_NOTICE_SHORT_H: f32 = 30.0;
 /// About as many characters as fit on Line's widest capsule.
 const LYRIC_ONE_LINE: usize = 56;
@@ -1545,6 +1547,17 @@ fn refresh(ui: &Island) {
         ui.set_sweep_at(sweep_at);
         let capsule_ro = if line { capsule_lyric_line(state).map(|l| l.romaji.clone()).unwrap_or_default() } else { String::new() };
         ui.set_capsule_romaji(capsule_ro.as_str().into());
+        // The line's words with furigana (the あ switch shows them over its kanji).
+        let capsule_ruby: Vec<RubySeg> = if line {
+            capsule_lyric_line(state)
+                .filter(|l| l.ruby.iter().any(|w| !w.ruby.is_empty()))
+                .map(|l| l.ruby.iter().map(|w| RubySeg { text: w.text.as_str().into(), ruby: w.ruby.as_str().into() }).collect())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let capsule_has_ruby = !capsule_ruby.is_empty() && ui.get_furigana();
+        ui.set_capsule_ruby(ModelRc::new(VecModel::from(capsule_ruby)));
         let capsule_long = lyric_width(&capsule_line) > LYRIC_ONE_LINE;
         ui.set_capsule_long(capsule_long);
         ui.set_music(music_view(&state.music, &state.music_art, ui.window().scale_factor(), state.cover_big, state.music_accent, &state.lyrics, lines, lyrics_on, state.lyrics_nudge, rating, ytm.as_ref()));
@@ -1698,7 +1711,9 @@ fn refresh(ui: &Island) {
                     Some(_) => LINE_NOTICE_SHORT_H,
                     None => 0.0,
                 };
-                (if under > 0.0 { w.max(COMPACT_NOTICE.0) } else { w }, COMPACT_LYRIC.1 + under)
+                // Furigana over the line: a row of readings more.
+                let ruby_h = if capsule_has_ruby { CAPSULE_RUBY_H } else { 0.0 };
+                (if under > 0.0 { w.max(COMPACT_NOTICE.0) } else { w }, COMPACT_LYRIC.1 + ruby_h + under)
             }
             Mode::Compact if notice && front_id.as_deref().is_some_and(|id| id.starts_with("music:event")) => COMPACT_MEDIA,
             Mode::Compact if notice => COMPACT_NOTICE,

@@ -1029,6 +1029,22 @@ component IdleSlot inherits HorizontalLayout {
     }
 }
 
+// A lyric line as words with furigana over their kanji, on one row (the
+// capsule's Line). `fs`: the line's font size; the readings are half of it.
+component RubyLine inherits HorizontalLayout {
+    in property <[RubySeg]> segs;
+    in property <length> fs;
+    in property <color> ink;
+    in property <color> ruby-ink;
+    spacing: 0;
+    alignment: start;
+    for s in root.segs : VerticalLayout {
+        spacing: -1px;
+        Text { height: root.fs * 0.68; text: s.ruby; font-size: root.fs * 0.56; horizontal-alignment: center; vertical-alignment: bottom; color: root.ruby-ink; }
+        Text { text: s.text; font-size: root.fs; font-weight: 600; horizontal-alignment: center; color: root.ink; }
+    }
+}
+
 // A small pill for a question's answers.
 component ActionPill inherits Rectangle {
     in property <string> label;
@@ -2124,6 +2140,10 @@ export component Island inherits Window {
     in property <bool> lyrics-japanese;
     // Romaji of the line on the capsule (shown under it), when the lyrics have it.
     in property <string> capsule-romaji;
+    // The capsule line's words with furigana (empty: none), and the あ switch,
+    // shared by the capsule and the lyrics card.
+    in property <[RubySeg]> capsule-ruby;
+    in-out property <bool> furigana: true;
     in property <[NotifRow]> notifications;
     // How many notifications there are in all (the page shows at most two per app).
     in property <int> notif-total;
@@ -2526,9 +2546,11 @@ export component Island inherits Window {
                             property <length> fs: 11.5px * Mini.k * min(1, lyric-box.width / max(1px, line-probe.preferred-width));
                             property <float> done: root.sweep-len <= 0 ? 1
                                 : clamp((root.sweep-at * 1ms + (root.sweep-playing ? animation-tick() - root.sweep-t0 : 0ms)) / (root.sweep-len * 1ms), 0, 1);
-                            height: base-text.preferred-height;
+                            property <bool> ruby: root.furigana && root.capsule-ruby.length > 0;
+                            height: self.ruby ? ruby-dim.preferred-height : base-text.preferred-height;
                             // The line not yet sung, dimmed.
                             base-text := Text {
+                                visible: !sweep-row.ruby;
                                 width: parent.width;
                                 text: root.capsule-line;
                                 color: Mini.ink.with-alpha(0.38);
@@ -2537,7 +2559,7 @@ export component Island inherits Window {
                                 horizontal-alignment: center;
                             }
                             // The part already sung, full ink: the same text, clipped to the sweep.
-                            Rectangle {
+                            if !sweep-row.ruby : Rectangle {
                                 x: (parent.width - base-text.preferred-width) / 2;
                                 width: base-text.preferred-width * sweep-row.done;
                                 clip: true;
@@ -2548,6 +2570,31 @@ export component Island inherits Window {
                                     color: Mini.ink;
                                     font-size: sweep-row.fs;
                                     font-weight: 600;
+                                }
+                            }
+                            // With furigana (the あ switch): the words with their readings
+                            // over the kanji, swept the same way, readings and all.
+                            ruby-dim := RubyLine {
+                                visible: sweep-row.ruby;
+                                x: (parent.width - self.preferred-width) / 2;
+                                width: self.preferred-width;
+                                segs: root.capsule-ruby;
+                                fs: sweep-row.fs;
+                                ink: Mini.ink.with-alpha(0.38);
+                                ruby-ink: Mini.ink.with-alpha(0.3);
+                            }
+                            if sweep-row.ruby : Rectangle {
+                                x: ruby-dim.x;
+                                width: ruby-dim.preferred-width * sweep-row.done;
+                                height: ruby-dim.preferred-height;
+                                clip: true;
+                                RubyLine {
+                                    x: 0;
+                                    width: ruby-dim.preferred-width;
+                                    segs: root.capsule-ruby;
+                                    fs: sweep-row.fs;
+                                    ink: Mini.ink;
+                                    ruby-ink: Mini.text-2;
                                 }
                             }
                         }
@@ -2742,6 +2789,7 @@ export component Island inherits Window {
                             accent: root.song-accent;
                             held: root.held;
                             japanese: root.lyrics-japanese;
+                            furigana <=> root.furigana;
                             live: root.expanded && (root.active-tab == "music" || root.active-tab == "lyrics");
                             command(c) => { root.music-command(c); }
                             text-width(w) => { root.lyric-text-width(w); }
