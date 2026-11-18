@@ -17,6 +17,7 @@ pub const MODULES: &[ModuleInfo] = &[
     ModuleInfo { id: "shelf", name: "Shelf", has_tab: true, default_on: true },
     ModuleInfo { id: "claude", name: "Claude Code", has_tab: false, default_on: true },
     ModuleInfo { id: "accounts", name: "Accounts", has_tab: true, default_on: true },
+    ModuleInfo { id: "prayer", name: "Prayer", has_tab: true, default_on: true },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -207,6 +208,24 @@ impl FocusSettings {
     }
 }
 
+/// Prayer times (Kemenag's method, worked out on the PC): where, and when to pop up.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PrayerSettings {
+    /// One of the app's preset places by name; an unknown one means the first.
+    pub place: String,
+    /// A reminder this many minutes before each prayer, 0..30; 0 = none.
+    pub remind_before_min: u32,
+    /// Pop up at each prayer's time.
+    pub at_time: bool,
+}
+
+impl Default for PrayerSettings {
+    fn default() -> Self {
+        PrayerSettings { place: "Kab. Bekasi".into(), remind_before_min: 10, at_time: true }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneralSettings {
@@ -238,6 +257,7 @@ pub struct Settings {
     pub look: LookSettings,
     pub water: WaterSettings,
     pub focus: FocusSettings,
+    pub prayer: PrayerSettings,
     pub general: GeneralSettings,
     pub autostart: bool,
 }
@@ -252,6 +272,7 @@ impl Default for Settings {
             look: LookSettings::default(),
             water: WaterSettings::default(),
             focus: FocusSettings::default(),
+            prayer: PrayerSettings::default(),
             general: GeneralSettings::default(),
             autostart: false,
         }
@@ -311,6 +332,7 @@ impl Settings {
             look: section(&v, "look"),
             water: section(&v, "water"),
             focus: section(&v, "focus"),
+            prayer: section(&v, "prayer"),
             general: section(&v, "general"),
             autostart: field(&v, "autostart"),
         }
@@ -365,6 +387,7 @@ mod tests {
         s.water.from = "08:30".into();
         s.focus.rounds = 3;
         s.general.hide_after_s = 10;
+        s.prayer = PrayerSettings { place: "Kota Bandung".into(), remind_before_min: 0, at_time: false };
         assert_eq!(Settings::parse(s.to_json().as_bytes()), s);
     }
 
@@ -388,7 +411,7 @@ mod tests {
     fn unknown_modules_go_new_ones_come_order_is_kept() {
         let s = Settings::parse(br#"{"modules":[{"id":"system","enabled":false},{"id":"weather","enabled":true},{"id":"music","enabled":true},{"id":"music","enabled":false}]}"#);
         let ids: Vec<&str> = s.modules.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(ids, ["system", "music", "notifications", "focus", "water", "todo", "shelf", "claude", "accounts"], "weather dropped, duplicate ignored, the rest added");
+        assert_eq!(ids, ["system", "music", "notifications", "focus", "water", "todo", "shelf", "claude", "accounts", "prayer"], "weather dropped, duplicate ignored, the rest added");
         assert!(!s.is_on("system"));
         assert!(s.is_on("music"));
     }
@@ -400,13 +423,15 @@ mod tests {
         assert!(!s.music.romaji, "sibling kept");
         assert!(!s.system.volume);
         assert!(s.system.caps_lock, "missing = default");
+        assert_eq!(s.prayer, PrayerSettings::default(), "an old file gains Prayer's defaults");
+        assert!(s.is_on("prayer"), "and the module, on");
         assert!(!s.autostart);
     }
 
     #[test]
     fn tabs_follow_order_and_switches() {
         let mut s = Settings::default();
-        assert_eq!(s.tabs().iter().map(|t| t.id).collect::<Vec<_>>(), ["music", "notifications", "focus", "water", "todo", "shelf", "accounts"], "system has no tab");
+        assert_eq!(s.tabs().iter().map(|t| t.id).collect::<Vec<_>>(), ["music", "notifications", "focus", "water", "todo", "shelf", "accounts", "prayer"], "system has no tab");
         s.move_module("notifications", -1);
         assert_eq!(s.tabs()[..2].iter().map(|t| t.id).collect::<Vec<_>>(), ["notifications", "music"]);
         s.modules.iter_mut().find(|m| m.id == "music").unwrap().enabled = false;

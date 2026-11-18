@@ -95,6 +95,31 @@ export struct WaterView {
     due: bool,
 }
 
+// Prayer: one of the five on the day's line; where its dot and its label
+// sit along the line (the labels pushed apart where prayers come close).
+export struct PrayerMark {
+    name: string,
+    time: string,
+    dot-x: length,
+    label-x: length,
+    past: bool,
+    next: bool,
+}
+
+export struct PrayerView {
+    next-name: string,
+    // "03:13:42" until the next prayer.
+    countdown: string,
+    // "15:01 today", "04:04 tomorrow".
+    when: string,
+    place: string,
+    // "Imsak 03:54 · Terbit 05:21 · Qibla 295° WNW".
+    info: string,
+    now-text: string,
+    now-x: length,
+    marks: [PrayerMark],
+}
+
 export struct TaskRow {
     id: int,
     text: string,
@@ -228,6 +253,9 @@ global Glyphs {
     out property <string> moon: "\u{E708}";
     out property <string> video: "\u{E714}";
     out property <string> line: "\u{E90B}";
+    out property <string> place: "\u{E81D}";
+    // Not in Segoe Fluent: a mosque, drawn (a dome, its spire, a door).
+    out property <string> mosque: "M 3 20.5 H 21 M 6 20.5 V 13.5 A 6 6 0 0 1 18 13.5 V 20.5 M 12 7.5 V 4 M 10.5 20.5 V 17.5 A 1.5 1.5 0 0 1 13.5 17.5 V 20.5";
     public pure function tab(id: string) -> string {
         return id == "notifications" ? "\u{EA8F}" : id == "music" ? "\u{EC4F}" : id == "lyrics" ? "\u{E8E4}" : id == "accounts" ? "\u{E716}" : "\u{E8D6}";
     }
@@ -582,9 +610,10 @@ component SysIcon inherits Path {
     viewbox-width: 24;
     viewbox-height: 24;
     stroke-width: 1.8px;
-    stroke: name == "bolt" ? #30d158 : name == "caps-on" ? #ff9f0a
+    stroke: name == "bolt" || name == "prayer" ? #30d158 : name == "caps-on" ? #ff9f0a
         : (name == "headphones-off" || name == "wifi-off" || name == "volume-off" || name == "caps-off") ? Mini.label : Mini.ink;
-    commands: name == "headphones" ? "M 4 15 V 12 A 8 8 0 0 1 20 12 V 15 M 4 15 H 7 V 20 H 4 Z M 20 15 H 17 V 20 H 20 Z"
+    commands: name == "prayer" ? Glyphs.mosque
+        : name == "headphones" ? "M 4 15 V 12 A 8 8 0 0 1 20 12 V 15 M 4 15 H 7 V 20 H 4 Z M 20 15 H 17 V 20 H 20 Z"
         : name == "headphones-off" ? "M 4 15 V 12 A 8 8 0 0 1 20 12 V 15 M 4 15 H 7 V 20 H 4 Z M 20 15 H 17 V 20 H 20 Z M 3 3 L 21 21"
         : name == "bolt" ? "M 13 2 L 5 13 H 11 L 10 22 L 19 10 H 13 Z"
         : name == "battery" ? "M 3 8 H 18 V 16 H 3 Z M 21 11 V 13 M 6 11 V 13"
@@ -1024,6 +1053,143 @@ component AccountsPage inherits VerticalLayout {
 
 // ── The island ───────────────────────────────────────────────────────────────
 
+// Prayer: the next prayer and the time left on the left; on the right the
+// day's marks and the five prayers on a line from Subuh to Isya, the part
+// already gone filled, now marked above it, the next one a green ring.
+component PrayerPage inherits Rectangle {
+    in property <PrayerView> p;
+    out property <color> green: #30d158;
+    property <length> col-x: 118px;
+    property <length> col-w: 200px;
+    property <length> track-y: 35px;
+
+    VerticalLayout {
+        x: 4px;
+        y: 0;
+        width: root.col-x - 14px;
+        height: root.height;
+        alignment: center;
+        spacing: 0px;
+        Text { text: root.p.next-name; color: root.green; font-size: 13px; font-weight: 700; overflow: elide; }
+        Text { text: root.p.countdown; color: Mini.ink; font-size: 24px; font-weight: 700; }
+        Text { text: root.p.when; color: Mini.text-2; font-size: 11px; overflow: elide; }
+        HorizontalLayout {
+            padding-top: 3px;
+            spacing: 4px;
+            Glyph { width: 11px; text: Glyphs.place; font-size: 10px; color: Mini.label; }
+            Text { text: root.p.place; color: Mini.label; font-size: 11px; overflow: elide; horizontal-stretch: 1; }
+        }
+    }
+
+    Rectangle {
+        x: root.col-x;
+        y: 0;
+        width: root.col-w;
+        height: root.height;
+        Text {
+            x: 0;
+            y: 2px;
+            width: parent.width;
+            height: 13px;
+            text: root.p.info;
+            color: Mini.label;
+            font-size: 10px;
+            overflow: elide;
+        }
+        // Now, above the line.
+        Text {
+            x: clamp(root.p.now-x - self.width / 2, 0px, parent.width - self.width);
+            y: root.track-y - 7px - 13px;
+            width: self.preferred-width;
+            height: 13px;
+            text: root.p.now-text;
+            color: Mini.ink;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        // The line, filled as far as now.
+        Rectangle {
+            x: 0;
+            y: root.track-y - 1.5px;
+            width: parent.width;
+            height: 3px;
+            border-radius: 1.5px;
+            background: #ffffff26;
+        }
+        Rectangle {
+            x: 0;
+            y: root.track-y - 1.5px;
+            width: max(3px, root.p.now-x);
+            height: 3px;
+            border-radius: 1.5px;
+            background: root.green.with-alpha(0.75);
+        }
+        for m in root.p.marks : Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            // A thin line from the dot down to its label (slanted where the label moved over).
+            Path {
+                x: 0;
+                y: root.track-y + 4px;
+                width: parent.width;
+                height: 8px;
+                viewbox-x: 0;
+                viewbox-y: 0;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                stroke: m.next ? root.green.with-alpha(0.7) : #ffffff47;
+                stroke-width: 1px;
+                MoveTo { x: m.dot-x / 1px; y: 0; }
+                LineTo { x: m.label-x / 1px; y: 8; }
+            }
+            Rectangle {
+                property <length> size: m.next ? 11px : 7px;
+                x: m.dot-x - self.size / 2;
+                y: root.track-y - self.size / 2;
+                width: self.size;
+                height: self.size;
+                border-radius: self.size / 2;
+                background: m.next ? Mini.base : m.past ? root.green : #8e8e93;
+                border-width: m.next ? 2px : 0px;
+                border-color: root.green;
+            }
+            Text {
+                x: m.label-x - self.width / 2;
+                y: root.track-y + 13px;
+                width: 40px;
+                height: 13px;
+                text: m.name;
+                color: m.next ? root.green : m.past ? Mini.label : Mini.text-2;
+                font-size: 10px;
+                font-weight: m.next ? 700 : 600;
+                horizontal-alignment: center;
+            }
+            Text {
+                x: m.label-x - self.width / 2;
+                y: root.track-y + 26px;
+                width: 40px;
+                height: 13px;
+                text: m.time;
+                color: m.next ? root.green : Mini.label;
+                font-size: 10px;
+                font-weight: m.next ? 700 : 400;
+                horizontal-alignment: center;
+            }
+        }
+        // Now's mark across the line.
+        Rectangle {
+            x: root.p.now-x - 0.75px;
+            y: root.track-y - 6px;
+            width: 1.5px;
+            height: 12px;
+            border-radius: 0.75px;
+            background: Mini.ink;
+        }
+    }
+}
+
 export component Island inherits Window {
     default-font-family: "Segoe UI";
     title: "Kanmuri";
@@ -1062,6 +1228,7 @@ export component Island inherits Window {
     in property <[NotifRow]> notifications;
     in property <FocusView> pomodoro;
     in property <WaterView> water;
+    in property <PrayerView> prayer;
     in property <[TaskRow]> tasks;
     in property <[DoneRow]> todo-log;
     // The to-do page shows its log (set at start for snapshots of it).
@@ -1451,7 +1618,18 @@ export component Island inherits Window {
                             border-radius: 10px;
                             background: self.on ? #ffffff3a : tab-area.has-hover ? #ffffff1a : transparent;
                             animate background { duration: 150ms; }
-                            Glyph {
+                            if t.id == "prayer" : Path {
+                                x: parent.on ? 10px : (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 15px;
+                                height: 15px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                stroke-width: 1.6px;
+                                stroke: parent.on || tab-area.has-hover ? Mini.ink : Mini.text-3;
+                                commands: Glyphs.mosque;
+                            }
+                            if t.id != "prayer" : Glyph {
                                 x: parent.on ? 10px : (parent.width - self.width) / 2;
                                 width: 14px;
                                 text: Glyphs.tab(t.id);
@@ -1519,6 +1697,10 @@ export component Island inherits Window {
                             japanese: root.lyrics-japanese;
                             command(c) => { root.music-command(c); }
                         }
+                    }
+                    Page {
+                        shown: root.active-tab == "prayer";
+                        PrayerPage { width: parent.width; height: parent.height; p: root.prayer; }
                     }
                     Page {
                         shown: root.active-tab == "accounts";

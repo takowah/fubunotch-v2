@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod autostart;
+mod prayer;
 mod watch;
 mod banners;
 mod mascot;
@@ -98,6 +99,16 @@ const ACCOUNT_LINE_W: f32 = 318.0;
 const ACCOUNT_CHIP_PAD: f32 = 59.0;
 /// A name's width per character at 13 px semibold.
 const ACCOUNT_CHAR_W: f32 = 7.4;
+/// Prayer: the next prayer and the day's timeline (two columns).
+const PRAYER_PAGE_H: f32 = 80.0;
+/// The timeline's width (the right column), the room at its ends for the
+/// dots, and a prayer's label (wide enough for "Maghrib" at 10 px).
+const PRAYER_TRACK_W: f32 = 200.0;
+const PRAYER_TRACK_INSET: f32 = 6.0;
+const PRAYER_LABEL_W: f32 = 38.0;
+/// A prayer pop-up still comes this many minutes late (the PC was asleep
+/// at the time); later than that it is skipped.
+const PRAYER_LATE_MIN: u32 = 5;
 /// Mini Island's $MAX_ISLAND_H.
 const EXPANDED_MAX_H: f32 = 440.0;
 /// Finished tasks shown in the log (more are kept).
@@ -220,6 +231,11 @@ struct State {
     water_reminded: Option<u32>,
     /// When the focus round under way was first started (minutes after midnight).
     focus_started_min: Option<u32>,
+    /// Prayer: the day's times, for which date, place and time zone.
+    prayer_day: Option<(String, prayer::Day)>,
+    /// The last minute whose prayer pop-ups were looked at, and its date
+    /// ("2026-11-18"); pop-ups up to it are done.
+    prayer_seen: (String, i64),
     data: store::Data,
     /// Claude Code permission requests waiting for a click: activity id → answer.
     pending: HashMap<String, island_webhook::Reply>,
@@ -327,6 +343,7 @@ fn accent_of(source: &str, kind: Kind) -> slint::Color {
         s if s.contains("telegram") => Some((0x2a, 0xab, 0xee)),
         s if s.contains("wechat") => Some((0x07, 0xc1, 0x60)),
         s if s.contains("slack") => Some((0xe0, 0x1e, 0x5a)),
+        "icon:prayer" => Some((0x30, 0xd1, 0x58)),
         _ => None,
     };
     if let Some((r, g, b)) = known {
@@ -753,7 +770,9 @@ fn refresh(ui: &Island) {
             .map(item)
             .collect();
         ui.set_others(ModelRc::new(VecModel::from(others)));
-        ui.set_clock(SharedString::from(local_time::clock_text()));
+        // FUBUNOTCH_V2_DEMO_PRAYER: the header's clock says the pretend time too.
+        let clock = if std::env::var_os("FUBUNOTCH_V2_DEMO_PRAYER").is_some() { prayer::hh_mm(prayer_now().3 / 60) } else { local_time::clock_text() };
+        ui.set_clock(SharedString::from(clock));
 
         // Tabs, as Mini Island's list: Notifications (when there are some, or
         // no song), Music and Lyrics (while a song plays, Lyrics when it has
@@ -768,6 +787,9 @@ fn refresh(ui: &Island) {
             if has_lyrics {
                 tab_ids.push(("lyrics", "Lyrics"));
             }
+        }
+        if state.settings.is_on("prayer") {
+            tab_ids.push(("prayer", "Prayer"));
         }
         if accounts::installed() {
             tab_ids.push(("accounts", "Accounts"));
@@ -820,6 +842,9 @@ fn refresh(ui: &Island) {
         });
         state.data.water.for_date(&local_time::today());
         ui.set_water(water_view(state));
+        if state.active_tab == "prayer" {
+            ui.set_prayer(prayer_view(&mut state.prayer_day, &state.settings));
+        }
         let tasks: Vec<TaskRow> = state.data.todo.ordered().into_iter().map(|t| TaskRow { id: t.id as i32, text: t.text.as_str().into(), done: t.done }).collect();
         ui.set_tasks(ModelRc::new(VecModel::from(tasks)));
         ui.set_todo_log(ModelRc::new(VecModel::from(todo_log_rows(&state.data.todo.log, &local_time::today()))));
@@ -871,7 +896,8 @@ fn refresh(ui: &Island) {
             && front_kind != Some(Kind::Ambient)
             && state.mode == Mode::Hidden
             // Settings → General → Pop up for activities; water reminders still come (v1).
-            && (state.settings.general.popups || front_id.as_deref() == Some("water:remind"))
+            // Prayer's pop-ups too: the user asked for them on the Prayer page.
+            && (state.settings.general.popups || matches!(front_id.as_deref(), Some("water:remind" | "prayer:remind")))
         {
             state.mode = Mode::Compact;
             state.hide_at = Some(now + hide_after(&state.settings));
@@ -948,6 +974,7 @@ fn refresh(ui: &Island) {
                     "music" => EXPANDED_MUSIC.1 - EXPANDED_CHROME,
                     "lyrics" => EXPANDED_LYRICS.1 - EXPANDED_CHROME,
                     "accounts" => accounts_h,
+                    "prayer" => PRAYER_PAGE_H,
                     _ if state.notifications.is_empty() => NOTIF_EMPTY_H,
                     _ => NOTIF_HEADER_H + state.notifications.len().min(NOTIF_ROWS_MAX) as f32 * NOTIF_ROW_PITCH,
                 };
@@ -1015,7 +1042,9 @@ fn refresh(ui: &Island) {
         };
         // The Pomodoro counts down in seconds while its page is on screen.
         let focus_tick = if expanded && state.active_tab == "focus" && state.focus.running() { 1_000 } else { u64::MAX };
-        let page_tick = page_tick.min(focus_tick).min(daily_wake(state, now));
+        // So does the next prayer, on the second, while its page is on screen.
+        let prayer_tick = if expanded && state.active_tab == "prayer" { local_time::ms_to_next_second() } else { u64::MAX };
+        let page_tick = page_tick.min(focus_tick).min(prayer_tick).min(daily_wake(state, now));
         let under_in = if line_notice && !asking { state.line_notice_until.saturating_sub(now) } else { u64::MAX };
         let page_tick = page_tick.min(under_in);
         // While a video is docked: often enough to follow the pointer on it,
@@ -1742,6 +1771,9 @@ fn daily_tick(state: &mut State, now: u64) {
             }
         }
     }
+    if state.settings.is_on("prayer") {
+        prayer_tick(state, now);
+    }
 }
 
 /// Milliseconds until a daily module needs a look (a phase end, a reminder).
@@ -1756,7 +1788,148 @@ fn daily_wake(state: &State, now: u64) -> u64 {
             wake = wake.min(if due > minute { (due - minute) as u64 * 60_000 } else { 1_000 });
         }
     }
+    if state.settings.is_on("prayer") {
+        if let Some((_, day)) = state.prayer_day.as_ref() {
+            let (_, _, _, secs) = prayer_now();
+            let next = prayer_events(day, &state.settings.prayer).into_iter().map(|e| e.0 * 60).find(|&at| at > secs);
+            // None left today: just after midnight, for the next day's.
+            let at = next.unwrap_or(24 * 3600);
+            wake = wake.min((at - secs) as u64 * 1000 + 50);
+        }
+    }
     wake
+}
+
+// ── Prayer ────────────────────────────────────────────────────────────────────
+
+/// Now for the Prayer module: (year, month, day, seconds since midnight).
+/// FUBUNOTCH_V2_DEMO_PRAYER=HH:MM pretends it is that time today (snapshots).
+fn prayer_now() -> (i32, u32, u32, u32) {
+    static DEMO: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    let demo = *DEMO.get_or_init(|| std::env::var("FUBUNOTCH_V2_DEMO_PRAYER").ok().and_then(|v| parse_hh_mm(&v)));
+    let (y, m, d, secs) = local_time::now_parts();
+    (y, m, d, demo.map_or(secs, |min| min * 60))
+}
+
+/// The chosen place (Settings > Prayer), else the first preset.
+fn prayer_place(s: &Settings) -> (&'static str, f64, f64) {
+    prayer::PLACES.iter().copied().find(|p| p.0 == s.prayer.place).unwrap_or(prayer::PLACES[0])
+}
+
+/// The day's times, worked out again only for a new date, place or time zone.
+fn prayer_day(cache: &mut Option<(String, prayer::Day)>, settings: &Settings, y: i32, m: u32, d: u32) -> prayer::Day {
+    let (name, lat, lon) = prayer_place(settings);
+    let tz = local_time::utc_offset_hours();
+    let key = format!("{y}-{m:02}-{d:02}|{name}|{tz}");
+    if cache.as_ref().is_none_or(|(k, _)| *k != key) {
+        *cache = Some((key, prayer::day(y, m, d, lat, lon, tz)));
+    }
+    cache.as_ref().map(|(_, day)| day.clone()).unwrap_or_else(|| prayer::day(y, m, d, lat, lon, tz))
+}
+
+/// The day's pop-ups in order: (minute, prayer, a reminder before it).
+fn prayer_events(day: &prayer::Day, p: &island_core::settings::PrayerSettings) -> Vec<(u32, prayer::Which, bool)> {
+    let before = p.remind_before_min.min(30);
+    let mut events = Vec::new();
+    for (w, at) in day.prayers() {
+        if before > 0 && at >= before {
+            events.push((at - before, w, true));
+        }
+        if p.at_time {
+            events.push((at, w, false));
+        }
+    }
+    events.sort_by_key(|e| (e.0, !e.2));
+    events
+}
+
+/// A prayer pop-up that came due since the last look (the latest one, and
+/// only while it is still timely).
+fn prayer_tick(state: &mut State, now: u64) {
+    let (y, m, d, secs) = prayer_now();
+    let date = format!("{y}-{m:02}-{d:02}");
+    let minute = secs / 60;
+    let day = prayer_day(&mut state.prayer_day, &state.settings, y, m, d);
+    if state.prayer_seen.0 != date {
+        state.prayer_seen = (date, -1);
+    }
+    let seen = state.prayer_seen.1;
+    let due = prayer_events(&day, &state.settings.prayer).into_iter().filter(|e| e.0 as i64 > seen && e.0 <= minute).last();
+    state.prayer_seen.1 = seen.max(minute as i64);
+    let Some((at, w, before)) = due else { return };
+    if minute - at > PRAYER_LATE_MIN {
+        return;
+    }
+    let time = prayer::hh_mm(day.get(w));
+    let title = if before { format!("{} in {} min · {time}", w.name(), day.get(w) - at) } else { format!("{} · {time}", w.name()) };
+    upsert_json(state, serde_json::json!({ "id": "prayer:remind", "source": "icon:prayer", "kind": "alert", "title": title }), now);
+}
+
+/// Label centres along the timeline: under their dots, pushed apart just
+/// enough not to overlap, and kept inside the column.
+fn spread_labels(dots: &[f32], width: f32, label: f32) -> Vec<f32> {
+    let (lo, hi) = (label / 2.0, width - label / 2.0);
+    let mut c: Vec<f32> = dots.iter().map(|x| x.clamp(lo, hi)).collect();
+    for i in 1..c.len() {
+        c[i] = c[i].max(c[i - 1] + label);
+    }
+    for i in (0..c.len()).rev() {
+        let cap = if i + 1 < c.len() { c[i + 1] - label } else { hi };
+        c[i] = c[i].min(cap);
+    }
+    c
+}
+
+/// The Prayer page: the next prayer and how long until it, the day's marks
+/// and the five prayers on a line from Subuh to Isya.
+fn prayer_view(cache: &mut Option<(String, prayer::Day)>, settings: &Settings) -> PrayerView {
+    let (y, m, d, secs) = prayer_now();
+    let day = prayer_day(cache, settings, y, m, d);
+    let (place, lat, lon) = prayer_place(settings);
+    let five = day.prayers();
+    let (next, next_s, tomorrow) = match five.iter().find(|(_, at)| at * 60 > secs) {
+        Some(&(w, at)) => (w, at * 60, false),
+        None => {
+            let (ty, tm, td) = local_time::add_days(y, m, d, 1);
+            let at = prayer::day(ty, tm, td, lat, lon, local_time::utc_offset_hours()).get(prayer::Which::Subuh);
+            (prayer::Which::Subuh, 24 * 3600 + at * 60, true)
+        }
+    };
+    let left = next_s - secs;
+    let (deg, point) = prayer::qibla(lat, lon);
+    let first = five.first().map_or(0, |p| p.1) as f32;
+    let last = five.last().map_or(1, |p| p.1) as f32;
+    let usable = PRAYER_TRACK_W - 2.0 * PRAYER_TRACK_INSET;
+    let x_of = |min: f32| PRAYER_TRACK_INSET + ((min - first) / (last - first).max(1.0)).clamp(0.0, 1.0) * usable;
+    let dots: Vec<f32> = five.iter().map(|(_, at)| x_of(*at as f32)).collect();
+    let labels = spread_labels(&dots, PRAYER_TRACK_W, PRAYER_LABEL_W);
+    let marks: Vec<PrayerMark> = five
+        .iter()
+        .zip(dots.iter().zip(labels))
+        .map(|(&(w, at), (&dot, label))| PrayerMark {
+            name: w.name().into(),
+            time: prayer::hh_mm(at).into(),
+            dot_x: dot,
+            label_x: label,
+            past: at * 60 <= secs,
+            next: w == next,
+        })
+        .collect();
+    PrayerView {
+        next_name: next.name().into(),
+        countdown: format!("{:02}:{:02}:{:02}", left / 3600, left / 60 % 60, left % 60).into(),
+        when: format!("{} {}", prayer::hh_mm(next_s / 60), if tomorrow { "tomorrow" } else { "today" }).into(),
+        place: place.into(),
+        info: format!(
+            "Imsak {} · Terbit {} · Qibla {deg}° {point}",
+            prayer::hh_mm(day.get(prayer::Which::Imsak)),
+            prayer::hh_mm(day.get(prayer::Which::Terbit))
+        )
+        .into(),
+        now_text: prayer::hh_mm(secs / 60).into(),
+        now_x: x_of(secs as f32 / 60.0),
+        marks: ModelRc::new(VecModel::from(marks)),
+    }
 }
 
 fn start_music(ui: &Island) {
@@ -1859,6 +2032,10 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         short_min: s.focus.plan().short_min as i32,
         long_min: s.focus.plan().long_min as i32,
         rounds: s.focus.plan().rounds as i32,
+        prayer_places: ModelRc::new(VecModel::from(prayer::PLACES.iter().map(|p| SharedString::from(p.0)).collect::<Vec<_>>())),
+        prayer_place: prayer_place(s).0.into(),
+        prayer_remind: s.prayer.remind_before_min.min(30) as i32,
+        prayer_at_time: s.prayer.at_time,
         data_folder: store::data_dir().display().to_string().into(),
         claude_status: status.into(),
         claude_installed: installed,
@@ -1910,6 +2087,7 @@ fn set_flag(s: &mut Settings, key: &str, on: bool) {
         "look.mascot" => s.look.mascot = on,
         "general.popups" => s.general.popups = on,
         "water.reminders" => s.water.reminders = on,
+        "prayer.at_time" => s.prayer.at_time = on,
         "autostart" => {
             if let Err(err) = autostart::set(on) {
                 eprintln!("autostart: {err}");
@@ -1935,6 +2113,7 @@ fn set_number(s: &mut Settings, key: &str, v: i32) {
         "focus.short_min" => s.focus.short_min = u.clamp(1, 60),
         "focus.long_min" => s.focus.long_min = u.clamp(1, 120),
         "focus.rounds" => s.focus.rounds = u.clamp(1, 12),
+        "prayer.remind_before_min" => s.prayer.remind_before_min = u.min(30),
         _ => {}
     }
 }
@@ -2082,6 +2261,12 @@ fn open_settings(ui: &Island) {
         if let Some(ui) = island.upgrade() {
             change_settings(&ui, |s| s.general.screen = id.to_string());
             recover_island(&ui);
+        }
+    });
+    let island = ui.as_weak();
+    win.on_place_picked(move |name| {
+        if let Some(ui) = island.upgrade() {
+            change_settings(&ui, |s| s.prayer.place = name.to_string());
         }
     });
     let island = ui.as_weak();
@@ -2349,6 +2534,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             water_plan,
             water_reminded: None,
             focus_started_min: None,
+            prayer_day: None,
+            // From the minute before start: a pop-up due right now still comes.
+            prayer_seen: {
+                let (y, m, d, secs) = prayer_now();
+                (format!("{y}-{m:02}-{d:02}"), (secs / 60) as i64 - 1)
+            },
             data: store::load_data(),
             pending: HashMap::new(),
             ask_seq: 0,
@@ -3019,4 +3210,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The island is hidden from the taskbar, so closing Settings must not end the app.
     slint::run_event_loop_until_quit()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod prayer_tests {
+    use super::*;
+
+    #[test]
+    fn labels_keep_apart_and_inside() {
+        // Kab. Bekasi's day: Maghrib and Isya's dots almost touch.
+        let dots = [6.0, 101.0, 148.0, 183.0, 194.0];
+        let c = spread_labels(&dots, PRAYER_TRACK_W, PRAYER_LABEL_W);
+        assert!(c.windows(2).all(|w| w[1] - w[0] >= PRAYER_LABEL_W - 0.01), "{c:?}");
+        assert!(c[0] >= PRAYER_LABEL_W / 2.0 && c[4] <= PRAYER_TRACK_W - PRAYER_LABEL_W / 2.0, "{c:?}");
+        // Far apart, they stay under their dots.
+        let wide = spread_labels(&[30.0, 100.0, 170.0], PRAYER_TRACK_W, PRAYER_LABEL_W);
+        assert_eq!(wide, vec![30.0, 100.0, 170.0]);
+    }
+
+    #[test]
+    fn events_follow_the_settings() {
+        let day = prayer::day(2026, 11, 18, -6.2615, 107.1527, 7.0);
+        let mut p = island_core::settings::PrayerSettings::default();
+        let e = prayer_events(&day, &p);
+        assert_eq!(e.len(), 10, "a reminder and the time for each of five");
+        let dzuhur = day.get(prayer::Which::Dzuhur);
+        assert!(e.contains(&(dzuhur - 10, prayer::Which::Dzuhur, true)) && e.contains(&(dzuhur, prayer::Which::Dzuhur, false)));
+        assert!(e.windows(2).all(|w| w[0].0 <= w[1].0));
+        p.remind_before_min = 0;
+        assert!(prayer_events(&day, &p).iter().all(|e| !e.2), "0 = no reminders");
+        p.at_time = false;
+        assert!(prayer_events(&day, &p).is_empty());
+    }
 }

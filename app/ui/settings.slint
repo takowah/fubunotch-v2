@@ -75,6 +75,11 @@ export struct SettingsView {
     short-min: int,
     long-min: int,
     rounds: int,
+    // Prayer: the preset places and the chosen one, minutes before, at the time.
+    prayer-places: [string],
+    prayer-place: string,
+    prayer-remind: int,
+    prayer-at-time: bool,
     data-folder: string,
     claude-status: string,
     claude-installed: bool,
@@ -120,6 +125,7 @@ global SetGlyphs {
             : id == "notifications" ? "\u{EA8F}"
             : id == "water" ? "\u{EB42}"
             : id == "focus" ? "\u{E916}"
+            : id == "prayer" ? "\u{E823}"
             : id == "system" ? "\u{E7F4}"
             : id == "claude" ? "\u{E756}"
             : id == "todo" ? "\u{E73A}"
@@ -547,6 +553,7 @@ export component SettingsWindow inherits Window {
     callback notif-app-toggled(string, bool);
     callback theme-picked(string);
     callback screen-picked(string);
+    callback place-picked(string);
     callback slot-picked(string, string);
     /// "background.pick", "background.clear", "open-data-folder".
     callback action(string);
@@ -598,6 +605,7 @@ export component SettingsWindow inherits Window {
                 NavItem { label: "Notifications"; id: "notifications"; active: root.page == "notifications"; clicked => { root.page = "notifications"; } }
                 NavItem { label: "Water"; id: "water"; active: root.page == "water"; clicked => { root.page = "water"; } }
                 NavItem { label: "Focus"; id: "focus"; active: root.page == "focus"; clicked => { root.page = "focus"; } }
+                NavItem { label: "Prayer"; id: "prayer"; active: root.page == "prayer"; clicked => { root.page = "prayer"; } }
                 NavItem { label: "System"; id: "system"; active: root.page == "system"; clicked => { root.page = "system"; } }
                 NavItem { label: "Claude Code"; id: "claude"; active: root.page == "claude"; clicked => { root.page = "claude"; } }
                 Rectangle { vertical-stretch: 1; }
@@ -630,7 +638,7 @@ export component SettingsWindow inherits Window {
                         Text {
                             text: root.page == "general" ? "General" : root.page == "look" ? "Appearance" : root.page == "modules" ? "Modules"
                                 : root.page == "music" ? "Music" : root.page == "notifications" ? "Notifications" : root.page == "water" ? "Water"
-                                : root.page == "focus" ? "Focus" : root.page == "system" ? "System" : "Claude Code";
+                                : root.page == "focus" ? "Focus" : root.page == "prayer" ? "Prayer" : root.page == "system" ? "System" : "Claude Code";
                             color: K.ink;
                             font-size: 24px;
                             font-weight: 700;
@@ -643,6 +651,7 @@ export component SettingsWindow inherits Window {
                                 : root.page == "notifications" ? "Windows notifications from the apps you choose."
                                 : root.page == "water" ? "A glass at a time toward a daily goal."
                                 : root.page == "focus" ? "Pomodoro rounds and breaks."
+                                : root.page == "prayer" ? "Today's prayer times (Kemenag), worked out on this PC."
                                 : root.page == "system" ? "Small notices for what changes on this PC."
                                 : "Answer Claude Code's permission requests from the island.";
                             color: K.hint;
@@ -921,6 +930,30 @@ export component SettingsWindow inherits Window {
                 }
 
                 // ── System ──
+                // ── Prayer ──
+                if root.page == "prayer" : Heading { text: "PLACE"; }
+                if root.page == "prayer" : Card {
+                    Rectangle {
+                        property <int> per-row: 4;
+                        property <length> gap: 8px;
+                        property <length> chip-w: (self.width - 32px - (self.per-row - 1) * self.gap) / self.per-row;
+                        height: 16px * 2 + ceil(root.s.prayer-places.length / self.per-row) * (28px + self.gap) - self.gap;
+                        for name[i] in root.s.prayer-places : SmallButton {
+                            x: 16px + mod(i, parent.per-row) * (parent.chip-w + parent.gap);
+                            y: 16px + floor(i / parent.per-row) * (28px + parent.gap);
+                            width: parent.chip-w;
+                            label: name;
+                            primary: name == root.s.prayer-place;
+                            clicked => { root.place-picked(name); }
+                        }
+                    }
+                }
+                if root.page == "prayer" : Heading { text: "REMINDERS"; }
+                if root.page == "prayer" : Card {
+                    SettingRow { title: "Remind before"; hint: "Minutes before each prayer; 0 for none."; Stepper { value: root.s.prayer-remind; minimum: 0; maximum: 30; unit: "min"; changed(v) => { root.number-changed("prayer.remind_before_min", v); } } }
+                    SettingRow { title: "At prayer time"; hint: "Subuh, Dzuhur, Ashar, Maghrib and Isya."; last: true; Toggle { on: root.s.prayer-at-time; toggled(v) => { root.flag-changed("prayer.at_time", v); } } }
+                }
+
                 if root.page == "system" : Heading { text: "NOTICES"; }
                 if root.page == "system" : Card {
                     SettingRow { title: "Volume"; hint: ""; glyph: "\u{E767}"; Toggle { on: root.s.sys-volume; toggled(v) => { root.flag-changed("system.volume", v); } } }
