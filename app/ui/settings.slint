@@ -29,6 +29,18 @@ export struct AppSwitch {
     on: bool,
 }
 
+// An account on Settings > Accounts: who it is signed in as, a warning when
+// two slots are one account.
+export struct AccountSetting {
+    id: string,
+    name: string,
+    signed-in-as: string,
+    warning: string,
+    active: bool,
+    is-default: bool,
+    can-sign-in: bool,
+}
+
 // A screen the island can sit on (Settings > General > Screen).
 export struct ScreenRow {
     id: string,
@@ -172,6 +184,31 @@ component Glyph inherits Text {
     font-family: K.icons;
     horizontal-alignment: center;
     vertical-alignment: center;
+}
+
+// A text field (Settings > Accounts' names): Enter hands its text over.
+component Field inherits Rectangle {
+    in property <string> text;
+    in property <string> placeholder;
+    callback accepted(string);
+    out property <string> value: input.text;
+    height: 30px;
+    border-radius: 8px;
+    background: #ffffff10;
+    border-width: 1px;
+    border-color: input.has-focus ? Ice.glow : transparent;
+    if input.text == "" : Text { x: 10px; height: parent.height; text: root.placeholder; color: #ffffff59; font-size: 12.5px; vertical-alignment: center; }
+    input := TextInput {
+        x: 10px;
+        width: parent.width - 20px;
+        height: parent.height;
+        vertical-alignment: center;
+        text: root.text;
+        color: #ffffffeb;
+        font-size: 12.5px;
+        single-line: true;
+        accepted => { root.accepted(self.text); }
+    }
 }
 
 component Toggle inherits Rectangle {
@@ -368,6 +405,60 @@ component Card inherits Rectangle {
     border-color: K.card-edge;
     VerticalLayout {
         @children
+    }
+}
+
+// One app's accounts on Settings > Accounts: each with its name (Enter
+// renames), who it is signed in as, a warning, Sign in and Remove; a field to
+// add one at the end. `act(action, id, value)`: "rename" / "remove" /
+// "signin" with the account's id, "add" with the service and the name.
+component AccountsCard inherits Card {
+    in property <string> service;
+    in property <[AccountSetting]> rows;
+    in property <string> add-hint;
+    callback act(string, string, string);
+    for a[i] in root.rows : Rectangle {
+        min-height: 64px;
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 14px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            spacing: 12px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 4px;
+                alignment: center;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Field { width: 220px; text: a.name; accepted(t) => { root.act("rename", a.id, t); } }
+                    if a.active : Text { text: "In use"; color: Ice.glow; font-size: 11.5px; font-weight: 600; vertical-alignment: center; }
+                    if a.is-default : Text { text: "Main"; color: K.hint; font-size: 11.5px; vertical-alignment: center; }
+                }
+                Text { text: a.signed-in-as; color: K.hint; font-size: 12px; overflow: elide; }
+                if a.warning != "" : Text { text: "⚠ " + a.warning + ": sign this one in again with the other account."; color: #ff9f0a; font-size: 12px; wrap: word-wrap; }
+            }
+            VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    spacing: 6px;
+                    if a.can-sign-in : SmallButton { label: "Sign in…"; clicked => { root.act("signin", a.id, ""); } }
+                    if !a.is-default : SmallButton { label: "Remove"; enabled: !(root.service == "desktop" && a.active); clicked => { root.act("remove", a.id, ""); } }
+                }
+            }
+        }
+        Rectangle { x: 16px; y: parent.height - 1px; width: parent.width - 16px; height: 1px; background: K.line; }
+    }
+    // Add one.
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 12px;
+        spacing: 8px;
+        add-field := Field { width: 220px; placeholder: "New account's name"; accepted(t) => { root.act("add", root.service, t); } }
+        SmallButton { label: "Add"; glyph: SetGlyphs.add; clicked => { root.act("add", root.service, add-field.value); } }
+        Text { horizontal-stretch: 1; text: root.add-hint; color: K.hint; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
     }
 }
 
@@ -756,6 +847,12 @@ export component SettingsWindow inherits Window {
     /// "background.pick", "background.clear", "open-data-folder".
     callback action(string);
     callback claude-connect(bool);
+    // Settings > Accounts.
+    in property <[AccountSetting]> accounts-desktop;
+    in property <[AccountSetting]> accounts-claude;
+    in property <[AccountSetting]> accounts-codex;
+    in property <string> account-note;
+    callback account-act(string, string, string);
     // A byte as two hex digits: the swatches' "#rrggbb".
     pure function hex(v: int) -> string {
         return root.digit(floor(v / 16)) + root.digit(mod(v, 16));
@@ -815,6 +912,7 @@ export component SettingsWindow inherits Window {
                 NavItem { label: "Day Progress"; id: "day"; active: root.page == "day"; clicked => { root.page = "day"; } }
                 NavItem { label: "System"; id: "system"; active: root.page == "system"; clicked => { root.page = "system"; } }
                 NavItem { label: "Claude Code"; id: "claude"; active: root.page == "claude"; clicked => { root.page = "claude"; } }
+                NavItem { label: "Accounts"; id: "accounts"; active: root.page == "accounts"; clicked => { root.page = "accounts"; root.action("accounts.refresh"); } }
                 Rectangle { vertical-stretch: 1; }
             }
             Rectangle {
@@ -845,7 +943,7 @@ export component SettingsWindow inherits Window {
                         Text {
                             text: root.page == "general" ? "General" : root.page == "look" ? "Appearance" : root.page == "modules" ? "Modules"
                                 : root.page == "music" ? "Music" : root.page == "notifications" ? "Notifications" : root.page == "water" ? "Water"
-                                : root.page == "focus" ? "Focus" : root.page == "prayer" ? "Prayer" : root.page == "day" ? "Day Progress" : root.page == "system" ? "System" : "Claude Code";
+                                : root.page == "focus" ? "Focus" : root.page == "prayer" ? "Prayer" : root.page == "day" ? "Day Progress" : root.page == "system" ? "System" : root.page == "accounts" ? "Accounts" : "Claude Code";
                             color: K.ink;
                             font-size: 24px;
                             font-weight: 700;
@@ -860,6 +958,7 @@ export component SettingsWindow inherits Window {
                                 : root.page == "focus" ? "Pomodoro rounds and breaks."
                                 : root.page == "prayer" ? "Today's prayer times (Kemenag), worked out on this PC."
                                 : root.page == "day" ? "How much of your day, week, month and year has gone."
+                                : root.page == "accounts" ? "The Claude Desktop, Claude Code and Codex accounts the island switches between."
                                 : root.page == "system" ? "Small notices for what changes on this PC."
                                 : "Answer Claude Code's permission requests from the island.";
                             color: K.hint;
@@ -1348,6 +1447,28 @@ export component SettingsWindow inherits Window {
                             clicked => { root.claude-connect(!root.s.claude-installed); }
                         }
                     }
+                }
+                if root.page == "accounts" && root.account-note != "" : Text { text: root.account-note; color: #ff9f0a; font-size: 12.5px; wrap: word-wrap; }
+                if root.page == "accounts" : Heading { text: "CLAUDE DESKTOP"; }
+                if root.page == "accounts" : AccountsCard {
+                    service: "desktop";
+                    rows: root.accounts-desktop;
+                    add-hint: "Switch to it on the island's Accounts tab, then sign in to Claude.";
+                    act(a, id, v) => { root.account-act(a, id, v); }
+                }
+                if root.page == "accounts" : Heading { text: "CLAUDE CODE"; }
+                if root.page == "accounts" : AccountsCard {
+                    service: "claude";
+                    rows: root.accounts-claude;
+                    add-hint: "A terminal opens to sign it in.";
+                    act(a, id, v) => { root.account-act(a, id, v); }
+                }
+                if root.page == "accounts" : Heading { text: "CODEX"; }
+                if root.page == "accounts" : AccountsCard {
+                    service: "codex";
+                    rows: root.accounts-codex;
+                    add-hint: "A terminal opens to sign it in.";
+                    act(a, id, v) => { root.account-act(a, id, v); }
                 }
             }
         }

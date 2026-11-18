@@ -94,6 +94,260 @@ pub fn needs_confirm(id: &str) -> bool {
     load().iter().any(|a| a.id == id && a.service == "desktop" && !a.active)
 }
 
+// ── Managing the accounts (Settings > Accounts) ─────────────────────────────
+// What NotchDeck's window did: who each slot is signed in as, add, rename,
+// remove, sign in. Tokens are never read out, shown or copied: only the
+// account's e-mail and id that Claude Code / Codex keep beside them.
+
+/// One account as Settings shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Managed {
+    pub id: String,
+    pub service: String,
+    pub name: String,
+    pub active: bool,
+    pub is_default: bool,
+    /// "someone@x.com", "Saved login", "Not signed in".
+    pub signed_in_as: String,
+    /// A warning: "Same account as Main" ("" for none).
+    pub warning: String,
+}
+
+fn read_json(p: &Path) -> Option<Value> {
+    serde_json::from_slice(&std::fs::read(p).ok()?).ok()
+}
+
+/// A Claude Code slot's account: (uuid, e-mail) from its `.claude.json`
+/// (for the default one, %USERPROFILE%\.claude.json beside the folder).
+fn claude_account(dir: &Path, is_default: bool) -> Option<(String, String)> {
+    let v = read_json(&dir.join(".claude.json")).filter(|v| v.get("oauthAccount").is_some()).or_else(|| is_default.then(|| read_json(&home().join(".claude.json"))).flatten())?;
+    let a = v.get("oauthAccount")?;
+    Some((a.get("accountUuid")?.as_str()?.to_string(), a.get("emailAddress").and_then(|x| x.as_str()).unwrap_or("").to_string()))
+}
+
+/// A Codex slot's e-mail, from the id token's payload in `auth.json` (the
+/// token itself is not kept or shown; an API key says so).
+fn codex_account(dir: &Path) -> Option<String> {
+    let v = read_json(&dir.join("auth.json"))?;
+    if let Some(t) = v.get("tokens").and_then(|t| t.get("id_token")).and_then(|t| t.as_str()) {
+        let payload = t.split('.').nth(1)?;
+        let bytes = base64url(payload)?;
+        let claims: Value = serde_json::from_slice(&bytes).ok()?;
+        return claims.get("email").and_then(|e| e.as_str()).map(str::to_string);
+    }
+    v.get("OPENAI_API_KEY").and_then(|k| k.as_str()).filter(|k| !k.is_empty()).map(|_| "API key".to_string())
+}
+
+fn base64url(s: &str) -> Option<Vec<u8>> {
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'-' | b'+' => 62,
+            b'_' | b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let clean: Vec<u8> = s.bytes().filter(|c| *c != b'=').collect();
+    let mut out = Vec::with_capacity(clean.len() * 3 / 4);
+    for chunk in clean.chunks(4) {
+        let mut n = 0u32;
+        for (i, c) in chunk.iter().enumerate() {
+            n |= val(*c)? << (18 - 6 * i);
+        }
+        out.push((n >> 16) as u8);
+        if chunk.len() > 2 {
+            out.push((n >> 8) as u8);
+        }
+        if chunk.len() > 3 {
+            out.push(n as u8);
+        }
+    }
+    Some(out)
+}
+
+/// Every account with who it is signed in as, and a warning when two slots
+/// of one app are the same account (two logins of one account: switching
+/// between them changes nothing).
+pub fn managed() -> Vec<Managed> {
+    let Some(state) = read_json(&state_path()) else { return Vec::new() };
+    let active = state.get("active").cloned().unwrap_or(Value::Null);
+    let list = state.get("accounts").and_then(|l| l.as_array()).cloned().unwrap_or_default();
+    let mut out: Vec<Managed> = Vec::new();
+    let mut seen: Vec<(String, String, String)> = Vec::new(); // (service, account key, slot name)
+    for a in &list {
+        let (Some(id), Some(service)) = (a.get("id").and_then(|x| x.as_str()), a.get("service").and_then(|x| x.as_str())) else { continue };
+        if !SERVICES.iter().any(|(s, _)| *s == service) {
+            continue;
+        }
+        let name = a.get("name").and_then(|x| x.as_str()).unwrap_or(id).to_string();
+        let is_default = a.get("isDefault").and_then(|x| x.as_bool()).unwrap_or(false);
+        let is_active = active.get(service).and_then(|x| x.as_str()) == Some(id);
+        let dir = account_dir(a, id);
+        let (signed_in_as, key) = match service {
+            "claude" => match claude_account(&dir, is_default) {
+                Some((uuid, email)) => (if email.is_empty() { "Signed in".to_string() } else { email }, Some(uuid)),
+                None => ("Not signed in".to_string(), None),
+            },
+            "codex" => match codex_account(&dir) {
+                Some(e) => (e.clone(), Some(e)),
+                None => ("Not signed in".to_string(), None),
+            },
+            _ => {
+                let cfg = if is_active { desktop::support().join("config.json") } else { dir.join("config.json") };
+                let uuid = desktop::account_uuid(&cfg);
+                let has = if is_active { desktop::has_login(&desktop::support()) } else { desktop::slot_has_login(&dir) };
+                (if has { if is_active { "Open in Claude now".into() } else { "Saved login".into() } } else { "Sign in after switching".to_string() }, uuid)
+            }
+        };
+        let warning = match &key {
+            Some(k) => seen.iter().find(|(s, kk, _)| s == service && kk == k).map(|(_, _, other)| format!("Same account as {other}")).unwrap_or_default(),
+            None => String::new(),
+        };
+        if let Some(k) = key {
+            seen.push((service.to_string(), k, name.clone()));
+        }
+        out.push(Managed { id: id.to_string(), service: service.to_string(), name, active: is_active, is_default, signed_in_as, warning });
+    }
+    // A Claude Desktop slot is known by the Claude Code account with its uuid: show that e-mail.
+    let emails: Vec<(String, String)> = list
+        .iter()
+        .filter(|a| a.get("service").and_then(|x| x.as_str()) == Some("claude"))
+        .filter_map(|a| {
+            let id = a.get("id")?.as_str()?;
+            claude_account(&account_dir(a, id), a.get("isDefault").and_then(|x| x.as_bool()).unwrap_or(false))
+        })
+        .collect();
+    for m in out.iter_mut().filter(|m| m.service == "desktop") {
+        let a = list.iter().find(|a| a.get("id").and_then(|x| x.as_str()) == Some(m.id.as_str()));
+        let dir = a.map(|a| account_dir(a, &m.id)).unwrap_or_default();
+        let cfg = if m.active { desktop::support().join("config.json") } else { dir.join("config.json") };
+        if let Some(u) = desktop::account_uuid(&cfg) {
+            if let Some((_, e)) = emails.iter().find(|(uu, e)| *uu == u && !e.is_empty()) {
+                m.signed_in_as = format!("{} · {e}", m.signed_in_as);
+            }
+        }
+    }
+    out
+}
+
+/// Changes the state file: `f` gets its accounts list and active map.
+fn edit_state(f: impl FnOnce(&mut Vec<Value>, &mut serde_json::Map<String, Value>) -> Result<(), String>) -> Result<(), String> {
+    let path = state_path();
+    let mut state: Value = read_json(&path).unwrap_or_else(|| serde_json::json!({ "accounts": [], "active": {} }));
+    let mut list = state.get("accounts").and_then(|l| l.as_array()).cloned().unwrap_or_default();
+    let mut active = state.get("active").and_then(|a| a.as_object()).cloned().unwrap_or_default();
+    f(&mut list, &mut active)?;
+    state["accounts"] = Value::Array(list);
+    state["active"] = Value::Object(active);
+    std::fs::create_dir_all(root()).map_err(|e| e.to_string())?;
+    write_state(&path, &state)
+}
+
+pub fn rename(id: &str, name: &str) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a name, please".into());
+    }
+    edit_state(|list, _| {
+        let a = list.iter_mut().find(|a| a.get("id").and_then(|x| x.as_str()) == Some(id)).ok_or("no such account")?;
+        a["name"] = Value::String(name.to_string());
+        Ok(())
+    })
+}
+
+/// A new slot for `service` named `name`: its own folder; returns its id.
+/// Claude Code / Codex then sign in (`sign_in`); Claude Desktop signs in
+/// after switching to it.
+pub fn add(service: &str, name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() || !SERVICES.iter().any(|(s, _)| *s == service) {
+        return Err("a name, please".into());
+    }
+    let slug: String = name.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect::<String>().split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+    let slug = if slug.is_empty() { "account".to_string() } else { slug };
+    let mut new_id = String::new();
+    edit_state(|list, _| {
+        let taken = |id: &str| list.iter().any(|a| a.get("id").and_then(|x| x.as_str()) == Some(id));
+        let mut id = format!("{service}-{slug}");
+        let mut n = 2;
+        while taken(&id) {
+            id = format!("{service}-{slug}-{n}");
+            n += 1;
+        }
+        let dir = root().join(service).join(&id);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        list.push(serde_json::json!({ "id": id, "service": service, "name": name, "isDefault": false, "dir": dir.to_string_lossy() }));
+        new_id = id;
+        Ok(())
+    })?;
+    Ok(new_id)
+}
+
+/// Takes a slot off the list. Its folder is moved aside to
+/// .accountdeck\_removed (not deleted), so a login is never lost by a click.
+/// Not the Main ones, nor Claude Desktop's slot in use.
+pub fn remove(id: &str) -> Result<(), String> {
+    let mut gone: Option<PathBuf> = None;
+    edit_state(|list, active| {
+        let i = list.iter().position(|a| a.get("id").and_then(|x| x.as_str()) == Some(id)).ok_or("no such account")?;
+        let a = list[i].clone();
+        if a.get("isDefault").and_then(|x| x.as_bool()).unwrap_or(false) {
+            return Err("the Main account stays".into());
+        }
+        let service = a.get("service").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        if service == "desktop" && active.get("desktop").and_then(|x| x.as_str()) == Some(id) {
+            return Err("switch Claude to another account first".into());
+        }
+        gone = Some(account_dir(&a, id));
+        list.remove(i);
+        if active.get(&service).and_then(|x| x.as_str()) == Some(id) {
+            if let Some(main) = list.iter().find(|x| x.get("service").and_then(|s| s.as_str()) == Some(service.as_str()) && x.get("isDefault").and_then(|d| d.as_bool()).unwrap_or(false)) {
+                active.insert(service.clone(), main.get("id").cloned().unwrap_or(Value::Null));
+            }
+        }
+        Ok(())
+    })?;
+    if let Some(dir) = gone.filter(|d| d.exists() && d.starts_with(root())) {
+        let aside = root().join("_removed");
+        let _ = std::fs::create_dir_all(&aside);
+        let stamp = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let _ = std::fs::rename(&dir, aside.join(format!("{}-{stamp}", dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())));
+    }
+    Ok(())
+}
+
+/// Opens a terminal signed in as nobody yet, its config folder set to the
+/// slot's, running the app's own login (Claude Code: /login, Codex: login).
+/// The user finishes it there; nothing of it passes through Kanmuri.
+pub fn sign_in(id: &str) -> Result<(), String> {
+    let state = read_json(&state_path()).ok_or("no accounts set up")?;
+    let a = state.get("accounts").and_then(|l| l.as_array()).and_then(|l| l.iter().find(|a| a.get("id").and_then(|x| x.as_str()) == Some(id))).cloned().ok_or("no such account")?;
+    let service = a.get("service").and_then(|x| x.as_str()).unwrap_or("");
+    let is_default = a.get("isDefault").and_then(|x| x.as_bool()).unwrap_or(false);
+    let dir = account_dir(&a, id);
+    let (var, run) = match service {
+        "claude" => ("CLAUDE_CONFIG_DIR", "claude /login"),
+        "codex" => ("CODEX_HOME", "codex login"),
+        _ => return Err("Claude Desktop signs in after switching to it".into()),
+    };
+    let name = a.get("name").and_then(|x| x.as_str()).unwrap_or(id).replace(['"', '&', '|', '<', '>', '^', '%'], " ");
+    let mut cmd = std::process::Command::new("cmd.exe");
+    cmd.args(["/k", &format!("title Sign in: {name} & echo Sign in as \"{name}\", then type /exit. & {run}")]);
+    if is_default {
+        cmd.env_remove(var);
+    } else {
+        cmd.env(var, &dir);
+    }
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(0x0000_0010) // CREATE_NEW_CONSOLE
+        .current_dir(home())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// Switches to the account. Blocking (a Claude Desktop switch takes several
 /// seconds): call it off the UI thread. Returns a short line for the island.
 pub fn switch(id: &str) -> Result<String, String> {
@@ -608,6 +862,54 @@ mod tests {
         assert_eq!(read_var(), None, "Main removes the variable");
         assert!(load().iter().any(|a| a.id == main.id && a.active));
         println!("round trip ok");
+    }
+
+    /// Add, rename, remove and the same-account warning, in a made-up home
+    /// (USERPROFILE pointed at a scratch folder; run alone:
+    /// cargo test -p kanmuri manage_in_a_scratch_home -- --ignored --test-threads=1).
+    #[test]
+    #[ignore]
+    fn manage_in_a_scratch_home() {
+        let home = scratch("home");
+        let old = std::env::var_os("USERPROFILE");
+        std::env::set_var("USERPROFILE", &home);
+        let main_dir = home.join(".claude");
+        std::fs::create_dir_all(&main_dir).unwrap();
+        std::fs::write(home.join(".claude.json"), r#"{"oauthAccount":{"accountUuid":"u1","emailAddress":"a@x.com"}}"#).unwrap();
+        std::fs::create_dir_all(home.join(".accountdeck")).unwrap();
+        let state = serde_json::json!({ "accounts": [
+            { "id": "claude-default", "service": "claude", "name": "Main", "isDefault": true, "dir": main_dir.to_string_lossy() } ],
+            "active": { "claude": "claude-default" } });
+        std::fs::write(home.join(".accountdeck\\state.json"), state.to_string()).unwrap();
+
+        let id = add("claude", "Second One").unwrap();
+        assert_eq!(id, "claude-second-one");
+        let dir = home.join(".accountdeck\\claude\\claude-second-one");
+        assert!(dir.is_dir());
+        // Signed in to the same account as Main: warned.
+        std::fs::write(dir.join(".claude.json"), r#"{"oauthAccount":{"accountUuid":"u1","emailAddress":"a@x.com"}}"#).unwrap();
+        let m = managed();
+        let second = m.iter().find(|x| x.id == id).unwrap();
+        assert_eq!(second.signed_in_as, "a@x.com");
+        assert_eq!(second.warning, "Same account as Main");
+        rename(&id, "Renamed").unwrap();
+        assert!(load().iter().any(|a| a.id == id && a.name == "Renamed"));
+        assert!(remove("claude-default").is_err(), "Main stays");
+        remove(&id).unwrap();
+        assert!(!load().iter().any(|a| a.id == id));
+        assert!(!dir.exists(), "moved aside");
+        assert_eq!(std::fs::read_dir(home.join(".accountdeck\\_removed")).unwrap().count(), 1, "kept in _removed");
+
+        match old {
+            Some(v) => std::env::set_var("USERPROFILE", v),
+            None => std::env::remove_var("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn base64url_reads_jwt_payloads() {
+        assert_eq!(base64url("eyJlbWFpbCI6ImFAeC5jb20ifQ").unwrap(), br#"{"email":"a@x.com"}"#);
     }
 
     #[test]

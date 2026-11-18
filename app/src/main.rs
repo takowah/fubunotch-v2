@@ -3476,6 +3476,31 @@ fn update_background(ui: &Island) {
     std::thread::spawn(work);
 }
 
+/// Settings > Accounts' three lists, read now, and a line after a failed change.
+fn fill_accounts(win: &SettingsWindow, note: &str) {
+    let all = accounts::managed();
+    let rows = |service: &str| {
+        let v: Vec<AccountSetting> = all
+            .iter()
+            .filter(|m| m.service == service)
+            .map(|m| AccountSetting {
+                id: m.id.as_str().into(),
+                name: m.name.as_str().into(),
+                signed_in_as: m.signed_in_as.as_str().into(),
+                warning: m.warning.as_str().into(),
+                active: m.active,
+                is_default: m.is_default,
+                can_sign_in: m.service != "desktop",
+            })
+            .collect();
+        ModelRc::new(VecModel::from(v))
+    };
+    win.set_accounts_desktop(rows("desktop"));
+    win.set_accounts_claude(rows("claude"));
+    win.set_accounts_codex(rows("codex"));
+    win.set_account_note(note.into());
+}
+
 fn open_settings(ui: &Island) {
     let existing = with_state(|state| state.settings_window.as_ref().map(|w| w.as_weak())).flatten();
     if let Some(win) = existing.and_then(|w| w.upgrade()) {
@@ -3621,9 +3646,16 @@ fn open_settings(ui: &Island) {
         }
     });
     let island = ui.as_weak();
+    let me_for_action = win.as_weak();
     win.on_action(move |what| {
         let Some(ui) = island.upgrade() else { return };
         match what.as_str() {
+            // Settings > Accounts opened: read again (a sign-in may have finished).
+            "accounts.refresh" => {
+                if let Some(win) = me_for_action.upgrade() {
+                    fill_accounts(&win, "");
+                }
+            }
             "background.pick" => {
                 let island = ui.as_weak();
                 std::thread::spawn(move || {
@@ -3659,6 +3691,26 @@ fn open_settings(ui: &Island) {
         if let Some(ui) = island.upgrade() {
             ask_claude_hooks(&ui, install);
         }
+    });
+    // Settings > Accounts: read on open and after each change (files only, quick).
+    fill_accounts(&win, "");
+    let island = ui.as_weak();
+    let me = win.as_weak();
+    win.on_account_act(move |action, id, value| {
+        let (Some(ui), Some(win)) = (island.upgrade(), me.upgrade()) else { return };
+        let done = match action.as_str() {
+            "rename" => accounts::rename(&id, &value),
+            "remove" => accounts::remove(&id),
+            "signin" => accounts::sign_in(&id),
+            // `id` is the service here; Claude Code / Codex sign the new one in at once.
+            "add" => accounts::add(&id, &value).and_then(|new_id| if id == "desktop" { Ok(()) } else { accounts::sign_in(&new_id) }),
+            _ => Ok(()),
+        };
+        if let Err(e) = &done {
+            store::log(&format!("accounts: {action} {id} failed: {e}"));
+        }
+        fill_accounts(&win, &done.err().map(|e| format!("Couldn't {action}: {e}")).unwrap_or_default());
+        refresh(&ui);
     });
     let _ = win.show();
     let weak = win.as_weak();
