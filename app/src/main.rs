@@ -42,36 +42,65 @@ slint::include_modules!();
 
 /// Glow margin around the island (Ice.pad in island.slint).
 /// The gap between the screen's top edge and the island (Ice.top).
-const TOP: f32 = 6.0;
+// Sizes after Mini Island (island.ps1): the capsule at its "Extra large"
+// setting (x 1.5), the notification card and the open list at normal size.
+const TOP: f32 = 8.0;
 /// Room around the island for its glow.
 const GLOW: f32 = 6.0;
-const HIDDEN: (f32, f32) = (64.0, 6.0);
+/// The hidden island: Mini Island's handle.
+const HIDDEN: (f32, f32) = (64.0, 4.0);
 /// The hidden island's hover strip (wider than its bar, easy to point at).
 const HIDDEN_HOVER: (f32, f32) = (200.0, 18.0);
-const COMPACT_IDLE: (f32, f32) = (170.0, 34.0);
-const COMPACT_BUSY: (f32, f32) = (390.0, 38.0);
-/// A notification with a message: a small card showing who, what and the message.
-const COMPACT_NOTICE: (f32, f32) = (420.0, 80.0);
-const NOTICE_RADIUS: f32 = 22.0;
+/// Nothing going on: the idle pill (120 x 30 at x 1.5).
+const COMPACT_IDLE: (f32, f32) = (180.0, 45.0);
+/// Something else on one line (a system notice, a progress).
+const COMPACT_BUSY: (f32, f32) = (300.0, 42.0);
+/// The song while it plays: Mini Island's small pill (148 x 28 at x 1.5).
+const COMPACT_SONG: (f32, f32) = (222.0, 42.0);
+/// A notification: Mini Island's popup ($WIDE_W x $NOTIF_H), a full pill.
+const COMPACT_NOTICE: (f32, f32) = (340.0, 56.0);
+const NOTICE_RADIUS: f32 = 28.0;
+/// The music's notice (a new song, play, pause): the song's popup card.
+const COMPACT_MEDIA: (f32, f32) = (340.0, 88.0);
+const MEDIA_RADIUS: f32 = 24.0;
 /// The music's notices start this long after launch (ms), past the first snapshot.
 const MUSIC_EVENTS_AFTER: u64 = 4_000;
-/// Line's capsule: room for a line of lyrics.
-const COMPACT_LYRIC: (f32, f32) = (480.0, 38.0);
-const COMPACT_LYRIC_TALL: f32 = 58.0;
+/// Line's capsule: as wide as its line (plus the cover and the bars, $MINI_PAD),
+/// between the small pill and $MINI_MAX_W; a longer line is drawn smaller.
+const COMPACT_LYRIC: (f32, f32) = (222.0, 42.0);
+const LYRIC_PAD: f32 = 82.0;
+const LYRIC_MAX_W: f32 = 570.0;
+/// A lyric's width per Latin character at 17.25 px (kana and kanji count twice).
+const LYRIC_CHAR_W: f32 = 8.6;
 /// The row under Line's lyric: a notice with a message, and without.
 const LINE_NOTICE_H: f32 = 54.0;
 const LINE_NOTICE_SHORT_H: f32 = 30.0;
-/// About as many characters as fit on Line's one line at 13 px (Space Mono).
-const LYRIC_ONE_LINE: usize = 44;
-const EXPANDED: (f32, f32) = (580.0, 240.0);
-/// The Music page is roomier: a bigger cover and the wave bar.
-const EXPANDED_MUSIC: (f32, f32) = (620.0, 252.0);
-/// The expanded island grows for a long list (To-do), up to this tall; the
-/// rest scrolls.
-const EXPANDED_MAX_H: f32 = 400.0;
-/// One to-do row, and how many fit the regular height.
-const TODO_PITCH: f32 = 27.0;
-const TODO_ROWS_FIT: usize = 5;
+/// About as many characters as fit on Line's widest capsule.
+const LYRIC_ONE_LINE: usize = 56;
+/// The open list: $WIDE_W wide; its chrome (margins, tabs, footer, edge)
+/// plus the page, each page as tall as its content.
+const EXPANDED: (f32, f32) = (340.0, 179.0);
+const EXPANDED_CHROME: f32 = 93.0;
+/// The Music page: the card ($MEDIA content, 86).
+const EXPANDED_MUSIC: (f32, f32) = (340.0, EXPANDED_CHROME + 86.0);
+/// The Lyrics page: the card ($LYRICS_PAGE_H).
+const EXPANDED_LYRICS: (f32, f32) = (340.0, EXPANDED_CHROME + 196.0);
+/// Notifications: a header and up to four rows ($ITEM_H + 2 each).
+const NOTIF_HEADER_H: f32 = 28.0;
+const NOTIF_ROW_PITCH: f32 = 50.0;
+const NOTIF_ROWS_MAX: usize = 4;
+const NOTIF_EMPTY_H: f32 = 30.0;
+/// Accounts: an app's title, a line of chips, the gap after an app.
+const ACCOUNT_TITLE_H: f32 = 24.0;
+const ACCOUNT_LINE_H: f32 = 34.0;
+const ACCOUNT_GAP_H: f32 = 6.0;
+/// The room a line of chips has, and a chip's width without its name.
+const ACCOUNT_LINE_W: f32 = 318.0;
+const ACCOUNT_CHIP_PAD: f32 = 59.0;
+/// A name's width per character at 13 px semibold.
+const ACCOUNT_CHAR_W: f32 = 7.4;
+/// Mini Island's $MAX_ISLAND_H.
+const EXPANDED_MAX_H: f32 = 440.0;
 /// Finished tasks shown in the log (more are kept).
 const TODO_LOG_SHOWN: usize = 100;
 /// How long a Windows notification floats on the capsule, at least.
@@ -109,7 +138,7 @@ fn hide_after(s: &Settings) -> u64 {
 /// region follows once it is done.
 const MORPH_MS: u64 = 450;
 /// The window never changes size: the largest island and its glow.
-const WINDOW: (f32, f32) = (EXPANDED_MUSIC.0 + 2.0 * GLOW + 8.0, TOP + EXPANDED_MAX_H + GLOW + 4.0);
+const WINDOW: (f32, f32) = (LYRIC_MAX_W + 2.0 * GLOW + 8.0, TOP + EXPANDED_MAX_H + GLOW + 4.0);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Mode {
@@ -293,7 +322,21 @@ fn accent_of(source: &str, kind: Kind) -> slint::Color {
     if kind == Kind::Ask {
         return slint::Color::from_rgb_u8(0xf5, 0xb5, 0x42);
     }
-    const TONES: [(u8, u8, u8); 5] = [(0x5f, 0xd4, 0xff), (0xb8, 0xe8, 0xff), (0x7c, 0xf2, 0xd0), (0xc4, 0xb5, 0xff), (0x9f, 0xc8, 0xff)];
+    // Mini Island takes an app's colour from its icon; without icons, a few
+    // known apps get theirs, the rest one of Mini Island's spare colours.
+    let known = match source.to_lowercase().as_str() {
+        s if s.contains("claude") => Some((0xd9, 0x77, 0x57)),
+        s if s.contains("discord") => Some((0x58, 0x65, 0xf2)),
+        s if s.contains("whatsapp") => Some((0x25, 0xd3, 0x66)),
+        s if s.contains("telegram") => Some((0x2a, 0xab, 0xee)),
+        s if s.contains("wechat") => Some((0x07, 0xc1, 0x60)),
+        s if s.contains("slack") => Some((0xe0, 0x1e, 0x5a)),
+        _ => None,
+    };
+    if let Some((r, g, b)) = known {
+        return slint::Color::from_rgb_u8(r, g, b);
+    }
+    const TONES: [(u8, u8, u8); 7] = [(0x0a, 0x84, 0xff), (0xbf, 0x5a, 0xf2), (0xff, 0x9f, 0x0a), (0xff, 0x37, 0x5f), (0x64, 0xd2, 0xff), (0x30, 0xd1, 0x58), (0x5e, 0x5c, 0xe6)];
     let h = source.bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
     let (r, g, b) = TONES[(h as usize) % TONES.len()];
     slint::Color::from_rgb_u8(r, g, b)
@@ -322,6 +365,32 @@ fn item(a: &Activity) -> Item {
         progress: a.progress.unwrap_or(0.0),
         has_progress: a.progress.is_some(),
         accent: accent(a),
+        initial: initial(&a.source).into(),
+    }
+}
+
+/// An app's first letter, for its round icon.
+fn initial(app: &str) -> String {
+    app.trim().chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().to_string()).unwrap_or_default()
+}
+
+/// Rounds a square cover's corners (radius a quarter of its side) in place:
+/// the software renderer clips square, so the picture carries its own corners.
+fn round_cover(rgba: &mut [u8], n: u32) {
+    let r = n as f32 / 4.0;
+    for y in 0..n {
+        for x in 0..n {
+            // Distance into the corner's circle, from the nearest corner's centre.
+            let cx = if (x as f32) < r { r } else if (x as f32) > n as f32 - r { n as f32 - r } else { continue };
+            let cy = if (y as f32) < r { r } else if (y as f32) > n as f32 - r { n as f32 - r } else { continue };
+            let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+            let cover = (r - d + 0.5).clamp(0.0, 1.0);
+            let i = ((y * n + x) * 4) as usize;
+            // Straight (not premultiplied) RGBA: only the alpha changes.
+            if let Some(a) = rgba.get_mut(i + 3) {
+                *a = (*a as f32 * cover) as u8;
+            }
+        }
     }
 }
 
@@ -604,31 +673,51 @@ fn morph_to(ui: &Island, state: &mut State, target: (f32, f32)) {
 
 /// Shows what the arbiter and the modules say, sizes the island, sets the one timer.
 /// The Accounts tab: NotchDeck's accounts, one group per app.
-fn set_accounts(ui: &Island, pending: &str) {
+/// Returns the page's height: each app's title, its lines of chips (a line
+/// holds the chips that fit, as Mini Island's wrap panel does), a gap after.
+fn set_accounts(ui: &Island, pending: &str) -> f32 {
     let list = accounts::load();
-    let groups: Vec<AccountGroup> = accounts::SERVICES
-        .iter()
-        .filter_map(|(service, title)| {
-            let rows: Vec<AccountRow> = list
-                .iter()
-                .filter(|a| a.service == *service)
-                .map(|a| AccountRow {
-                    id: a.id.as_str().into(),
-                    name: a.name.as_str().into(),
-                    initial: a.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
-                    // Once NotchDeck has switched, the pending one is the active one.
-                    active: a.active,
-                })
-                .collect();
-            (!rows.is_empty()).then(|| AccountGroup { title: (*title).into(), accounts: ModelRc::new(VecModel::from(rows)) })
-        })
-        .collect();
+    let mut groups: Vec<AccountGroup> = Vec::new();
+    let mut height = 2.0;
+    for (service, title) in accounts::SERVICES.iter() {
+        let rows: Vec<AccountRow> = list
+            .iter()
+            .filter(|a| a.service == *service)
+            .map(|a| AccountRow {
+                id: a.id.as_str().into(),
+                name: a.name.as_str().into(),
+                initial: a.name.trim().chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
+                // Once NotchDeck has switched, the pending one is the active one.
+                active: a.active,
+            })
+            .collect();
+        if rows.is_empty() {
+            continue;
+        }
+        let mut lines: Vec<Vec<AccountRow>> = vec![Vec::new()];
+        let mut used = 0.0;
+        for row in rows {
+            let w = ACCOUNT_CHIP_PAD + ACCOUNT_CHAR_W * row.name.chars().count() as f32;
+            if used > 0.0 && used + w > ACCOUNT_LINE_W {
+                lines.push(Vec::new());
+                used = 0.0;
+            }
+            used += w;
+            lines.last_mut().map(|l| l.push(row));
+        }
+        height += ACCOUNT_TITLE_H + lines.len() as f32 * ACCOUNT_LINE_H + ACCOUNT_GAP_H;
+        for (i, line) in lines.into_iter().enumerate() {
+            groups.push(AccountGroup { title: if i == 0 { (*title).into() } else { SharedString::new() }, accounts: ModelRc::new(VecModel::from(line)) });
+        }
+    }
     let pending = if list.iter().any(|a| a.id == pending && a.active) { "" } else { pending };
     ui.set_account_pending(pending.into());
     if groups.is_empty() {
-        ui.set_account_note(if accounts::installed() { "No accounts in NotchDeck yet." } else { "Install NotchDeck to switch Claude and Codex accounts here." }.into());
+        ui.set_account_note(if accounts::installed() { "No accounts in NotchDeck yet" } else { "Install NotchDeck to switch Claude and Codex accounts here" }.into());
+        height = 30.0;
     }
     ui.set_account_groups(ModelRc::new(VecModel::from(groups)));
+    height
 }
 
 fn refresh(ui: &Island) {
@@ -663,11 +752,29 @@ fn refresh(ui: &Island) {
         ui.set_others(ModelRc::new(VecModel::from(others)));
         ui.set_clock(SharedString::from(local_time::clock_text()));
 
-        // Tabs: Home, then the enabled modules that have a page, in the user's order.
-        let tabs: Vec<TabInfo> = state.settings.tabs().iter().map(|t| TabInfo { id: t.id.into(), label: t.name.into() }).collect();
-        if state.active_tab != "home" && !tabs.iter().any(|t| t.id == state.active_tab.as_str()) {
-            state.active_tab = "home".into();
+        // Tabs, as Mini Island's list: Notifications (when there are some, or
+        // no song), Music and Lyrics (while a song plays, Lyrics when it has
+        // them), Accounts (with NotchDeck).
+        let has_lyrics = state.lyrics.as_ref().is_some_and(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty());
+        let mut tab_ids: Vec<(&str, &str)> = Vec::new();
+        if !state.notifications.is_empty() || !state.music.has_session {
+            tab_ids.push(("notifications", "Notifications"));
         }
+        if state.music.has_session {
+            tab_ids.push(("music", "Music"));
+            if has_lyrics {
+                tab_ids.push(("lyrics", "Lyrics"));
+            }
+        }
+        if accounts::installed() {
+            tab_ids.push(("accounts", "Accounts"));
+        }
+        let tabs: Vec<TabInfo> = tab_ids.iter().map(|(id, name)| TabInfo { id: (*id).into(), label: (*name).into() }).collect();
+        if !tabs.iter().any(|t| t.id == state.active_tab.as_str()) {
+            state.active_tab = tab_ids.first().map_or("notifications", |t| t.0).into();
+        }
+        ui.set_music_notice(view.front.is_some_and(|a| a.id.starts_with("music:event")));
+        ui.set_lyrics_japanese(state.lyrics.as_ref().is_some_and(|l| l.lines.iter().any(|x| x.text.chars().any(|c| matches!(c as u32, 0x3040..=0x30ff | 0x4e00..=0x9fff)))));
         ui.set_tabs(ModelRc::new(VecModel::from(tabs)));
         ui.set_active_tab(state.active_tab.as_str().into());
         let lyrics_on = state.settings.music.lyrics || state.settings.music.lyrics_youtube;
@@ -680,6 +787,7 @@ fn refresh(ui: &Island) {
                 body: n.body.as_str().into(),
                 time: n.time.as_str().into(),
                 accent: accent_of(&n.app, Kind::Alert),
+                initial: initial(&n.app).into(),
             })
             .collect();
         ui.set_notifications(ModelRc::new(VecModel::from(rows)));
@@ -715,13 +823,12 @@ fn refresh(ui: &Island) {
         ui.set_todo_open(state.data.todo.open_count() as i32);
         let shelf_rows: Vec<ShelfRow> = state.data.shelf.iter().map(|f| ShelfRow { name: f.name().into(), detail: f.detail().into() }).collect();
         ui.set_shelf(ModelRc::new(VecModel::from(shelf_rows)));
-        if state.active_tab == "accounts" {
-            set_accounts(ui, &state.account_pending);
-        }
+        let accounts_h = if state.active_tab == "accounts" { set_accounts(ui, &state.account_pending) } else { 0.0 };
         ui.set_drop_hover(state.drop_hover);
         *NOTIF_APPS.lock().unwrap_or_else(|e| e.into_inner()) = state.settings.notifications.filter();
         let rating = state.data.ratings.get(&song_key(&state.music)).copied().unwrap_or(0);
-        if state.active_tab != "music" {
+        // The pin lives on the Lyrics page: leaving it lets the list close again.
+        if state.active_tab != "lyrics" {
             state.held = false;
         }
         ui.set_held(state.held);
@@ -830,24 +937,36 @@ fn refresh(ui: &Island) {
             apply_theme!(ui.global::<Ice>(), theme);
         }
         let size = match state.mode {
-            Mode::Expanded if state.active_tab == "todo" => {
-                let extra = state.data.todo.tasks.len().saturating_sub(TODO_ROWS_FIT) as f32 * TODO_PITCH;
-                (EXPANDED.0, (EXPANDED.1 + extra).min(EXPANDED_MAX_H))
+            // Each page as tall as its content, as Mini Island's list.
+            Mode::Expanded => {
+                let page = match state.active_tab.as_str() {
+                    "music" => EXPANDED_MUSIC.1 - EXPANDED_CHROME,
+                    "lyrics" => EXPANDED_LYRICS.1 - EXPANDED_CHROME,
+                    "accounts" => accounts_h,
+                    _ if state.notifications.is_empty() => NOTIF_EMPTY_H,
+                    _ => NOTIF_HEADER_H + state.notifications.len().min(NOTIF_ROWS_MAX) as f32 * NOTIF_ROW_PITCH,
+                };
+                (EXPANDED.0, (EXPANDED_CHROME + page).min(EXPANDED_MAX_H))
             }
-            Mode::Expanded if state.active_tab == "music" => EXPANDED_MUSIC,
-            Mode::Expanded => EXPANDED,
             Mode::Hidden => HIDDEN,
-            // A long lyric takes a second line, a notice a row underneath.
+            // As wide as the line, a notice a row underneath.
             Mode::Compact if line => {
-                let lyric = if capsule_long { COMPACT_LYRIC_TALL } else { COMPACT_LYRIC.1 };
+                let w = if capsule_line.is_empty() {
+                    COMPACT_SONG.0
+                } else {
+                    (lyric_width(&capsule_line) as f32 * LYRIC_CHAR_W + LYRIC_PAD).clamp(COMPACT_LYRIC.0, LYRIC_MAX_W)
+                };
                 let under = match state.arbiter.view().front.filter(|_| line_notice) {
                     Some(a) if !a.body.trim().is_empty() => LINE_NOTICE_H,
                     Some(_) => LINE_NOTICE_SHORT_H,
                     None => 0.0,
                 };
-                (COMPACT_LYRIC.0, lyric + under)
+                (if under > 0.0 { w.max(COMPACT_NOTICE.0) } else { w }, COMPACT_LYRIC.1 + under)
             }
+            Mode::Compact if notice && front_id.as_deref().is_some_and(|id| id.starts_with("music:event")) => COMPACT_MEDIA,
             Mode::Compact if notice => COMPACT_NOTICE,
+            Mode::Compact if front_kind == Some(Kind::Ask) => COMPACT_NOTICE,
+            Mode::Compact if front_kind == Some(Kind::Ambient) && state.music.has_session => COMPACT_SONG,
             Mode::Compact if front_id.is_some() => COMPACT_BUSY,
             Mode::Compact => COMPACT_IDLE,
         };
@@ -869,7 +988,7 @@ fn refresh(ui: &Island) {
 
         // One timer: the arbiter's next wake, else the clock's next minute.
         let wake = state.arbiter.next_wake(now).map(|t| t.saturating_sub(now));
-        let music_on_screen = (expanded && state.active_tab == "music" || line && state.mode == Mode::Compact) && state.music.playing;
+        let music_on_screen = (expanded && (state.active_tab == "music" || state.active_tab == "lyrics") || line && state.mode == Mode::Compact) && state.music.playing;
         // The lyrics move on more often than the progress bar.
         let page_tick = match (music_on_screen, state.lyrics.as_ref().is_some_and(|l| !l.lines.is_empty())) {
             (true, true) => 250,
@@ -1034,17 +1153,17 @@ fn lyric_lines(state: &mut State) -> Option<ModelRc<LyricLine>> {
 }
 
 /// The line the capsule shows while Line holds: the lyric being sung, else
-/// the song.
+/// nothing (the capsule then runs the song's title and artist, as Mini
+/// Island's small pill does between lines).
 fn capsule_lyric(state: &State) -> String {
     let snap = &state.music;
     if let Some(l) = state.lyrics.as_ref().filter(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty()) {
         let shift = island_lyrics::intro_shift(snap.duration, l.duration) + state.lyrics_nudge;
         if let Some(i) = island_lyrics::line_at(&l.lines, snap.position_now() - shift) {
-            let text = l.lines[i].text.trim();
-            return if text.is_empty() { "♪".into() } else { format!("♪  {text}") };
+            return l.lines[i].text.trim().to_string();
         }
     }
-    format!("♪  {} · {}", snap.title, snap.artist)
+    String::new()
 }
 
 /// A line's width in Latin characters: kana and kanji count twice.
@@ -1127,8 +1246,11 @@ fn on_music(ui: &Island, snap: music::Snapshot) {
         let now = now_ms(state.started);
         if state.music.art != snap.art {
             state.music_art = snap.art.as_ref().and_then(|rgba| {
-                let px = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba, music::ART_PX, music::ART_PX);
-                (rgba.len() == (music::ART_PX * music::ART_PX * 4) as usize).then(|| slint::Image::from_rgba8(px))
+                (rgba.len() == (music::ART_PX * music::ART_PX * 4) as usize).then(|| {
+                    let mut rounded = rgba.clone();
+                    round_cover(&mut rounded, music::ART_PX);
+                    slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rounded, music::ART_PX, music::ART_PX))
+                })
             });
             state.music_accent = snap.art.as_deref().and_then(accent::of_rgba);
         }
@@ -1792,7 +1914,7 @@ fn update_background(ui: &Island) {
         }
         let scale = ui.window().scale_factor().max(0.5);
         let (w, h) = state.size_to;
-        let r = if state.mode == Mode::Expanded { 28.0 } else if (w, h) == COMPACT_NOTICE { NOTICE_RADIUS } else { h / 2.0 };
+        let r = if state.mode == Mode::Expanded || (w, h) == COMPACT_MEDIA { MEDIA_RADIUS } else if (w, h) == COMPACT_NOTICE { NOTICE_RADIUS } else { h / 2.0 };
         let p = theme::palette(look.theme());
         let tint = ((p.body >> 16) as u8, (p.body >> 8) as u8, p.body as u8);
         let key = format!("{}|{w}x{h}|{scale}|{}|{}", look.background, look.background_dim, look.theme());
@@ -2658,17 +2780,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("FUBUNOTCH_V2_DEMO_NOTIFS").is_some() {
         // A few notifications, for checks of the page without real ones.
         with_state(|state| {
+            // Newest first, more than the list shows (its header counts them).
             for (id, app, title, body, time) in [
-                (3, "Discord", "#general", "The build is green, shipping tonight", "00:55"),
-                (2, "WhatsApp", "Mika", "See you at seven?", "00:41"),
-                (1, "Discord", "Ren", "", "00:12"),
+                (6, "Claude", "Build finished", "All 214 tests passed on the release branch", "10:28"),
+                (5, "Discord", "#general", "The build is green, shipping tonight", "10:27"),
+                (4, "WhatsApp", "Mika", "See you at seven? I'll bring the prints", "10:24"),
+                (3, "Claude", "Waiting for you", "Approve the migration before it runs", "10:22"),
+                (2, "Discord", "Ren", "Pushed the fix, have a look when you can", "10:12"),
+                (1, "WhatsApp", "Mum", "Call me later", "09:58"),
             ] {
                 state.notifications.push_back(notif::Notif { id, app: app.into(), aumid: String::new(), title: title.into(), body: body.into(), time: time.into() });
             }
             // the newest one up on the capsule, as a real one would be
-            upsert_json(state, serde_json::json!({ "id": "notif:3", "source": "Discord", "kind": "alert",
-                "title": "#general", "body": "The build is green, shipping tonight. Anyone up for a last look at the release notes?" }), 0);
+            upsert_json(state, serde_json::json!({ "id": "notif:6", "source": "Claude", "kind": "alert",
+                "title": "Build finished", "body": "All 214 tests passed on the release branch, ready to ship" }), 0);
         });
+    }
+    // FUBUNOTCH_V2_DEMO_VOLUME=<0..100>: a player volume, to see the music
+    // card's volume row (FubuNotch doesn't read the player's volume yet).
+    if let Some(v) = std::env::var("FUBUNOTCH_V2_DEMO_VOLUME").ok().and_then(|v| v.parse::<f32>().ok()) {
+        ui.set_volume((v / 100.0).clamp(0.0, 1.0));
     }
     if std::env::var_os("FUBUNOTCH_V2_DEMO_MUSIC").is_some() {
         // A song with lyrics, for checks of the Music page without touching the player.
@@ -2687,6 +2818,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 repeat: Some(music::Repeat::All),
                 ..Default::default()
             };
+            // Now playing, as a real song would be (the capsule's song pill).
+            upsert_json(state, serde_json::json!({ "id": "music:now", "source": "demo", "kind": "ambient",
+                "title": format!("♪ {}", state.music.title), "body": state.music.artist }), 0);
             // A made-up cover in one colour (FUBUNOTCH_V2_DEMO_ART=rrggbb, pink by default):
             // a diagonal shade and a pale disc, enough to check the island taking its colour.
             let hex = std::env::var("FUBUNOTCH_V2_DEMO_ART").unwrap_or_else(|_| "ff5fa2".into());
@@ -2704,7 +2838,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             state.music_accent = accent::of_rgba(&art);
-            state.music_art = Some(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&art, n, n)));
+            let mut rounded = art.clone();
+            round_cover(&mut rounded, n);
+            state.music_art = Some(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rounded, n, n)));
             state.music.art = Some(art);
             // =nolyrics: the song without; FUBUNOTCH_V2_LINE: Line on.
             state.line_held = std::env::var_os("FUBUNOTCH_V2_LINE").is_some();
@@ -2712,9 +2848,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 state.lyrics = Some(island_lyrics::Lyrics { status: island_lyrics::Status::None, lines: vec![], duration: 0.0 });
                 return;
             }
+            // =ja: the lines in Japanese (the lyrics card then offers あ and Ro).
+            let latin = ["koko wa kitto yume no naka ne", "", "mezameta no wa uso mitai da, hontou no kimi wa doko ni iru no ka mada wakaranai mama", "kimi no koe ga kikoeru", "tooku made"];
+            let japanese = ["ここはきっと夢の中ね", "", "目覚めたのは嘘みたいだ", "君の声が聞こえる", "遠くまで"];
+            let words = if std::env::var("FUBUNOTCH_V2_DEMO_MUSIC").is_ok_and(|v| v == "ja") { japanese } else { latin };
             state.lyrics = Some(island_lyrics::Lyrics {
                 status: island_lyrics::Status::Found,
-                lines: ["koko wa kitto yume no naka ne", "", "mezameta no wa uso mitai da, hontou no kimi wa doko ni iru no ka mada wakaranai mama", "kimi no koe ga kikoeru", "tooku made"]
+                lines: words
                     .iter()
                     .zip([0.25, 4.78, 10.0, 14.5, 18.0])
                     .map(|(t, s)| island_lyrics::Line { time: s, text: t.to_string() })
@@ -2747,7 +2887,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             snapshot::advance(4000);
             let size = with_state(|s| s.settings_window.as_ref().map(|w| {
                 let p = w.window().size();
-                (p.width as f32 / snapshot::SCALE, p.height as f32 / snapshot::SCALE)
+                (p.width as f32 / snapshot::scale(), p.height as f32 / snapshot::scale())
             }))
             .flatten()
             .filter(|s| s.0 > 10.0)
@@ -2818,7 +2958,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let n = std::cell::Cell::new(0usize);
         let cycle = Timer::default();
         cycle.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(900), move || {
-            const TABS: [&str; 7] = ["home", "music", "notifications", "focus", "water", "todo", "shelf"];
+            const TABS: [&str; 4] = ["notifications", "music", "lyrics", "accounts"];
             if let Some(ui) = weak.upgrade() {
                 // A click activates the island: do the same.
                 ui.window().with_winit_window(|w: &winit::window::Window| w.focus_window());

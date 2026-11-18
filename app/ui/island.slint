@@ -1,15 +1,16 @@
-// The island. "Fubuki icy": deep navy body, ice-white text, a cyan → ice →
-// blue gradient frame. One shape that morphs: a thin glowing bar (hidden), a
-// capsule (compact), a card (expanded). Its size and radius spring between
-// modes; pages and contents fade and slide. The window itself never changes
-// size: Rust clips it to the island with a window region, so the rest of the
-// top of the screen stays clickable.
+// The island, drawn after Mini Island for Windows (its look and sizes, read
+// from its own code and from pictures of it on the owner's screen): a near
+// solid dark body whose left side takes the colour of what it shows (the
+// app's, the song's), one shape that morphs between a hidden handle, a
+// capsule (a notification, the song, the line being sung) and an open list
+// with tabs (Notifications, Music, Lyrics, Accounts). Its size and radius
+// spring between modes; pages fade. The window itself never changes size:
+// Rust clips it to the island with a window region.
+//
+// The capsule is drawn at Mini Island's "Extra large" size (Mini.k = 1.5);
+// the notification card and the open list at its normal size.
 
-// Space Mono (SIL OFL 1.1, assets/fonts/OFL.txt), built into the app.
-import "../assets/fonts/SpaceMono-Regular.ttf";
-import "../assets/fonts/SpaceMono-Bold.ttf";
 import { Ice } from "theme.slint";
-import { Sprites } from "sprites.slint";
 export { Ice }
 
 export struct ActionInfo {
@@ -28,6 +29,8 @@ export struct Item {
     progress: float,
     has-progress: bool,
     accent: color,
+    // The first letter of the app, for its round icon.
+    initial: string,
 }
 
 export struct TabInfo {
@@ -43,7 +46,8 @@ export struct AccountRow {
     active: bool,
 }
 
-// One column of the Accounts tab: an app and its accounts.
+// One app's accounts on the Accounts tab: a title and a line of chips. A
+// line with no title carries on the one above (its chips didn't fit).
 export struct AccountGroup {
     title: string,
     accounts: [AccountRow],
@@ -116,6 +120,8 @@ export struct NotifRow {
     body: string,
     time: string,
     accent: color,
+    // The first letter of the app, for its round icon.
+    initial: string,
 }
 
 export struct LyricLine {
@@ -155,145 +161,263 @@ export struct Music {
     rating: int,
 }
 
+// ── Mini Island's look ───────────────────────────────────────────────────────
+
+global Mini {
+    // Text: white, then three greys (a popup's message, a list's message and
+    // an artist, labels and times), and the faintest (Clear all, the gear).
+    out property <color> ink: #ffffff;
+    out property <color> text-2: #d2d2d7;
+    out property <color> text-3: #c2c2c7;
+    out property <color> label: #b4b4ba;
+    out property <color> faint: #a1a1a6;
+    // The body (near black, 95 % solid) and its edge.
+    out property <color> base: #0b0b0d;
+    out property <float> solid: 0.949;
+    out property <color> edge: #ffffff29;
+    // The open list's colour (notifications, accounts).
+    out property <color> neutral: #6e6e76;
+    // The hidden island's handle.
+    out property <color> handle: #9a9aa0;
+    out property <string> icons: "Segoe Fluent Icons";
+    // The capsule's size setting: "Extra large".
+    out property <float> k: 1.5;
+}
+
+global Paint {
+    // An app's or a song's colour used for text: moved toward white until it
+    // reads on the dark island.
+    public pure function readable(c: color) -> color {
+        let l = (0.2126 * c.red + 0.7152 * c.green + 0.0722 * c.blue) / 255;
+        if l >= 0.62 {
+            return c;
+        }
+        let t = (0.62 - l) / (1 - l);
+        return rgb(c.red + (255 - c.red) * t, c.green + (255 - c.green) * t, c.blue + (255 - c.blue) * t);
+    }
+    // Toward white by t (0..1).
+    public pure function lift(c: color, t: float) -> color {
+        return rgb(c.red + (255 - c.red) * t, c.green + (255 - c.green) * t, c.blue + (255 - c.blue) * t);
+    }
+    // Darker by f (a share of each channel).
+    public pure function shade(c: color, f: float) -> color {
+        return rgb(c.red * f, c.green * f, c.blue * f);
+    }
+}
+
+// Segoe Fluent Icons' glyphs (the ones Mini Island uses).
+global Glyphs {
+    out property <string> bell: "\u{EA8F}";
+    out property <string> music: "\u{EC4F}";
+    out property <string> lyrics: "\u{E8E4}";
+    out property <string> people: "\u{E716}";
+    out property <string> desktop: "\u{E7F4}";
+    out property <string> prompt: "\u{E756}";
+    out property <string> code: "\u{E943}";
+    out property <string> gear: "\u{E713}";
+    out property <string> prev: "\u{E892}";
+    out property <string> next: "\u{E893}";
+    out property <string> play: "\u{E768}";
+    out property <string> pause: "\u{E769}";
+    out property <string> note: "\u{E8D6}";
+    out property <string> volume: "\u{E767}";
+    out property <string> pin: "\u{E718}";
+    out property <string> pinned: "\u{E840}";
+    out property <string> moon: "\u{E708}";
+    out property <string> video: "\u{E714}";
+    out property <string> line: "\u{E90B}";
+    public pure function tab(id: string) -> string {
+        return id == "notifications" ? "\u{EA8F}" : id == "music" ? "\u{EC4F}" : id == "lyrics" ? "\u{E8E4}" : id == "accounts" ? "\u{E716}" : "\u{E8D6}";
+    }
+    public pure function service(title: string) -> string {
+        return title == "Claude Desktop" ? "\u{E7F4}" : title == "Claude Code" ? "\u{E756}" : "\u{E943}";
+    }
+}
+
 // ── Small parts ──────────────────────────────────────────────────────────────
 
-// The mascot: the theme's 32 x 32 pixel chibi, drawn crisp at any size.
-component Mascot inherits Rectangle {
-    // A frame: idle, idle2, blink, twitch, wag1, wag2, happy, sleep, walk1-4, climb1-2, sit.
-    in property <string> mood: "idle";
-    // Where it stands and hops, in sprite pixels (a 32-px grid: size / 32 each).
-    in property <int> dx;
-    in property <int> dy;
-    in property <bool> left;
-    in property <length> size: 24px;
-    // A soft disc behind: dark-haired members stay visible on a dark island.
-    in property <bool> halo;
-    callback clicked();
-    width: size;
-    height: size;
-    if root.halo : Rectangle {
-        width: parent.width * 0.86;
-        height: self.width;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2 + parent.height * 0.04;
-        border-radius: self.width / 2;
-        background: Ice.frost.with-alpha(0.16);
-    }
-    Image {
-        width: parent.width;
-        height: parent.height;
-        image-rendering: pixelated;
-        source: Sprites.pick(Ice.theme, root.mood, root.left);
-        x: root.dx * root.size / 32;
-        y: root.dy * root.size / 32;
-    }
-    TouchArea { clicked => { root.clicked(); } }
-}
-
-// The icon of a system notice in the capsule, after v1's overlay chip:
-// headphones, the charger's bolt (green), Caps Lock (amber when on), a
-// device that went away dimmed.
-component SysIcon inherits Path {
-    in property <string> name;
-    width: 16px;
-    height: 16px;
-    viewbox-width: 24;
-    viewbox-height: 24;
-    stroke-width: 1.8px;
-    stroke: name == "bolt" ? #34d399 : name == "caps-on" ? #fbbf24
-        : (name == "headphones-off" || name == "wifi-off" || name == "volume-off" || name == "caps-off") ? Ice.dim : Ice.ink;
-    commands: name == "headphones" ? "M 4 15 V 12 A 8 8 0 0 1 20 12 V 15 M 4 15 H 7 V 20 H 4 Z M 20 15 H 17 V 20 H 20 Z"
-        : name == "headphones-off" ? "M 4 15 V 12 A 8 8 0 0 1 20 12 V 15 M 4 15 H 7 V 20 H 4 Z M 20 15 H 17 V 20 H 20 Z M 3 3 L 21 21"
-        : name == "bolt" ? "M 13 2 L 5 13 H 11 L 10 22 L 19 10 H 13 Z"
-        : name == "battery" ? "M 3 8 H 18 V 16 H 3 Z M 21 11 V 13 M 6 11 V 13"
-        : name == "wifi" ? "M 2 9 A 15 15 0 0 1 22 9 M 5 12.5 A 10 10 0 0 1 19 12.5 M 8.5 16 A 5 5 0 0 1 15.5 16 M 12 19.5 V 20"
-        : name == "wifi-off" ? "M 2 9 A 15 15 0 0 1 22 9 M 5 12.5 A 10 10 0 0 1 19 12.5 M 8.5 16 A 5 5 0 0 1 15.5 16 M 3 3 L 21 21"
-        : name == "keyboard" ? "M 3 6 H 21 V 18 H 3 Z M 7 10 H 8 M 11 10 H 12 M 15 10 H 16 M 8 14 H 16"
-        : name == "caps-on" || name == "caps-off" ? "M 12 4 L 4 13 H 8 V 19 H 16 V 13 H 20 Z"
-        : name == "volume-off" ? "M 4 9 H 8 L 13 5 V 19 L 8 15 H 4 Z M 16 9 L 21 14 M 21 9 L 16 14"
-        : "M 4 9 H 8 L 13 5 V 19 L 8 15 H 4 Z M 16 9 A 4 4 0 0 1 16 15 M 18.5 6.5 A 7.5 7.5 0 0 1 18.5 17.5";
-}
-
-// A pane of frosted glass inside the island: near solid (what sits on it,
-// a chart or a row of text, must read over any screen behind the see-through
-// body) with a hairline edge, one shape (no stacked layers).
-component Panel inherits Rectangle {
-    in property <bool> lit;
-    border-radius: 14px;
-    background: (root.lit ? Ice.body-hi.mix(Ice.ink, 0.88) : Ice.body-hi).with-alpha(0.94);
-    border-width: 1px;
-    border-color: Ice.ink.with-alpha(root.lit ? 0.18 : 0.10);
-    animate background, border-color { duration: 150ms; }
-}
-
-component Dot inherits Rectangle {
-    in property <color> accent;
-    width: 7px;
-    height: 7px;
-    border-radius: 3.5px;
-    background: accent;
-}
-
-// A small uppercase label, in the way of a HUD.
-component Hud inherits Text {
-    color: Ice.glow.with-alpha(0.85);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1.4px;
+component Glyph inherits Text {
+    width: 100%;
+    height: 100%;
+    font-family: Mini.icons;
+    horizontal-alignment: center;
     vertical-alignment: center;
 }
 
-component Bar inherits Rectangle {
-    in property <float> value;
-    in property <color> from: Ice.frost;
-    in property <color> to: Ice.glow;
-    height: 5px;
-    border-radius: 2.5px;
-    background: Ice.ink.with-alpha(0.08);
-    Rectangle {
-        x: 0;
-        width: max(parent.height, parent.width * clamp(value, 0, 1));
-        height: parent.height;
-        border-radius: parent.border-radius;
-        background: @linear-gradient(90deg, root.from 0%, root.to 100%);
-        animate width { duration: 300ms; easing: ease-out; }
+// A horizontal fade inside a rounded shape: the colour strongest at one end,
+// gone after `span` of the width. The software renderer neither rounds
+// gradients nor clips round, so it is a stretched strip (assets/fade.png)
+// laid in rectangles that stay inside the rounded shape, plus a quarter disc
+// in each corner on the strong side.
+component Fade inherits Rectangle {
+    in property <color> tint;
+    in property <float> strength;
+    // The rounded shape's corner radius.
+    in property <length> r;
+    in property <float> span: 1;
+    // Strongest at the right end.
+    in property <bool> mirror;
+    // Whole pixels: a corner and the band beside it meet without a seam.
+    property <length> rr: floor(min(self.r, self.height / 2) / 1px) * 1px;
+    property <length> sw: max(self.rr + 1px, self.width * self.span);
+    // How far into the 128-pixel strip a corner reaches.
+    property <int> skip: min(127, round(128 * self.rr / self.sw));
+    Image {
+        x: root.mirror ? root.width - root.sw : 0px;
+        y: root.rr;
+        width: root.sw;
+        height: max(0px, root.height - 2 * root.rr);
+        source: root.mirror ? @image-url("../assets/fade-r.png") : @image-url("../assets/fade.png");
+        image-fit: fill;
+        colorize: root.tint;
+        opacity: root.strength;
+    }
+    for band in 2 : Image {
+        x: root.mirror ? root.width - root.sw : root.rr;
+        y: band == 0 ? 0px : root.height - root.rr;
+        width: max(0px, root.sw - root.rr);
+        height: root.rr;
+        source: root.mirror ? @image-url("../assets/fade-r.png") : @image-url("../assets/fade.png");
+        source-clip-x: root.mirror ? 0 : root.skip;
+        source-clip-width: 128 - root.skip;
+        image-fit: fill;
+        colorize: root.tint;
+        opacity: root.strength;
+    }
+    for corner in 2 : Path {
+        x: root.mirror ? root.width - root.rr : 0px;
+        y: corner == 0 ? 0px : root.height - root.rr;
+        width: root.rr;
+        height: root.rr;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 1;
+        viewbox-height: 1;
+        commands: root.mirror
+            ? (corner == 0 ? "M 0 1 L 1 1 A 1 1 0 0 0 0 0 Z" : "M 0 0 L 1 0 A 1 1 0 0 1 0 1 Z")
+            : (corner == 0 ? "M 1 1 L 0 1 A 1 1 0 0 1 1 0 Z" : "M 1 0 L 0 0 A 1 1 0 0 0 1 1 Z");
+        // The strip's alpha where the band beside it starts: no step between them.
+        fill: root.tint.with-alpha(root.strength * (1 - root.rr / root.sw));
+        stroke: transparent;
     }
 }
 
-// The song's progress as water, after Mini Island for Windows' (github.com/
-// nkzwsn/dynamic-island-windows, MIT: the wave shape and its numbers): three layers of waves
+// Mini Island's row and card fill: the colour from the left, faint by three
+// quarters, and (lit) a touch of white at the right end.
+component Tinted inherits Rectangle {
+    in property <color> tint;
+    in property <bool> lit;
+    border-radius: 14px;
+    background: root.lit ? #ffffff05 : transparent;
+    Fade {
+        width: parent.width;
+        height: parent.height;
+        r: root.border-radius;
+        tint: root.tint;
+        strength: root.lit ? 0.37 : 0.18;
+        span: root.lit ? 1.0 : 0.95;
+    }
+    if root.lit : Fade {
+        width: parent.width;
+        height: parent.height;
+        r: root.border-radius;
+        tint: #ffffff;
+        strength: 0.06;
+        span: 0.25;
+        mirror: true;
+    }
+}
+
+// An app's round icon: its colour, a little darker, and its first letter.
+component AppIcon inherits Rectangle {
+    in property <color> accent;
+    in property <string> initial;
+    in property <length> size: 34px;
+    width: root.size;
+    height: root.size;
+    border-radius: root.size / 2;
+    background: root.accent;
+    Text {
+        width: 100%;
+        height: 100%;
+        text: root.initial == "" ? "?" : root.initial;
+        color: Mini.ink;
+        font-size: root.size * 0.45;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// The song's cover, rounded (Rust rounds the picture's corners: the software
+// renderer clips square), or a note on the song's colour.
+component Cover inherits Rectangle {
+    in property <Music> music;
+    in property <color> accent;
+    in property <length> size: 40px;
+    in property <length> glyph-size: 16px;
+    width: root.size;
+    height: root.size;
+    border-radius: root.size / 4;
+    background: root.music.has-art ? transparent : Paint.shade(root.accent, 0.6);
+    if root.music.has-art : Image { source: root.music.art; width: parent.width; height: parent.height; image-fit: cover; }
+    if !root.music.has-art : Glyph { text: Glyphs.note; font-size: root.glyph-size; color: Mini.ink; }
+}
+
+// Three bars that bob while music plays (Mini Island's "bars"), each on its
+// own beat, rising from the bottom.
+component Equalizer inherits Rectangle {
+    in property <bool> playing;
+    in property <color> tint: Mini.ink;
+    in property <length> bar-w: 3px;
+    in property <length> bar-h: 12px;
+    width: 3 * (root.bar-w + root.bar-w * 2 / 3);
+    height: root.bar-h;
+    for i in [0, 1, 2] : Rectangle {
+        property <float> beat: [420, 560, 360][i];
+        property <float> phase: root.playing ? mod((animation-tick() / 1ms + 3000 - i * 90) / self.beat, 2) : 0;
+        property <float> level: root.playing ? 0.3 + 0.7 * (self.phase < 1 ? self.phase : 2 - self.phase) : 0.35;
+        x: root.bar-w / 3 + i * (root.bar-w + root.bar-w * 2 / 3);
+        width: root.bar-w;
+        height: root.bar-h * self.level;
+        y: root.height - self.height;
+        border-radius: root.bar-w / 2;
+        background: root.tint;
+    }
+}
+
+// The song's progress as water, after Mini Island's: three layers of waves
 // in the cover's colour ride the played part of the bar, slow and long at the
 // back, short and quicker in front; they swell and settle on their own and
-// lie down when the song pauses. Redrawn 20 times a second, only while playing on screen.
+// lie down when the song pauses. Redrawn 20 times a second, only while
+// playing on screen. The bar is the song's colour, the rest a thin line, the
+// knob the song's colour in a white ring.
 component WaveBar inherits Rectangle {
     in property <float> value;
     in property <bool> playing;
-    // On screen (the Music page open): the clock runs only then.
+    // On screen: the clock runs only then.
     in property <bool> live;
-    in property <color> tint: Ice.glow;
-    height: 24px;
-    // The bar's line sits near the bottom; the waves rise above it.
-    property <float> base: self.height / 1px - 4;
-    property <float> fill: max(6, self.width / 1px * clamp(root.value, 0, 1));
+    in property <color> tint: Mini.ink;
+    // The small one (the capsule): a thin bar, a small knob, no waves.
+    in property <bool> small;
+    height: root.small ? 9px : 22px;
+    property <length> bar-h: root.small ? 2px : 4px;
+    property <length> knob: root.small ? 5px : 11px;
+    // The bar's middle, near the bottom; the waves rise above it.
+    property <float> base: self.height / 1px - (root.small ? 1.5 : 0) - self.bar-h / 1px / 2;
+    property <float> fill: max(0, self.width / 1px * clamp(root.value, 0, 1));
     animate fill { duration: 300ms; easing: ease-out; }
-    // The waves' clock, ticked by a timer 20 times a second while playing on
-    // screen, still otherwise. A binding on animation-tick() would have the
-    // paths rebuilt every frame (60 a second) whatever the step.
     property <float> t;
     Timer {
         interval: 50ms;
-        running: root.playing && root.live;
+        running: root.playing && root.live && !root.small;
         triggered => { root.t = animation-tick() / 1ms / 1000; }
     }
-    // Calm (lower) while paused.
     property <float> calm: root.playing ? 1 : 0.4;
     animate calm { duration: 700ms; easing: ease-in-out; }
 
-    // Point i of N along a layer's span.
     pure function px(i: int, x0: float, x1: float) -> float { return x0 + (x1 - x0) * i / 24; }
     pure function smooth(u: float) -> float { return u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u); }
-    // Layer l's height at point i: a long wave plus a shorter ripple, sharpened a
-    // little (peaks pointed, troughs flat), tapering to nothing at both ends.
     pure function py(i: int, l: int, x0: float, x1: float, t: float, a: float) -> float {
         let x = root.px(i, x0, x1);
         let tap = max(1, min(22, (x1 - x0) * 0.4));
@@ -307,1052 +431,553 @@ component WaveBar inherits Rectangle {
         let x1 = root.fill * [1, 0.95, 0.86][l];
         return "M " + x0 + " " + root.base + " L " + root.px(0, x0, x1) + " " + root.py(0, l, x0, x1, t, a) + " L " + root.px(1, x0, x1) + " " + root.py(1, l, x0, x1, t, a) + " L " + root.px(2, x0, x1) + " " + root.py(2, l, x0, x1, t, a) + " L " + root.px(3, x0, x1) + " " + root.py(3, l, x0, x1, t, a) + " L " + root.px(4, x0, x1) + " " + root.py(4, l, x0, x1, t, a) + " L " + root.px(5, x0, x1) + " " + root.py(5, l, x0, x1, t, a) + " L " + root.px(6, x0, x1) + " " + root.py(6, l, x0, x1, t, a) + " L " + root.px(7, x0, x1) + " " + root.py(7, l, x0, x1, t, a) + " L " + root.px(8, x0, x1) + " " + root.py(8, l, x0, x1, t, a) + " L " + root.px(9, x0, x1) + " " + root.py(9, l, x0, x1, t, a) + " L " + root.px(10, x0, x1) + " " + root.py(10, l, x0, x1, t, a) + " L " + root.px(11, x0, x1) + " " + root.py(11, l, x0, x1, t, a) + " L " + root.px(12, x0, x1) + " " + root.py(12, l, x0, x1, t, a) + " L " + root.px(13, x0, x1) + " " + root.py(13, l, x0, x1, t, a) + " L " + root.px(14, x0, x1) + " " + root.py(14, l, x0, x1, t, a) + " L " + root.px(15, x0, x1) + " " + root.py(15, l, x0, x1, t, a) + " L " + root.px(16, x0, x1) + " " + root.py(16, l, x0, x1, t, a) + " L " + root.px(17, x0, x1) + " " + root.py(17, l, x0, x1, t, a) + " L " + root.px(18, x0, x1) + " " + root.py(18, l, x0, x1, t, a) + " L " + root.px(19, x0, x1) + " " + root.py(19, l, x0, x1, t, a) + " L " + root.px(20, x0, x1) + " " + root.py(20, l, x0, x1, t, a) + " L " + root.px(21, x0, x1) + " " + root.py(21, l, x0, x1, t, a) + " L " + root.px(22, x0, x1) + " " + root.py(22, l, x0, x1, t, a) + " L " + root.px(23, x0, x1) + " " + root.py(23, l, x0, x1, t, a) + " L " + root.px(24, x0, x1) + " " + root.py(24, l, x0, x1, t, a) + " L " + x1 + " " + root.base + " Z";
     }
-    // Each layer's height: a short bar early in the song gets low waves (no steep mounds).
     pure function amp(l: int) -> float {
-        return min(1, root.fill * 0.11 / 12) * [12, 10, 8][l] * root.calm * (0.72 + 0.28 * sin(root.t * [0.6, 0.9, 1.3][l] * 1rad + [1, 0, 2.1][l] * 1rad));
+        return min(1, root.fill * 0.11 / 12) * [9, 7.5, 6][l] * root.calm * (0.72 + 0.28 * sin(root.t * [0.6, 0.9, 1.3][l] * 1rad + [1, 0, 2.1][l] * 1rad));
     }
 
-    // The track, then the played part.
-    Rectangle { x: 0; y: (root.base - 1) * 1px; width: parent.width; height: 2px; border-radius: 1px; background: Ice.ink.with-alpha(0.10); }
-    Rectangle { x: 0; y: (root.base - 1) * 1px; width: root.fill * 1px; height: 2px; border-radius: 1px; background: root.tint; }
-    for l in [0, 1, 2] : Path {
+    // The rest of the song: a thin line.
+    Rectangle {
         x: 0;
-        y: 0;
+        y: root.base * 1px - self.height / 2;
+        width: parent.width;
+        height: root.small ? 1px : 2px;
+        border-radius: self.height / 2;
+        background: #ffffff38;
+    }
+    if !root.small : Rectangle {
         width: parent.width;
         height: parent.height;
-        viewbox-x: 0;
-        viewbox-y: 0;
-        viewbox-width: parent.width / 1px;
-        viewbox-height: parent.height / 1px;
-        commands: root.layer(l, root.t, root.amp(l));
-        // One colour each (the software renderer fills a path flat): the back
-        // layer pale and thin like a far wave, the front one the song's own.
-        fill: [root.tint.mix(Ice.ink, 0.5).with-alpha(0.38), root.tint.mix(Ice.ink, 0.75).with-alpha(0.55), root.tint.with-alpha(0.80)][l];
-        stroke: transparent;
+        for l in [0, 1, 2] : Path {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            viewbox-x: 0;
+            viewbox-y: 0;
+            viewbox-width: parent.width / 1px;
+            viewbox-height: parent.height / 1px;
+            commands: root.layer(l, root.t, root.amp(l));
+            fill: [Paint.lift(root.tint, 0.5).with-alpha(0.30), Paint.lift(root.tint, 0.2).with-alpha(0.40), root.tint.with-alpha(0.55)][l];
+            stroke: transparent;
+        }
     }
-    // The knob where the song is.
+    // The played part.
     Rectangle {
-        x: root.fill * 1px - 4px;
-        y: (root.base - 4) * 1px;
-        width: 8px;
-        height: 8px;
-        border-radius: 4px;
-        background: Ice.ink;
-    }
-}
-
-// Four bars that dance while music plays (redrawn only while on screen).
-component Equalizer inherits HorizontalLayout {
-    in property <bool> playing;
-    in property <color> tint: Ice.glow;
-    spacing: 2px;
-    alignment: center;
-    for i in [0, 1, 2, 3] : Rectangle {
-        width: 3px;
-        height: root.playing ? 3px + 9px * abs(sin((animation-tick() / 1ms) * 0.36deg + i * 70deg)) : 3px;
-        y: (parent.height - self.height) / 2;
-        border-radius: 1.5px;
+        x: 0;
+        y: root.base * 1px - self.height / 2;
+        width: root.fill * 1px;
+        height: root.bar-h;
+        border-radius: root.bar-h / 2;
         background: root.tint;
     }
-}
-
-// The tab icons, on a 24 x 24 grid (stroked).
-global TabIcons {
-    public pure function of(id: string) -> string {
-        return id == "home" ? "M 3 11.5 L 12 4 L 21 11.5 M 5.5 10 V 20 H 18.5 V 10"
-            : id == "music" ? "M 9 18 V 5.5 L 20 3.5 V 16 M 9 18 A 3 3 0 1 1 3 18 A 3 3 0 1 1 9 18 Z M 20 16 A 3 3 0 1 1 14 16 A 3 3 0 1 1 20 16 Z"
-            : id == "notifications" ? "M 6 16 V 11 A 6 6 0 0 1 18 11 V 16 L 20 18 H 4 Z M 10 21 H 14"
-            : id == "focus" ? "M 12 21 A 8 8 0 1 0 12 5 A 8 8 0 1 0 12 21 Z M 12 9 V 13 L 15 15 M 10 2 H 14"
-            : id == "water" ? "M 12 3 C 12 3 5.5 10.5 5.5 14.5 A 6.5 6.5 0 0 0 18.5 14.5 C 18.5 10.5 12 3 12 3 Z"
-            : id == "todo" ? "M 4 6 L 5.5 7.5 L 8 5 M 11 6 H 20 M 4 12 L 5.5 13.5 L 8 11 M 11 12 H 20 M 4 18 L 5.5 19.5 L 8 17 M 11 18 H 20"
-            : id == "shelf" ? "M 3 13 L 6 5 H 18 L 21 13 V 19 H 3 Z M 3 13 H 8 L 9.5 15.5 H 14.5 L 16 13 H 21"
-            : id == "accounts" ? "M 9 11 A 3.5 3.5 0 1 0 9 4 A 3.5 3.5 0 1 0 9 11 Z M 2.5 20 C 2.5 16 5.5 14 9 14 C 12.5 14 15.5 16 15.5 20 M 16 4.5 A 3.2 3.2 0 0 1 16 10.8 M 18 14.4 C 20.2 15 21.5 17 21.5 20"
-            : "M 5 5 H 19 V 19 H 5 Z";
+    // The knob where the song is: the song's colour in a white ring.
+    Rectangle {
+        x: root.fill * 1px - root.knob / 2;
+        y: root.base * 1px - root.knob / 2;
+        width: root.knob;
+        height: root.knob;
+        border-radius: root.knob / 2;
+        background: root.tint;
+        border-width: root.small ? 1.2px : 2px;
+        border-color: #ffffff;
     }
 }
 
-// A tab: an icon (Home also its name), on a filled pill when chosen.
-component Chip inherits Rectangle {
-    in property <string> id;
-    in property <string> label;
-    in property <bool> active;
-    in property <bool> show-label;
-    in property <color> accent: Ice.glow;
-    callback clicked();
-    width: root.show-label ? t.preferred-width + 44px : 36px;
-    height: 32px;
-    border-radius: 10px;
-    background: active ? Ice.ink.with-alpha(0.16) : (area.has-hover ? Ice.ink.with-alpha(0.07) : transparent);
-    animate background { duration: 200ms; easing: ease-out; }
-    HorizontalLayout {
-        padding-left: root.show-label ? 11px : 0px;
-        alignment: root.show-label ? start : center;
-        spacing: root.show-label ? 7px : 0px;
-        Path {
-            width: 17px;
-            height: 17px;
-            y: (parent.height - self.height) / 2;
-            viewbox-width: 24;
-            viewbox-height: 24;
-            commands: TabIcons.of(root.id);
-            stroke: root.active ? Ice.ink : Ice.dim;
-            stroke-width: 2px;
-            fill: transparent;
-            animate stroke { duration: 200ms; }
-        }
-        t := Text {
-            visible: root.show-label;
-            // A hidden text still takes room in a layout: none when the tab is an icon.
-            width: root.show-label ? self.preferred-width : 0px;
-            text: root.label;
-            color: root.active ? Ice.ink : Ice.dim;
-            font-size: 13px;
-            font-weight: 700;
-            vertical-alignment: center;
-            animate color { duration: 200ms; }
-        }
-    }
-    area := TouchArea { clicked => { root.clicked(); } }
-}
-
-component RoundButton inherits Rectangle {
-    in property <string> glyph;
-    in property <length> size: 24px;
-    in property <length> glyph-size: 12px;
-    in property <bool> primary;
-    callback clicked();
-    width: size;
-    height: size;
-    border-radius: size / 2;
-    background: primary ? (area.has-hover ? Ice.frost : Ice.glow) : (area.has-hover ? Ice.ink.with-alpha(0.16) : Ice.ink.with-alpha(0.08));
-    animate background { duration: 150ms; }
-    Text { text: glyph; color: primary ? Ice.body-lo : Ice.ink; font-size: glyph-size; horizontal-alignment: center; vertical-alignment: center; }
-    area := TouchArea { clicked => { root.clicked(); } }
-}
-
-// Icons drawn as paths on a 24 × 24 grid: the system font lacks most media glyphs.
-global Icons {
-    out property <string> shuffle: "M 3 7 H 6 C 10 7 13 17 17 17 H 21 M 18 14 L 21 17 L 18 20 M 3 17 H 6 C 8 17 9.5 15.5 10.5 13.5 M 13.5 10.5 C 14.5 8.5 15.5 7 17 7 H 21 M 18 4 L 21 7 L 18 10";
-    out property <string> repeat: "M 4 12 V 10 C 4 8 5.5 6.5 7.5 6.5 H 20 M 17 3.5 L 20 6.5 L 17 9.5 M 20 12 V 14 C 20 16 18.5 17.5 16.5 17.5 H 4 M 7 20.5 L 4 17.5 L 7 14.5";
-    out property <string> previous: "M 19 5 L 9 12 L 19 19 Z M 5.5 5 V 19";
-    out property <string> next: "M 5 5 L 15 12 L 5 19 Z M 18.5 5 V 19";
-    out property <string> play: "M 8 4.5 L 19.5 12 L 8 19.5 Z";
-    out property <string> pause: "M 8 5 V 19 M 16 5 V 19";
-    out property <string> gear: "M 12 15 A 3 3 0 1 0 12 9 A 3 3 0 1 0 12 15 Z M 12 2.5 V 5 M 12 19 V 21.5 M 2.5 12 H 5 M 19 12 H 21.5 M 5.3 5.3 L 7 7 M 17 17 L 18.7 18.7 M 5.3 18.7 L 7 17 M 17 7 L 18.7 5.3";
-    out property <string> moon: "M 20 14.5 A 8.5 8.5 0 1 1 9.5 4 A 6.8 6.8 0 0 0 20 14.5 Z";
-    // A screen on its stand: "Watch in island".
-    out property <string> tv: "M 3 6 H 21 V 17 H 3 Z M 8 21 H 16 M 12 17 V 21";
-    out property <string> reset: "M 4.5 12 A 7.5 7.5 0 1 0 7 6.4 M 4 3.5 V 7.5 H 8";
-    out property <string> like: "M 7.5 10.5 V 20 M 7.5 10.5 L 11 3.5 C 12.6 3.5 13.6 4.6 13.2 6.2 L 12.3 10 H 18.4 C 19.6 10 20.4 11.1 20.1 12.2 L 18.5 18.5 C 18.2 19.4 17.5 20 16.6 20 H 3.5 V 10.5 Z";
-    out property <string> dislike: "M 7.5 13.5 V 4 M 7.5 13.5 L 11 20.5 C 12.6 20.5 13.6 19.4 13.2 17.8 L 12.3 14 H 18.4 C 19.6 14 20.4 12.9 20.1 11.8 L 18.5 5.5 C 18.2 4.6 17.5 4 16.6 4 H 3.5 V 13.5 Z";
-}
-
-// A round button with a drawn icon. `on`: a toggle that is active (glows).
-// The docked video's button in the tab row: on while the video is kept shown.
-// Right-click: back to its tab.
-component WatchButton inherits Rectangle {
-    in property <bool> held;
-    in property <string> title;
-    callback clicked();
-    callback back();
-    width: 26px;
-    height: 26px;
-    border-radius: 13px;
-    background: held ? Ice.glow.with-alpha(area.has-hover ? 0.30 : 0.20) : area.has-hover ? Ice.ink.with-alpha(0.12) : transparent;
-    animate background { duration: 150ms; }
-    Path {
-        x: (parent.width - self.width) / 2;
+// The volume: a track, the part up to the level in the song's colour, a
+// white knob.
+component VolumeSlider inherits Rectangle {
+    in property <float> value;
+    in property <color> tint;
+    height: 18px;
+    Rectangle { y: (parent.height - self.height) / 2; height: 4px; border-radius: 2px; background: #ffffff33; }
+    Rectangle {
+        x: 0;
         y: (parent.height - self.height) / 2;
-        width: 15px;
-        height: 15px;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        commands: Icons.tv;
-        stroke: root.held ? Ice.glow : Ice.ink;
-        stroke-width: 1.9px;
-        fill: transparent;
+        width: parent.width * clamp(root.value, 0, 1);
+        height: 4px;
+        border-radius: 2px;
+        background: root.tint;
     }
+    Rectangle {
+        x: parent.width * clamp(root.value, 0, 1) - self.width / 2;
+        y: (parent.height - self.height) / 2;
+        width: 11px;
+        height: 11px;
+        border-radius: 5.5px;
+        background: #ffffff;
+    }
+}
+
+// A round media button: clear until pointed at (`ring`: always a faint disc).
+component MediaButton inherits Rectangle {
+    in property <string> glyph;
+    in property <length> glyph-size: 12px;
+    in property <bool> ring;
+    callback clicked();
+    width: 28px;
+    height: 28px;
+    border-radius: 14px;
+    background: area.has-hover || root.ring ? #ffffff2e : transparent;
+    animate background { duration: 120ms; }
+    Glyph { text: root.glyph; font-size: root.glyph-size; color: Mini.ink; }
+    area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// A small round toggle (the lyrics card's あ, Ro and pin).
+component PageToggle inherits Rectangle {
+    in property <string> label;
+    in property <bool> glyph;
+    in property <bool> on;
+    callback clicked();
+    width: 24px;
+    height: 24px;
+    border-radius: 12px;
+    background: area.has-hover ? #ffffff66 : root.on ? #ffffff55 : #ffffff26;
+    animate background { duration: 120ms; }
+    if root.glyph : Glyph { text: root.label; font-size: 11px; color: root.on ? Mini.ink : #ffffff99; }
+    if !root.glyph : Text {
+        width: 100%;
+        height: 100%;
+        text: root.label;
+        font-size: 10.5px;
+        font-weight: 600;
+        color: root.on ? Mini.ink : #ffffff99;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// The footer's small buttons (the gear): a grey glyph, a faint disc and white when pointed at.
+component FooterButton inherits Rectangle {
+    in property <string> glyph;
+    in property <bool> on;
+    callback clicked();
+    callback right-clicked();
+    width: 22px;
+    height: 18px;
+    border-radius: 9px;
+    background: area.has-hover ? #ffffff2e : transparent;
+    animate background { duration: 180ms; }
+    Glyph { text: root.glyph; font-size: 11px; color: area.has-hover || root.on ? Mini.ink : Mini.faint; animate color { duration: 180ms; } }
     area := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
         pointer-event(e) => {
             if e.button == PointerEventButton.right && e.kind == PointerEventKind.up {
-                root.back();
+                root.right-clicked();
             }
         }
     }
 }
 
-component IconButton inherits Rectangle {
-    in property <string> icon;
-    in property <length> size: 34px;
-    in property <length> icon-size: 18px;
-    in property <bool> primary;
-    in property <bool> on;
-    in property <bool> filled;
-    in property <bool> enabled: true;
-    in property <length> stroke-width: 2px;
-    // The colour of primary and on (the song's on the Music page).
-    in property <color> accent: Ice.glow;
-    callback clicked();
-    width: size;
-    height: size;
-    border-radius: size / 2;
-    background: primary ? (area.has-hover ? accent.mix(Ice.ink, 0.7) : accent)
-        : on ? accent.with-alpha(area.has-hover ? 0.30 : 0.20)
-        : area.has-hover && enabled ? Ice.ink.with-alpha(0.12) : transparent;
-    animate background { duration: 150ms; }
-    property <color> ink: primary ? Ice.body-lo : !enabled ? Ice.dim.with-alpha(0.4) : on ? accent : Ice.ink;
-    if root.primary : Rectangle {
-        x: -4px;
-        y: -4px;
-        width: parent.width + 8px;
-        height: parent.height + 8px;
-        border-radius: self.width / 2;
-        border-width: 1px;
-        border-color: root.accent.with-alpha(area.has-hover ? 0.6 : 0.32);
-        animate border-color { duration: 150ms; }
-    }
-    Path {
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        width: root.icon-size;
-        height: root.icon-size;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        commands: root.icon;
-        stroke: root.ink;
-        stroke-width: root.stroke-width;
-        fill: root.filled ? root.ink : transparent;
-    }
-    area := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+// The icon of a system notice in the capsule: headphones, the charger's
+// bolt (green), Caps Lock (amber when on), a device that went away dimmed.
+component SysIcon inherits Path {
+    in property <string> name;
+    width: 16px;
+    height: 16px;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke-width: 1.8px;
+    stroke: name == "bolt" ? #30d158 : name == "caps-on" ? #ff9f0a
+        : (name == "headphones-off" || name == "wifi-off" || name == "volume-off" || name == "caps-off") ? Mini.label : Mini.ink;
+    commands: name == "headphones" ? "M 4 15 V 12 A 8 8 0 0 1 20 12 V 15 M 4 15 H 7 V 20 H 4 Z M 20 15 H 17 V 20 H 20 Z"
+        : name == "headphones-off" ? "M 4 15 V 12 A 8 8 0 0 1 20 12 V 15 M 4 15 H 7 V 20 H 4 Z M 20 15 H 17 V 20 H 20 Z M 3 3 L 21 21"
+        : name == "bolt" ? "M 13 2 L 5 13 H 11 L 10 22 L 19 10 H 13 Z"
+        : name == "battery" ? "M 3 8 H 18 V 16 H 3 Z M 21 11 V 13 M 6 11 V 13"
+        : name == "wifi" ? "M 2 9 A 15 15 0 0 1 22 9 M 5 12.5 A 10 10 0 0 1 19 12.5 M 8.5 16 A 5 5 0 0 1 15.5 16 M 12 19.5 V 20"
+        : name == "wifi-off" ? "M 2 9 A 15 15 0 0 1 22 9 M 5 12.5 A 10 10 0 0 1 19 12.5 M 8.5 16 A 5 5 0 0 1 15.5 16 M 3 3 L 21 21"
+        : name == "keyboard" ? "M 3 6 H 21 V 18 H 3 Z M 7 10 H 8 M 11 10 H 12 M 15 10 H 16 M 8 14 H 16"
+        : name == "caps-on" || name == "caps-off" ? "M 12 4 L 4 13 H 8 V 19 H 16 V 13 H 20 Z"
+        : name == "volume-off" ? "M 4 9 H 8 L 13 5 V 19 L 8 15 H 4 Z M 16 9 L 21 14 M 21 9 L 16 14"
+        : "M 4 9 H 8 L 13 5 V 19 L 8 15 H 4 Z M 16 9 A 4 4 0 0 1 16 15 M 18.5 6.5 A 7.5 7.5 0 0 1 18.5 17.5";
 }
 
-// A small toggle chip with an icon (the lyrics header's Line and Hold).
-component HoldChip inherits Rectangle {
+// A small pill for a question's answers.
+component ActionPill inherits Rectangle {
     in property <string> label;
-    in property <string> icon;
-    in property <bool> on;
-    in property <bool> filled;
-    in property <color> accent: Ice.glow;
     callback clicked();
-    width: chip-row.preferred-width + 16px;
-    height: 20px;
-    border-radius: 10px;
-    background: root.on ? root.accent.with-alpha(area.has-hover ? 0.42 : 0.30) : area.has-hover ? Ice.ink.with-alpha(0.14) : Ice.ink.with-alpha(0.07);
-    animate background { duration: 150ms; }
-    chip-row := HorizontalLayout {
-        x: 8px;
-        spacing: 4px;
-        Path {
-            width: 13px;
-            height: 13px;
-            y: (parent.height - self.height) / 2;
-            viewbox-width: 24;
-            viewbox-height: 24;
-            commands: root.icon;
-            stroke: root.on ? root.accent : Ice.dim;
-            stroke-width: 1.6px;
-            fill: root.filled && root.on ? root.accent : transparent;
-        }
-        Text { text: root.label; color: root.on ? Ice.ink : Ice.dim; font-size: 12px; font-weight: 700; vertical-alignment: center; }
-    }
-    area := TouchArea { clicked => { root.clicked(); } }
+    width: t.preferred-width + 20px;
+    height: 24px;
+    border-radius: 12px;
+    background: area.has-hover ? #ffffff55 : #ffffff33;
+    animate background { duration: 120ms; }
+    t := Text { x: 10px; width: self.preferred-width; height: 100%; vertical-alignment: center; text: root.label; color: Mini.ink; font-size: 11.5px; font-weight: 600; }
+    area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
-component Pill inherits Rectangle {
-    in property <string> label;
-    in property <bool> enabled: true;
-    callback clicked();
-    width: t.preferred-width + 26px;
-    height: 28px;
-    border-radius: 14px;
-    background: !enabled ? Ice.ink.with-alpha(0.04)
-        : area.has-hover ? Ice.glow.with-alpha(0.40) : Ice.glow.with-alpha(0.22);
-    animate background { duration: 150ms; }
-    t := Text { text: label; color: enabled ? Ice.ink : Ice.dim; font-size: 13px; font-weight: 600; }
-    area := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
-}
-
-// A progress ring, drawn with a path (0..1).
-component Ring inherits Rectangle {
+component Bar inherits Rectangle {
     in property <float> value;
-    in property <length> thickness: 6px;
-    property <float> v: clamp(value, 0.001, 0.999);
-    property <angle> a: 360deg * v;
-    Path {
-        width: parent.width;
-        height: parent.height;
-        viewbox-width: 100;
-        viewbox-height: 100;
-        stroke: Ice.ink.with-alpha(0.08);
-        stroke-width: root.thickness;
-        commands: "M 50 9 A 41 41 0 1 1 49.99 9";
-    }
-    // The gauge's ticks, every quarter hour of a clock longer.
-    Path {
-        width: parent.width;
-        height: parent.height;
-        viewbox-width: 100;
-        viewbox-height: 100;
-        stroke: Ice.ink.with-alpha(0.22);
-        stroke-width: 1px;
-        commands: "M 50.00 3.50 L 50.00 0.50 M 56.07 3.90 L 56.27 2.41 M 62.04 5.08 L 62.42 3.64 M 67.79 7.04 L 68.37 5.65 M 73.25 9.73 L 74.75 7.13 M 78.31 13.11 L 79.22 11.92 M 82.88 17.12 L 83.94 16.06 M 86.89 21.69 L 88.08 20.78 M 90.27 26.75 L 92.87 25.25 M 92.96 32.21 L 94.35 31.63 M 94.92 37.96 L 96.36 37.58 M 96.10 43.93 L 97.59 43.73 M 96.50 50.00 L 99.50 50.00 M 96.10 56.07 L 97.59 56.27 M 94.92 62.04 L 96.36 62.42 M 92.96 67.79 L 94.35 68.37 M 90.27 73.25 L 92.87 74.75 M 86.89 78.31 L 88.08 79.22 M 82.88 82.88 L 83.94 83.94 M 78.31 86.89 L 79.22 88.08 M 73.25 90.27 L 74.75 92.87 M 67.79 92.96 L 68.37 94.35 M 62.04 94.92 L 62.42 96.36 M 56.07 96.10 L 56.27 97.59 M 50.00 96.50 L 50.00 99.50 M 43.93 96.10 L 43.73 97.59 M 37.96 94.92 L 37.58 96.36 M 32.21 92.96 L 31.63 94.35 M 26.75 90.27 L 25.25 92.87 M 21.69 86.89 L 20.78 88.08 M 17.12 82.88 L 16.06 83.94 M 13.11 78.31 L 11.92 79.22 M 9.73 73.25 L 7.13 74.75 M 7.04 67.79 L 5.65 68.37 M 5.08 62.04 L 3.64 62.42 M 3.90 56.07 L 2.41 56.27 M 3.50 50.00 L 0.50 50.00 M 3.90 43.93 L 2.41 43.73 M 5.08 37.96 L 3.64 37.58 M 7.04 32.21 L 5.65 31.63 M 9.73 26.75 L 7.13 25.25 M 13.11 21.69 L 11.92 20.78 M 17.12 17.12 L 16.06 16.06 M 21.69 13.11 L 20.78 11.92 M 26.75 9.73 L 25.25 7.13 M 32.21 7.04 L 31.63 5.65 M 37.96 5.08 L 37.58 3.64 M 43.93 3.90 L 43.73 2.41";
-    }
-    Path {
-        width: parent.width;
-        height: parent.height;
-        viewbox-width: 100;
-        viewbox-height: 100;
-        stroke: Ice.glow;
-        stroke-width: root.thickness;
-        commands: "M 50 9 A 41 41 0 " + (root.v > 0.5 ? "1" : "0") + " 1 " + (50 + 41 * sin(root.a)) + " " + (50 - 41 * cos(root.a));
-    }
-    // The tip: a bright dot with a soft ring, where the arc ends.
+    in property <color> tint: Mini.ink;
+    height: 4px;
+    border-radius: 2px;
+    background: #ffffff33;
     Rectangle {
-        property <length> d: root.thickness + 6px;
-        x: root.width * (50 + 41 * sin(root.a)) / 100 - self.d / 2;
-        y: root.height * (50 - 41 * cos(root.a)) / 100 - self.d / 2;
-        width: self.d;
-        height: self.d;
-        border-radius: self.d / 2;
-        background: Ice.glow.with-alpha(0.25);
-        Rectangle {
-            width: root.thickness - 1px;
-            height: self.width;
-            border-radius: self.width / 2;
-            background: Ice.ink;
-        }
+        x: 0;
+        width: max(parent.height, parent.width * clamp(root.value, 0, 1));
+        height: parent.height;
+        border-radius: parent.border-radius;
+        background: root.tint;
+        animate width { duration: 300ms; easing: ease-out; }
     }
 }
 
-// A page that fades and slides in when its tab is chosen.
+// A page that fades in when its tab is chosen.
 component Page inherits Rectangle {
     in property <bool> shown;
     opacity: shown ? 1 : 0;
     animate opacity { duration: Ice.fade; easing: ease-out; }
     visible: self.opacity > 0.01;
-    y: shown ? 0px : 8px;
-    animate y { duration: Ice.fade; easing: ease-out; }
 }
 
-// ── Pages ────────────────────────────────────────────────────────────────────
+// ── The capsule's song (Mini Island's small pill) ────────────────────────────
 
-component MusicPage inherits HorizontalLayout {
+// Title · artist running left forever inside the pill, its ends fading,
+// with the song's progress small underneath.
+component Marquee inherits Rectangle {
     in property <Music> music;
-    in property <bool> held;
-    in property <bool> line-held;
-    // The song's colour (the theme's when the cover has none).
-    in property <color> tint: Ice.glow;
-    // The page is on screen.
+    in property <color> accent;
     in property <bool> live;
-    callback command(string);
-    // Moves the lyrics by this many seconds (later: positive).
-    callback nudge(float);
-    spacing: 14px;
-    // A new song: the cover and the names dip out and come back in, so the
-    // change reads as one (Slint can't start an animation from a set value,
-    // so a short timer brings them back).
-    property <float> song-in: 1;
-    animate song-in { duration: 200ms; easing: ease-in-out; }
-    changed music => {
-        if self.music.title != self.last-title {
-            self.last-title = self.music.title;
-            self.song-in = 0;
-            back.running = true;
+    property <string> line: root.music.artist == "" ? root.music.title : root.music.title + "  ·  " + root.music.artist;
+    property <length> gap: 28px;
+    // 22 px a second (Mini Island's speed, at the pill's size).
+    property <float> speed: 22;
+    property <length> cycle: probe.preferred-width + self.gap;
+    property <float> shift: root.live ? mod(animation-tick() / 1ms / 1000 * self.speed, max(1, self.cycle / 1px)) : 0;
+    probe := Text { visible: false; text: root.line; font-size: 11px; font-weight: 600; }
+    // The ends fade over 16 % of the width each (Mini Island's opacity
+    // mask): the software renderer has no masks, so the text is laid in
+    // strips, each clipped and a little more opaque toward the middle.
+    for strip in [
+        { from: 0, span: 0.04, alpha: 0.125 }, { from: 0.04, span: 0.04, alpha: 0.375 },
+        { from: 0.08, span: 0.04, alpha: 0.625 }, { from: 0.12, span: 0.04, alpha: 0.875 },
+        { from: 0.16, span: 0.68, alpha: 1 },
+        { from: 0.84, span: 0.04, alpha: 0.875 }, { from: 0.88, span: 0.04, alpha: 0.625 },
+        { from: 0.92, span: 0.04, alpha: 0.375 }, { from: 0.96, span: 0.04, alpha: 0.125 },
+    ] : Rectangle {
+        x: root.width * strip.from;
+        y: 0;
+        width: root.width * strip.span;
+        height: 15px;
+        clip: true;
+        opacity: strip.alpha;
+        for copy in 2 : Text {
+            x: copy * root.cycle - root.shift * 1px - root.width * strip.from;
+            width: self.preferred-width;
+            y: 0;
+            height: parent.height;
+            text: root.line;
+            color: #ffffffd9;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-alignment: center;
         }
     }
-    property <string> last-title;
-    back := Timer {
-        interval: 200ms;
-        running: false;
-        triggered => { root.song-in = 1; self.running = false; }
-    }
-
-    if !music.has-session : VerticalLayout {
-        alignment: center;
-        Hud { text: "NOW PLAYING"; }
-        Text { text: "Nothing playing"; color: Ice.ink; font-size: 16px; font-weight: 700; }
-        Text { text: "Play something in Spotify, a browser or any player."; color: Ice.dim; font-size: 12.5px; }
-    }
-
-    // The player, after YouTube Music's: title between dislike and like, the
-    // bar, then five even controls with play in the middle.
-    if music.has-session : VerticalLayout {
-        spacing: 9px;
-        alignment: center;
-        width: 272px;
-        horizontal-stretch: 0;
-        HorizontalLayout {
-            spacing: 10px;
-            Rectangle {
-                width: 64px;
-                height: 64px;
-                border-radius: 14px;
-                background: Ice.body-hi;
-                clip: true;
-                opacity: root.song-in;
-                if music.has-art : Image { source: music.art; width: parent.width; height: parent.height; image-fit: cover; }
-                if !music.has-art : Text { text: "♪"; color: root.tint; font-size: 22px; horizontal-alignment: center; vertical-alignment: center; }
-            }
-            VerticalLayout {
-                alignment: center;
-                spacing: 2px;
-                opacity: root.song-in;
-                HorizontalLayout {
-                    spacing: 6px;
-                    Hud { text: music.app == "" ? "NOW PLAYING" : music.app; color: root.tint.with-alpha(0.9); }
-                    Equalizer { playing: music.playing; height: 10px; tint: root.tint; }
-                    Rectangle { horizontal-stretch: 1; }
-                }
-                Text { text: music.title; color: Ice.ink; font-size: 16px; font-weight: 700; overflow: elide; }
-                Text { text: music.artist; color: Ice.dim; font-size: 13px; overflow: elide; }
-            }
-            IconButton { accent: root.tint; icon: Icons.dislike; size: 32px; icon-size: 19px; stroke-width: 1.6px; on: music.rating < 0; filled: music.rating < 0; y: (parent.height - self.height) / 2; clicked => { root.command("dislike"); } }
-            IconButton { accent: root.tint; icon: Icons.like; size: 32px; icon-size: 19px; stroke-width: 1.6px; on: music.rating > 0; filled: music.rating > 0; y: (parent.height - self.height) / 2; clicked => { root.command("like"); } }
-        }
-        HorizontalLayout {
-            spacing: 8px;
-            Text { text: music.elapsed; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
-            WaveBar { value: music.position; playing: music.playing; live: root.live; tint: root.tint; y: (parent.height - self.height) / 2; }
-            Text { text: music.remaining; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
-        }
-        HorizontalLayout {
-            alignment: space-between;
-            IconButton {
-                icon: Icons.shuffle; accent: root.tint; enabled: music.can-shuffle; on: music.shuffle;
-                y: (parent.height - self.height) / 2;
-                clicked => { root.command("shuffle"); }
-            }
-            IconButton { icon: Icons.previous; filled: true; y: (parent.height - self.height) / 2; clicked => { root.command("previous"); } }
-            IconButton {
-                icon: music.playing ? Icons.pause : Icons.play;
-                primary: true; accent: root.tint; filled: !music.playing; size: 44px; icon-size: 20px; stroke-width: music.playing ? 3.2px : 1.5px;
-                clicked => { root.command("play-pause"); }
-            }
-            IconButton { icon: Icons.next; filled: true; y: (parent.height - self.height) / 2; clicked => { root.command("next"); } }
-            Rectangle {
-                width: 34px;
-                height: 34px;
-                y: (parent.height - self.height) / 2;
-                IconButton { icon: Icons.repeat; accent: root.tint; enabled: music.can-repeat; on: music.repeat > 0; clicked => { root.command("repeat"); } }
-                if music.repeat == 2 : Text { text: "1"; color: root.tint; font-size: 10px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
-            }
-        }
-    }
-
-    // Lyrics, after v1: the whole song as one list, five rows in view, the line
-    // being sung in the middle row. The list slides up a row at a time; the
-    // lines only change their look, so nothing jumps.
-    // The lyrics column: its header (Line and Hold) stays whether or not the
-    // song has lyrics; below it the lyrics, or why there are none.
-    if music.has-session : VerticalLayout {
-        horizontal-stretch: 1;
-        spacing: 2px;
-        HorizontalLayout {
-            spacing: 6px;
-            Hud { text: "LYRICS"; color: root.tint.with-alpha(0.9); horizontal-stretch: 1; vertical-alignment: center; }
-            // Line: the island stays a capsule showing the line being sung.
-            HoldChip {
-                label: "Line";
-                accent: root.tint;
-                icon: "M 4 7 H 20 M 4 12 H 15 M 4 17 H 18";
-                on: root.line-held;
-                clicked => { root.command("line-hold"); }
-            }
-            // Hold: the island stays open while you read along.
-            HoldChip {
-                label: "Hold";
-                accent: root.tint;
-                icon: "M 9 3 H 15 L 14 10 L 18 14 H 6 L 10 10 Z M 12 14 V 21";
-                filled: true;
-                on: root.held;
-                clicked => { root.command("hold"); }
-            }
-        }
-        if music.has-lyrics : view := Rectangle {
-            vertical-stretch: 1;
-                clip: true;
-                // Long lines wrap (never cut): each line is as tall as its text,
-                // and the list centres the sung line by its own place and height,
-                // read from the layout.
-                list := VerticalLayout {
-                    property <length> sung-y;
-                    property <length> sung-h: 18px;
-                    x: 0;
-                    width: view.width;
-                    y: (view.height - self.sung-h) / 2 - self.sung-y;
-                    animate y { duration: 350ms; easing: cubic-bezier(0.3, 0.9, 0.4, 1); }
-                    spacing: 3px;
-                    for line[i] in music.lyrics : Text {
-                        property <bool> now: i == music.lyric-center;
-                        property <bool> sung: i == music.lyric-index;
-                        property <int> away: abs(i - music.lyric-center);
-                        text: line.text;
-                        wrap: word-wrap;
-                        horizontal-alignment: center;
-                        font-size: self.sung ? 13px : 11.5px;
-                        font-weight: self.sung ? 700 : 400;
-                        color: self.sung ? Ice.ink.mix(root.tint, 0.8) : i < music.lyric-index ? Ice.dim.with-alpha(0.7) : Ice.ink.with-alpha(0.55);
-                        opacity: self.away <= 1 ? 1 : self.away == 2 ? 0.45 : 0;
-                        animate color, opacity { duration: 250ms; easing: ease-out; }
-                        init => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
-                        changed now => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
-                        changed y => { if self.now { list.sung-y = self.y; } }
-                        changed height => { if self.now { list.sung-h = self.height; } }
-                    }
-                }
-            }
-    
-        if !music.has-lyrics : VerticalLayout {
-            vertical-stretch: 1;
-            alignment: center;
-            Text { text: music.lyrics-note == "" ? "Lyrics are off (Settings → Music)" : music.lyrics-note; color: Ice.dim; font-size: 12px; wrap: word-wrap; horizontal-alignment: center; }
-        }
+    WaveBar {
+        x: 1px;
+        y: 15px;
+        width: parent.width - 2px;
+        small: true;
+        value: root.music.position;
+        playing: root.music.playing;
+        tint: root.accent;
     }
 }
 
-// Focus (Pomodoro): the ring and the time, the controls laid out like the
-// Music player's, and today's log of rounds.
-component FocusPage inherits HorizontalLayout {
-    in property <FocusView> pomodoro;
+// ── Pages of the open list ───────────────────────────────────────────────────
+
+// The music card: cover, title (and the bars) and artist, the controls, and
+// underneath the volume (when the player's level is known) or the song's
+// progress. Mini Island's card, at the open list's size and in its popup.
+component MusicCard inherits Rectangle {
+    in property <Music> music;
+    in property <color> accent;
+    in property <float> volume;
+    in property <bool> live;
+    in property <bool> line-held;
+    in property <bool> card: true;
     callback command(string);
-    spacing: 18px;
+    height: 86px;
+    if root.card : Tinted { width: parent.width; height: parent.height; tint: root.accent; lit: true; }
+    Cover { x: 10px; y: 10px; music: root.music; accent: root.accent; }
+    // Title and artist between the cover and the controls.
     Rectangle {
-        width: 104px;
-        height: 104px;
-        y: (parent.height - self.height) / 2;
-        Ring { width: parent.width; height: parent.height; value: pomodoro.fraction; thickness: 7px; }
+        x: 60px;
+        y: 10px;
+        width: parent.width - 60px - 6px - 84px - 12px;
+        height: 40px;
         VerticalLayout {
             alignment: center;
-            Text { text: pomodoro.left; color: Ice.ink; font-size: 24px; font-weight: 800; horizontal-alignment: center; }
-            Text { text: pomodoro.rounds; color: Ice.dim; font-size: 11px; horizontal-alignment: center; }
-        }
-    }
-    VerticalLayout {
-        alignment: center;
-        spacing: 12px;
-        width: 168px;
-        Hud { text: "POMODORO · " + pomodoro.phase; color: pomodoro.on-break ? Ice.frost : Ice.glow; }
-        HorizontalLayout {
-            alignment: space-between;
-            IconButton { icon: Icons.reset; y: (parent.height - self.height) / 2; clicked => { root.command("reset"); } }
-            IconButton {
-                icon: pomodoro.running ? Icons.pause : Icons.play;
-                primary: true; filled: !pomodoro.running; size: 48px; icon-size: 22px; stroke-width: pomodoro.running ? 3.2px : 1.5px;
-                clicked => { root.command(pomodoro.running ? "pause" : "start"); }
+            HorizontalLayout {
+                spacing: 6px;
+                Text { text: root.music.title; color: Mini.ink; font-size: 13px; font-weight: 600; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                Equalizer { playing: root.music.playing; tint: Paint.readable(root.accent); y: (parent.height - self.height) / 2; }
             }
-            IconButton { icon: Icons.next; filled: true; y: (parent.height - self.height) / 2; clicked => { root.command("skip"); } }
+            Text { text: root.music.artist; color: Mini.text-3; font-size: 12px; overflow: elide; }
         }
     }
-    // Today's rounds: how long each one really was.
-    Panel {
-        horizontal-stretch: 1;
-        VerticalLayout {
-        padding: 12px;
-        alignment: center;
-        spacing: 4px;
-        Hud { text: "TODAY"; }
-        Text { text: pomodoro.today; color: Ice.ink; font-size: 13px; font-weight: 700; }
-        for r in pomodoro.log : HorizontalLayout {
-            spacing: 6px;
+    HorizontalLayout {
+        x: parent.width - 12px - 84px;
+        y: 16px;
+        width: 84px;
+        height: 28px;
+        MediaButton { glyph: Glyphs.prev; clicked => { root.command("previous"); } }
+        MediaButton { glyph: root.music.playing ? Glyphs.pause : Glyphs.play; glyph-size: 15px; ring: true; clicked => { root.command("play-pause"); } }
+        MediaButton { glyph: Glyphs.next; clicked => { root.command("next"); } }
+    }
+    // The volume row: speaker, slider, level.
+    if root.volume >= 0 : HorizontalLayout {
+        x: 12px;
+        y: 58px;
+        width: parent.width - 28px;
+        height: 24px;
+        Rectangle {
+            width: 24px;
+            Glyph { text: Glyphs.volume; font-size: 12px; color: #ffffffe6; }
+        }
+        VolumeSlider { horizontal-stretch: 1; value: root.volume; tint: Paint.lift(root.accent, 0.35); y: (parent.height - self.height) / 2; }
+        Rectangle { width: 2px; }
+        Text { text: round(root.volume * 100) + "%"; color: Mini.text-2; font-size: 10.5px; min-width: 32px; horizontal-alignment: right; vertical-alignment: center; }
+    }
+    // The song's progress: time, the wave, length, and the lyric switch.
+    if root.volume < 0 : HorizontalLayout {
+        x: 16px;
+        y: 58px;
+        width: parent.width - 32px;
+        height: 24px;
+        Text { text: root.music.elapsed; color: Mini.text-2; font-size: 10.5px; min-width: 28px; vertical-alignment: center; }
+        WaveBar {
+            horizontal-stretch: 1;
+            y: 24px / 2 + 2px - self.height;
+            value: root.music.position;
+            playing: root.music.playing;
+            live: root.live;
+            tint: root.accent;
+        }
+        Rectangle { width: 6px; }
+        Text { text: root.music.remaining; color: Mini.text-2; font-size: 10.5px; min-width: 28px; horizontal-alignment: right; vertical-alignment: center; }
+        // Line: the song's lyric on the capsule (Mini Island's lyric switch).
+        Rectangle {
+            width: 28px;
             Rectangle {
-                width: 6px;
-                height: 6px;
+                x: 6px;
                 y: (parent.height - self.height) / 2;
-                border-radius: 3px;
-                background: r.full ? Ice.glow : Ice.dim;
+                width: 22px;
+                height: 22px;
+                border-radius: 11px;
+                background: line-area.has-hover ? #ffffff33 : root.line-held ? #ffffff40 : transparent;
+                Glyph { text: Glyphs.line; font-size: 11px; color: root.line-held ? Mini.ink : #ffffffb3; }
+                line-area := TouchArea { mouse-cursor: pointer; clicked => { root.command("line-hold"); } }
             }
-            Text { text: r.time; color: Ice.soft; font-size: 12px; horizontal-stretch: 1; }
-            Text { text: r.length; color: r.full ? Ice.glow : Ice.dim; font-size: 12px; }
-        }
         }
     }
 }
 
-// Accounts: one column per app (Claude Desktop, Claude Code, Codex). The lit
-// row is the account in use; a click on another asks NotchDeck to switch.
+// Notifications: a header (how many, Clear all) and the four newest as rows
+// with the app's round icon, the title and message, and the time.
+component NotifPage inherits Rectangle {
+    in property <[NotifRow]> items;
+    callback clicked(int);
+    callback clear();
+    if root.items.length == 0 : Text {
+        y: 6px;
+        width: parent.width;
+        height: 18px;
+        text: "No notifications";
+        color: Mini.text-3;
+        font-size: 13px;
+        horizontal-alignment: center;
+    }
+    if root.items.length > 0 : Rectangle {
+        x: 8px;
+        y: 0;
+        width: parent.width - 16px;
+        height: 26px;
+        Text {
+            x: 0;
+            width: self.preferred-width;
+            height: 100%;
+            text: root.items.length > 4 ? "Notifications (4 of " + root.items.length + ")" : "Notifications";
+            color: Mini.label;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        Text {
+            x: parent.width - self.width;
+            width: self.preferred-width;
+            height: 100%;
+            text: "Clear all";
+            color: clear-area.has-hover ? Mini.ink : Mini.faint;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-alignment: center;
+            animate color { duration: 180ms; }
+            clear-area := TouchArea { mouse-cursor: pointer; clicked => { root.clear(); } }
+        }
+    }
+    for n[i] in root.items : Rectangle {
+        visible: i < 4;
+        y: 28px + i * 50px;
+        height: 48px;
+        Tinted { width: parent.width; height: parent.height; tint: n.accent; lit: row.has-hover; }
+        AppIcon { x: 8px; y: 9px; size: 30px; accent: n.accent; initial: n.initial; }
+        VerticalLayout {
+            x: 50px;
+            width: parent.width - 50px - 10px - 44px;
+            alignment: center;
+            Text { text: n.title == "" ? n.app : n.title; color: Mini.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+            if n.body != "" : Text { text: n.body; color: Mini.text-3; font-size: 12px; overflow: elide; }
+        }
+        Text {
+            x: parent.width - 8px - self.width;
+            width: self.preferred-width;
+            height: 100%;
+            text: n.time;
+            color: Mini.label;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+        row := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(i); } }
+    }
+}
+
+// Lyrics: the whole song on a card, the line being sung bright in the
+// middle, the others dim and fading toward the card's edges; furigana over
+// a line and romaji under it when the lyrics have them; あ, Ro and a pin.
+component LyricsPage inherits Rectangle {
+    in property <Music> music;
+    in property <color> accent;
+    in property <bool> held;
+    // The lyrics are Japanese (あ and Ro show).
+    in property <bool> japanese;
+    in-out property <bool> furigana: true;
+    in-out property <bool> romaji: true;
+    callback command(string);
+    height: 196px;
+    Tinted { width: parent.width; height: parent.height; tint: root.accent; lit: true; }
+    view := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        clip: true;
+        list := VerticalLayout {
+            property <length> sung-y;
+            property <length> sung-h: 24px;
+            x: 0;
+            width: view.width;
+            y: (view.height - self.sung-h) / 2 - self.sung-y;
+            animate y { duration: 520ms; easing: cubic-bezier(0.25, 0.8, 0.3, 1); }
+            for line[i] in root.music.lyrics : line-row := VerticalLayout {
+                property <bool> now: i == max(0, root.music.lyric-center);
+                property <bool> sung: i == root.music.lyric-index;
+                // Where its middle is on the card: the card's edges fade.
+                property <length> mid: list.y + self.y + self.height / 2;
+                property <float> edge: clamp(min(self.mid, view.height - self.mid) / (view.height * 0.22), 0, 1);
+                padding-left: 18px;
+                padding-right: 18px;
+                padding-top: 5px;
+                padding-bottom: 5px;
+                opacity: self.edge;
+                // Romaji: the line's own when the lyrics carry it (none yet).
+                property <string> ro: "";
+                Text {
+                    text: line.text;
+                    wrap: word-wrap;
+                    font-size: 14.5px;
+                    font-weight: 600;
+                    color: i == root.music.lyric-index ? Mini.ink : #ffffff5c;
+                    animate color { duration: 300ms; }
+                }
+                if line-row.ro != "" && root.romaji : Text {
+                    text: line-row.ro;
+                    wrap: word-wrap;
+                    font-size: 10.5px;
+                    color: i == root.music.lyric-index ? #ffffffcc : #ffffff4a;
+                }
+                init => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
+                changed now => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
+                changed y => { if self.now { list.sung-y = self.y; } }
+                changed height => { if self.now { list.sung-h = self.height; } }
+            }
+        }
+    }
+    HorizontalLayout {
+        x: parent.width - 8px - self.preferred-width;
+        y: 8px;
+        width: self.preferred-width;
+        height: 24px;
+        spacing: 4px;
+        if root.japanese : PageToggle { label: "あ"; on: root.furigana; clicked => { root.furigana = !root.furigana; } }
+        if root.japanese : PageToggle { label: "Ro"; on: root.romaji; clicked => { root.romaji = !root.romaji; } }
+        PageToggle { label: root.held ? Glyphs.pinned : Glyphs.pin; glyph: true; on: root.held; clicked => { root.command("hold"); } }
+    }
+}
+
+// Accounts: per app its icon and name, then its accounts as chips (a round
+// initial and the name). The one in use is solid white; a click on another
+// asks NotchDeck to switch.
 component AccountChip inherits Rectangle {
     in property <AccountRow> account;
     in property <bool> pending;
     callback clicked();
+    width: chip-row.preferred-width + 19px;
     height: 34px;
-    border-radius: 12px;
-    background: account.active ? Ice.glow.with-alpha(0.24)
-        : area.has-hover ? Ice.ink.with-alpha(0.10) : Ice.ink.with-alpha(0.045);
-    border-width: account.active ? 1px : 0px;
-    border-color: Ice.glow.with-alpha(0.7);
-    animate background { duration: 180ms; easing: ease-out; }
-    HorizontalLayout {
-        padding-left: 6px;
-        padding-right: 10px;
+    border-radius: 17px;
+    background: root.account.active ? #fffffff2 : area.has-hover ? #ffffff3a : root.pending ? #ffffff45 : #ffffff1f;
+    animate background { duration: 150ms; }
+    chip-row := HorizontalLayout {
+        x: 5px;
         spacing: 8px;
         Rectangle {
-            width: 22px;
-            height: 22px;
+            width: 24px;
+            height: 24px;
             y: (parent.height - self.height) / 2;
-            border-radius: 8px;
-            background: account.active ? Ice.glow : Ice.ink.with-alpha(0.14);
-            animate background { duration: 180ms; }
-            Text { text: account.initial; color: account.active ? Ice.body-lo : Ice.ink; font-size: 11px; font-weight: 800; }
+            border-radius: 12px;
+            background: root.account.active ? #000000 : #ffffff33;
+            Text { width: 100%; height: 100%; horizontal-alignment: center; vertical-alignment: center; text: root.account.initial; color: Mini.ink; font-size: 11.5px; font-weight: 700; }
         }
         Text {
-            text: account.name;
-            color: account.active ? Ice.ink : Ice.ink.with-alpha(0.82);
-            font-size: 12px;
-            font-weight: account.active ? 700 : 500;
+            text: root.pending && !root.account.active ? root.account.name + "  ..." : root.account.name;
+            color: root.account.active ? #000000 : Mini.ink;
+            font-size: 13px;
+            font-weight: 600;
             vertical-alignment: center;
-            overflow: elide;
-            horizontal-stretch: 1;
         }
-        if account.active : Dot { accent: Ice.glow; y: (parent.height - self.height) / 2; }
-        if root.pending : Text { text: "…"; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
     }
     area := TouchArea { enabled: !root.account.active; mouse-cursor: root.account.active ? default : pointer; clicked => { root.clicked(); } }
 }
 
-component AccountsPage inherits HorizontalLayout {
+component AccountsPage inherits VerticalLayout {
     in property <[AccountGroup]> groups;
     in property <string> pending;
     in property <string> note;
     callback clicked(string);
-    spacing: 14px;
-    if root.groups.length == 0 : VerticalLayout {
-        alignment: center;
-        Text { text: root.note; color: Ice.dim; font-size: 11.5px; horizontal-alignment: center; wrap: word-wrap; }
-    }
-    // Even columns, whatever the names: a narrow column cuts its names short.
-    property <length> col-w: (root.width - root.spacing * max(0, root.groups.length - 1)) / max(1, root.groups.length);
-    for g in root.groups : Panel {
-        width: root.col-w;
-        VerticalLayout {
-            padding: 10px;
-            alignment: start;
-            spacing: 6px;
-            Hud { text: g.title; height: 16px; }
-            for a in g.accounts : AccountChip { account: a; pending: root.pending == a.id; clicked => { root.clicked(a.id); } }
-        }
-    }
-}
-
-// Water, after v1: a ring toward the day's goal, the next reminder and the
-// active hours, a glass at a time, and today by the hour.
-component WaterPage inherits HorizontalLayout {
-    in property <WaterView> water;
-    callback command(string);
-    spacing: 18px;
-    Rectangle {
-        width: 104px;
-        height: 104px;
-        y: (parent.height - self.height) / 2;
-        Ring { width: parent.width; height: parent.height; value: root.water.fraction; thickness: 7px; }
-        VerticalLayout {
-            alignment: center;
-            Text { text: root.water.percent; color: Ice.ink; font-size: 22px; font-weight: 800; horizontal-alignment: center; }
-            Text { text: root.water.total + " ml"; color: Ice.dim; font-size: 11.5px; horizontal-alignment: center; }
-        }
-    }
-    VerticalLayout {
-        alignment: center;
-        spacing: 6px;
-        width: 170px;
-        Hud { text: "HYDRATION · TODAY"; }
-        HorizontalLayout {
-            spacing: 6px;
-            Text { text: root.water.total; color: Ice.ink; font-size: 26px; font-weight: 800; vertical-alignment: bottom; }
-            Text { text: "/ " + root.water.goal; color: Ice.dim; font-size: 13px; vertical-alignment: bottom; }
-            Rectangle { horizontal-stretch: 1; }
-        }
-        Text { text: root.water.next; color: root.water.due ? Ice.glow : Ice.soft; font-size: 12.5px; font-weight: root.water.due ? 700 : 400; }
-        Text { text: root.water.hours-text; color: Ice.dim; font-size: 12px; }
-        HorizontalLayout {
-            spacing: 8px;
-            alignment: start;
-            Rectangle {
-                width: t.preferred-width + 30px;
-                height: 32px;
-                border-radius: 16px;
-                background: a.has-hover ? Ice.frost : Ice.glow;
-                animate background { duration: 150ms; }
-                t := Text { text: "+ " + root.water.glass; color: Ice.body-lo; font-size: 13.5px; font-weight: 800; }
-                a := TouchArea { clicked => { root.command("drink"); } }
-                // The same halo as the other primary buttons.
-                Rectangle {
-                    x: -4px;
-                    y: -4px;
-                    width: parent.width + 8px;
-                    height: parent.height + 8px;
-                    border-radius: self.height / 2;
-                    border-width: 1px;
-                    border-color: Ice.glow.with-alpha(a.has-hover ? 0.6 : 0.32);
-                }
-            }
-            Pill { label: "Undo"; enabled: root.water.drinks > 0; y: (parent.height - self.height) / 2; clicked => { root.command("undo"); } }
-        }
-    }
-    // Today by the hour, over the active hours (the hour now in light).
-    Panel {
-        horizontal-stretch: 1;
-        VerticalLayout {
-        padding: 12px;
-        padding-left: 10px;
-        padding-right: 10px;
-        spacing: 4px;
-        alignment: center;
-        Hud { text: "BY THE HOUR"; }
-        HorizontalLayout {
-            height: 104px;
-            alignment: space-between;
-            for b[i] in root.water.hours : VerticalLayout {
-                width: 15px;
-                padding-left: 2px;
-                padding-right: 2px;
-                alignment: end;
-                spacing: 3px;
-                Rectangle {
-                    height: max(3px, 86px * b.fraction);
-                    border-radius: 2px;
-                    background: b.now ? Ice.glow : b.fraction > 0 ? Ice.glow.with-alpha(0.6) : Ice.ink.with-alpha(0.14);
-                }
-                // Every other hour's label (and now's): a dozen don't fit side by side.
-                Text { text: b.now || mod(i, 2) == 0 ? b.label : ""; color: b.now ? Ice.glow : Ice.dim; font-size: 9.5px; horizontal-alignment: center; }
-            }
-        }
-        }
-    }
-}
-
-component ShelfPage inherits VerticalLayout {
-    in property <[ShelfRow]> items;
-    in property <bool> drop-hover;
-    callback open(int);
-    callback copy(int);
-    callback remove(int);
-    callback clear();
-    spacing: 6px;
-    if drop-hover : Rectangle {
-        vertical-stretch: 1;
-        border-radius: 14px;
-        background: Ice.glow.with-alpha(0.18);
-        border-width: 1px;
-        border-color: Ice.glow.with-alpha(0.6);
-        Text { text: "Drop to keep it here"; color: Ice.ink; font-size: 15px; font-weight: 800; }
-    }
-    if !drop-hover : HorizontalLayout {
-        Hud { text: items.length == 0 ? "SHELF" : "SHELF · " + items.length; horizontal-stretch: 1; }
-        if items.length > 0 : Pill { label: "Clear"; clicked => { root.clear(); } }
-    }
-    if !drop-hover && items.length == 0 : Text {
-        text: "Drag a file onto the island to keep it here. Nothing is copied: the shelf remembers where it is.";
-        color: Ice.dim;
+    padding-left: 2px;
+    padding-right: 2px;
+    if root.groups.length == 0 : Text {
+        text: root.note == "" ? "No accounts in NotchDeck yet" : root.note;
+        color: Mini.text-3;
         font-size: 13px;
+        horizontal-alignment: center;
         wrap: word-wrap;
     }
-    if !drop-hover : Flickable {
-        content-height: rows.preferred-height;
-        rows := VerticalLayout {
-            spacing: 4px;
-            for f[i] in root.items : Panel {
-                height: 34px;
-                border-radius: 10px;
-                lit: row.has-hover;
-                row := TouchArea { clicked => { root.open(i); } }
-                HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 4px;
-                    spacing: 8px;
-                    Rectangle {
-                        width: 12px;
-                        height: 14px;
-                        y: (parent.height - self.height) / 2;
-                        border-radius: 3px;
-                        background: f.detail == "Folder" ? Ice.frost.with-alpha(0.7) : Ice.glow.with-alpha(0.7);
-                    }
-                    Text { text: f.name; color: Ice.ink; font-size: 13.5px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                    Text { text: f.detail; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
-                    Pill { label: "Copy"; y: (parent.height - self.height) / 2; clicked => { root.copy(i); } }
-                    Text {
-                        text: "×";
-                        color: rm.has-hover ? Ice.ink : Ice.dim;
-                        font-size: 13px;
-                        vertical-alignment: center;
-                        rm := TouchArea { clicked => { root.remove(i); } }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// The to-do list: open tasks on top in the user's order (drag the grip),
-// done ones struck through and sunk to the bottom. Rows are short and the
-// list scrolls, so twenty tasks stay easy to scan.
-component TodoRow inherits Rectangle {
-    in property <TaskRow> task;
-    in property <int> index;
-    in property <int> open-count;
-    in property <length> pitch;
-    callback toggle();
-    callback remove();
-    callback move(int);
-    property <length> drag-dy;
-    // Where the row lands: a whole number of rows away, never among the done ones.
-    property <int> target: clamp(index + round(drag-dy / pitch), 0, open-count - 1);
-    height: pitch - 1px;
-    z: grip.pressed ? 10 : 0;
-    Rectangle {
-        y: grip.pressed ? root.drag-dy : 0px;
-        width: parent.width;
-        height: parent.height;
-        border-radius: 8px;
-        background: grip.pressed ? Ice.body-hi : row.has-hover ? Ice.ink.with-alpha(0.06) : transparent;
-        border-width: grip.pressed ? 1px : 0px;
-        border-color: Ice.glow.with-alpha(0.5);
-        animate background { duration: 120ms; }
-        row := TouchArea { clicked => { root.toggle(); } }
-        HorizontalLayout {
+    for g[i] in root.groups : VerticalLayout {
+        // The last line of an app's chips leaves a gap before the next app.
+        padding-bottom: i + 1 < root.groups.length && root.groups[i + 1].title == "" ? 0px : 6px;
+        if g.title != "" : HorizontalLayout {
             padding-left: 2px;
-            padding-right: 6px;
+            padding-top: 2px;
+            padding-bottom: 6px;
+            spacing: 7px;
+            alignment: start;
+            Glyph { width: 13px; text: Glyphs.service(g.title); font-size: 12px; color: Mini.label; horizontal-alignment: left; }
+            Text { text: g.title; color: Mini.label; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+        }
+        HorizontalLayout {
             spacing: 8px;
-            // The grip: six dots, on open tasks only.
-            Rectangle {
-                width: 14px;
-                opacity: root.task.done ? 0 : (grip.has-hover || grip.pressed ? 1 : 0.45);
-                for d in [0, 1, 2, 3, 4, 5] : Rectangle {
-                    x: d < 3 ? 4px : 8px;
-                    y: parent.height / 2 - 6px + mod(d, 3) * 5px;
-                    width: 2px;
-                    height: 2px;
-                    background: Ice.dim;
-                }
-                grip := TouchArea {
-                    enabled: !root.task.done;
-                    mouse-cursor: self.pressed ? grabbing : grab;
-                    // The row (and this grip with it) follows the mouse, so
-                    // mouse-y is measured from where the row is now: add it on.
-                    // Set outright, it bounced between the drag and 0 each
-                    // move, and the drop landed back where it started.
-                    moved => { root.drag-dy += self.mouse-y - self.pressed-y; }
-                    changed pressed => {
-                        if !self.pressed {
-                            if root.target != root.index { root.move(root.target); }
-                            root.drag-dy = 0px;
-                        }
-                    }
-                }
-            }
-            // The checkbox.
-            Rectangle {
-                width: 16px;
-                height: 16px;
-                y: (parent.height - self.height) / 2;
-                border-radius: 8px;
-                background: root.task.done ? Ice.glow : transparent;
-                border-width: root.task.done ? 0px : 1.5px;
-                border-color: row.has-hover ? Ice.glow : Ice.dim;
-                animate background { duration: 150ms; }
-                if root.task.done : Path {
-                    width: 10px;
-                    height: 10px;
-                    x: 3px;
-                    y: 3px;
-                    viewbox-width: 24;
-                    viewbox-height: 24;
-                    commands: "M 4 12.5 L 9.5 18 L 20 6";
-                    stroke: Ice.body-lo;
-                    stroke-width: 2.5px;
-                }
-            }
-            Rectangle {
-                horizontal-stretch: 1;
-                label := Text {
-                    x: 0;
-                    width: parent.width;
-                    text: root.task.text;
-                    color: root.task.done ? Ice.dim : Ice.ink;
-                    font-size: 13.5px;
-                    vertical-alignment: center;
-                    overflow: elide;
-                    animate color { duration: 200ms; }
-                }
-                // The strike-through, drawn: it grows across when a task is done.
-                Rectangle {
-                    x: 0;
-                    y: parent.height / 2;
-                    height: 1.2px;
-                    width: root.task.done ? min(label.preferred-width, parent.width) : 0px;
-                    background: Ice.dim;
-                    animate width { duration: 220ms; easing: ease-out; }
-                }
-            }
-            Text {
-                text: "×";
-                color: rm.has-hover ? Ice.ink : Ice.dim;
-                opacity: row.has-hover || rm.has-hover ? 1 : 0;
-                font-size: 14px;
-                vertical-alignment: center;
-                rm := TouchArea { clicked => { root.remove(); } }
-            }
-        }
-    }
-}
-
-component TodoPage inherits VerticalLayout {
-    in property <[TaskRow]> tasks;
-    in property <[DoneRow]> log;
-    in property <int> open-count;
-    in-out property <bool> show-log;
-    callback add(string);
-    callback toggle(int);
-    callback remove(int);
-    callback move(int, int);
-    callback clear-done();
-    spacing: 6px;
-    HorizontalLayout {
-        spacing: 8px;
-        Rectangle {
-            height: 30px;
-            horizontal-stretch: 1;
-            border-radius: 10px;
-            background: input.has-focus ? Ice.glow.with-alpha(0.10) : Ice.ink.with-alpha(0.05);
-            border-width: 1px;
-            border-color: input.has-focus ? Ice.glow.with-alpha(0.6) : Ice.ink.with-alpha(0.08);
-            animate background, border-color { duration: 150ms; }
-            // A bare TextInput doesn't scroll: a long task ran past the
-            // box. It slides inside this clip to keep the cursor in sight,
-            // as Slint's own LineEdit does.
-            Rectangle {
-                x: 12px;
-                width: parent.width - 24px;
-                clip: true;
-                input := TextInput {
-                    property <length> scroll-x;
-                    x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.scroll-x));
-                    width: max(parent.width - self.text-cursor-width, self.preferred-width);
-                    height: 100%;
-                    color: Ice.ink;
-                    font-size: 13.5px;
-                    vertical-alignment: center;
-                    single-line: true;
-                    cursor-position-changed(pos) => {
-                        if pos.x + self.scroll-x < 0px {
-                            self.scroll-x = -pos.x;
-                        } else if pos.x + self.scroll-x > parent.width - self.text-cursor-width {
-                            self.scroll-x = parent.width - pos.x - self.text-cursor-width;
-                        }
-                    }
-                    accepted => {
-                        root.add(self.text);
-                        self.text = "";
-                        self.scroll-x = 0px;
-                    }
-                }
-            }
-            if input.text == "" : Text {
-                x: 12px;
-                text: "Add a task, then Enter";
-                color: Ice.dim;
-                font-size: 13.5px;
-                vertical-alignment: center;
-            }
-        }
-        if root.tasks.length > 0 && !root.show-log : Hud {
-            text: root.open-count == 0 ? "ALL DONE" : root.open-count + " OPEN";
-            vertical-alignment: center;
-        }
-        if root.tasks.length > root.open-count && !root.show-log : Pill { label: "Clear done"; y: (parent.height - self.height) / 2; clicked => { root.clear-done(); } }
-        if root.log.length > 0 : Pill {
-            label: root.show-log ? "Back" : "Log";
-            y: (parent.height - self.height) / 2;
-            clicked => { root.show-log = !root.show-log; }
-        }
-    }
-    if root.tasks.length == 0 && !root.show-log : Text {
-        text: "Nothing to do. Type above; drag the dots to move a task up.";
-        color: Ice.dim;
-        font-size: 13px;
-        wrap: word-wrap;
-    }
-    // Done and cleared, newest first, under a line for each day.
-    if root.show-log : Flickable {
-        interactive: false;
-        content-height: done-rows.preferred-height;
-        done-rows := VerticalLayout {
-            spacing: 2px;
-            for r in root.log : VerticalLayout {
-                spacing: 2px;
-                if r.day != "" : Hud { text: r.day; height: 22px; }
-                HorizontalLayout {
-                    spacing: 10px;
-                    height: 22px;
-                    Text { text: r.time; color: Ice.dim; font-size: 12px; width: 38px; vertical-alignment: center; }
-                    Text { text: r.text; color: Ice.soft; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
-                }
-            }
-        }
-    }
-    // Wheel only: a mouse drag here is the grip's, never a scroll.
-    if !root.show-log : Flickable {
-        interactive: false;
-        content-height: rows.preferred-height;
-        rows := VerticalLayout {
-            spacing: 1px;
-            for t[i] in root.tasks : TodoRow {
-                task: t;
-                index: i;
-                open-count: root.open-count;
-                pitch: 27px;
-                toggle => { root.toggle(t.id); }
-                remove => { root.remove(t.id); }
-                move(to) => { root.move(t.id, to); }
-            }
-        }
-    }
-}
-
-// The history, after v1: one line a notification (its app, title · body,
-// when), newest first; a click brings its app forward.
-component NotifPage inherits VerticalLayout {
-    in property <[NotifRow]> items;
-    callback clicked(int);
-    callback clear();
-    spacing: 4px;
-    HorizontalLayout {
-        spacing: 8px;
-        Hud { text: items.length == 0 ? "NOTIFICATIONS" : "NOTIFICATIONS · " + items.length; horizontal-stretch: 1; vertical-alignment: center; }
-        if items.length > 0 : Pill { label: "Clear"; clicked => { root.clear(); } }
-    }
-    if items.length == 0 : Text {
-        text: "Notifications from the apps you allow show up here.";
-        color: Ice.dim;
-        font-size: 13px;
-        wrap: word-wrap;
-    }
-    Flickable {
-        content-height: list.preferred-height;
-        list := VerticalLayout {
-            spacing: 4px;
-            for n[i] in root.items : Panel {
-                height: 32px;
-                border-radius: 10px;
-                lit: row.has-hover;
-                HorizontalLayout {
-                    padding-left: 6px;
-                    padding-right: 8px;
-                    spacing: 8px;
-                    Dot { accent: n.accent; y: (parent.height - self.height) / 2; }
-                    Text { text: n.app; color: Ice.ink; font-size: 13px; font-weight: 700; vertical-alignment: center; overflow: elide; max-width: 90px; }
-                    Text {
-                        text: n.body == "" ? n.title : n.title + " · " + n.body;
-                        color: Ice.soft;
-                        font-size: 13px;
-                        vertical-alignment: center;
-                        overflow: elide;
-                        horizontal-stretch: 1;
-                    }
-                    Text { text: n.time; color: Ice.dim; font-size: 12px; vertical-alignment: center; }
-                }
-                row := TouchArea { clicked => { root.clicked(i); } }
-            }
+            alignment: start;
+            for a in g.accounts : AccountChip { account: a; pending: root.pending == a.id; clicked => { root.clicked(a.id); } }
         }
     }
 }
@@ -1369,14 +994,22 @@ export component Island inherits Window {
     in property <bool> has-front;
     // The front is a notification with a message: the capsule becomes a small card.
     in property <bool> notice;
+    // That notice is the music's (a new song, play, pause): the song's card.
+    in property <bool> music-notice;
     in property <Item> front;
     in property <int> waiting;
     in property <[Item]> others;
     in property <string> clock;
     in property <string> date;
     in property <[TabInfo]> tabs;
-    in property <string> active-tab: "home";
+    in property <string> active-tab: "notifications";
     in property <Music> music;
+    // The player's volume, 0..1 (-1: not known; the card then shows the song's progress).
+    in property <float> volume: -1;
+    // The lyrics are Japanese: the lyrics card offers furigana and romaji.
+    in property <bool> lyrics-japanese;
+    // Romaji of the line on the capsule (shown under it), when the lyrics have it.
+    in property <string> capsule-romaji;
     in property <[NotifRow]> notifications;
     in property <FocusView> pomodoro;
     in property <WaterView> water;
@@ -1394,10 +1027,11 @@ export component Island inherits Window {
     in property <string> mode: "compact";
     in property <string> mascot-mood: "idle";
     in property <bool> held;
-    // Line: the capsule stays, showing the line being sung (capsule-line).
+    // Line: the capsule stays, showing the line being sung (capsule-line;
+    // empty between lines: the song then runs in the capsule).
     in property <bool> line-held;
     in property <string> capsule-line;
-    // A long one: a size smaller, on two lines.
+    // A long one (unused: a long line is drawn smaller instead).
     in property <bool> capsule-long;
     // Something else up front while Line holds: shown under the lyric.
     in property <bool> line-notice;
@@ -1421,8 +1055,8 @@ export component Island inherits Window {
     in property <bool> has-bg;
     in property <image> bg;
     // The island's size for the mode (Rust): it springs there.
-    in property <length> target-w: 170px;
-    in property <length> target-h: 34px;
+    in property <length> target-w: 180px;
+    in property <length> target-h: 45px;
 
     callback shelf-open(int);
     callback shelf-copy(int);
@@ -1447,32 +1081,41 @@ export component Island inherits Window {
     callback dismiss();
     callback tab-clicked(string);
     callback open-settings();
-    // "play-pause", "next", "previous".
+    // "play-pause", "next", "previous", "line-hold", "hold".
     callback music-command(string);
     callback lyrics-nudge(float);
 
     property <bool> hidden: mode == "hidden";
     property <bool> compact: mode == "compact";
     property <bool> expanded: mode == "expanded";
-    // Springs: the size, and the radius (a capsule until expanded).
+    // What the capsule shows.
+    property <bool> show-line: root.compact && root.line-held;
+    property <bool> show-media: root.compact && !root.line-held && root.notice && root.music-notice;
+    property <bool> show-notif: root.compact && !root.line-held && root.notice && !root.music-notice;
+    property <bool> show-ask: root.compact && !root.line-held && !root.notice && root.has-front && root.front.kind == "ask";
+    property <bool> show-song: root.compact && !root.line-held && !root.notice && root.has-front && root.front.kind == "ambient" && root.music.has-session;
+    property <bool> show-one: root.compact && !root.line-held && !root.notice && !root.show-ask && !root.show-song;
+    // Springs: the size, and the radius.
     property <length> island-w: target-w;
     property <length> island-h: target-h;
     animate island-w, island-h { duration: Ice.morph; easing: cubic-bezier(0.22, 1.18, 0.36, 1); }
-    property <length> island-r: expanded ? 36px : root.compact && (root.notice || (root.line-held && (root.line-notice || root.capsule-long))) ? 22px : self.island-h / 2;
+    property <length> island-r: root.hidden ? 2px : root.expanded || root.show-media ? 24px : root.show-line && root.line-notice ? 22px : self.island-h / 2;
     animate island-r { duration: Ice.morph; easing: ease-out; }
     property <length> ix: (root.width - self.island-w) / 2;
-    // The island takes the cover's colour while it shows the song (Music, or
-    // the capsule's now playing / Line): edge, glow, a wash from the left, the
-    // wave and the controls. Anything else keeps the theme's.
-    property <bool> music-lit: root.music.has-session && root.music.has-accent && !root.hidden && (
-        (root.expanded && (root.active-tab == "music" || (root.active-tab == "home" && root.has-front && root.front.kind == "ambient")))
-        || (root.compact && (root.line-held || (!root.notice && root.has-front && root.front.kind == "ambient"))));
-    property <color> tint: root.music-lit ? root.music.accent : Ice.glow;
-    animate tint { duration: 650ms; easing: ease-in-out; }
-    property <float> lit: root.music-lit ? 1 : 0;
-    animate lit { duration: 650ms; easing: ease-in-out; }
+    property <length> body-y: root.hidden ? 2px : Ice.top;
 
-    // Hidden: a wider strip than the bar, so it is easy to point at.
+    // The song's colour: the cover's, a light grey for a grey cover, green without one.
+    property <color> song-accent: root.music.has-accent ? root.music.accent : root.music.has-art ? #c8c8d2 : #30d158;
+    property <bool> song-lit: root.music.has-session && (
+        (root.expanded && (root.active-tab == "music" || root.active-tab == "lyrics"))
+        || root.show-line || root.show-song || root.show-media);
+    // The island takes the colour of what it shows: the song's, the app's, else a neutral grey.
+    property <color> tint: root.song-lit ? root.song-accent
+        : (root.show-notif || root.show-ask || (root.show-one && root.has-front)) ? root.front.accent
+        : Mini.neutral;
+    animate tint { duration: 650ms; easing: ease-in-out; }
+
+    // Hidden: a wider strip than the handle, so it is easy to point at.
     if hidden : TouchArea {
         x: (root.width - 200px) / 2;
         y: 0;
@@ -1481,123 +1124,62 @@ export component Island inherits Window {
         changed has-hover => { root.hover-changed(self.has-hover); }
     }
 
-    // A soft glow, two rings fading outwards (the window keeps 6 px for it).
+    // The handle above the open list (the hidden island is the handle itself).
+    if root.expanded : Rectangle {
+        x: (root.width - 64px) / 2;
+        y: 2px;
+        width: 64px;
+        height: 4px;
+        border-radius: 2px;
+        background: Mini.handle;
+    }
+
+    // A faint glow in the song's colour while it plays (the window keeps 6 px for it).
     Rectangle {
         x: root.ix - 6px;
-        y: Ice.top - 6px;
+        y: root.body-y - 6px;
         width: root.island-w + 12px;
         height: root.island-h + 12px;
         border-radius: root.island-r + 6px;
-        background: root.tint.with-alpha(root.hidden ? 0.08 : 0.03 + 0.05 * root.lit);
+        background: root.song-accent.with-alpha(root.song-lit && root.music.playing && !root.hidden ? 0.035 : 0);
     }
     Rectangle {
         x: root.ix - 3px;
-        y: Ice.top - 3px;
+        y: root.body-y - 3px;
         width: root.island-w + 6px;
         height: root.island-h + 6px;
         border-radius: root.island-r + 3px;
-        background: root.tint.with-alpha(root.hidden ? 0.16 : 0.07 + 0.07 * root.lit);
+        background: root.song-accent.with-alpha(root.song-lit && root.music.playing && !root.hidden ? 0.07 : 0);
     }
     // The body: one shape with its own 1 px edge (stacked rounded layers
-    // left halos at the edges with the software renderer), and a faint
-    // sheen on its upper half.
+    // left halos at the edges with the software renderer).
     Rectangle {
         x: root.ix;
-        y: Ice.top;
+        y: root.body-y;
         width: root.island-w;
         height: root.island-h;
         border-radius: root.island-r;
-        border-width: 1px;
-        border-color: root.hidden ? Ice.glow : root.tint.with-alpha(0.55 + 0.1 * root.lit);
-        // Solid: the software renderer doesn't round gradients.
+        border-width: root.hidden ? 0px : 1px;
+        border-color: Mini.edge;
         // `repaint` flips the alpha by 1/255 (invisible): the whole island
         // counts as changed and is drawn again. Without it the software
         // renderer kept showing the old lyric in Line's capsule.
-        // Glass: the body lets the screen through a little (the window is
-        // transparent per pixel), the hidden bar stays solid.
-        background: root.hidden ? Ice.frost.with-alpha(root.repaint ? 1 : 0.996)
-            : Ice.body.with-alpha(root.repaint ? Ice.glass : Ice.glass - 0.004);
+        background: root.hidden ? Mini.handle.with-alpha(root.repaint ? 1 : 0.996)
+            : Mini.base.with-alpha(root.repaint ? Mini.solid : Mini.solid - 0.004);
         clip: true;
 
-        // The wash: the song's colour (or the theme's) from the left edge, gone past the middle.
-        // One small white strip (assets/wash.png, alpha fading to the right)
-        // stretched and coloured: cheap to draw every frame, unlike paths or a
-        // gradient (which the software renderer neither rounds nor fills).
-        // The software renderer's clip is square too, so the strip is laid in
-        // three rectangles that stay inside the rounded shape (a middle band,
-        // and top and bottom bands right of the corners), and each left corner
-        // is a quarter disc in the strip's colour there.
-        wash := Rectangle {
-            x: 0;
-            y: 0;
+        // The colour from the left edge, gone by 45 % of the width.
+        Fade {
             width: parent.width;
             height: parent.height;
             visible: !root.hidden;
-            property <length> r: min(root.island-r, self.height / 2);
-            property <length> span: self.width * 0.7;
-            // Always some (the theme's colour), stronger for a song's.
-            property <float> strength: 0.16 + 0.10 * root.lit;
-            // How far into the strip a corner's middle is, in its 128 pixels.
-            property <int> skip: min(127, round(128 * self.r / max(1px, self.span)));
-            Image {
-                x: 0;
-                y: wash.r;
-                width: wash.span;
-                height: max(0px, wash.height - 2 * wash.r);
-                source: @image-url("../assets/wash.png");
-                image-fit: fill;
-                colorize: root.tint;
-                opacity: wash.strength;
-            }
-            for band in 2 : Image {
-                x: wash.r;
-                y: band == 0 ? 0px : wash.height - wash.r;
-                width: max(0px, wash.span - wash.r);
-                height: wash.r;
-                source: @image-url("../assets/wash.png");
-                source-clip-x: wash.skip;
-                source-clip-width: 128 - wash.skip;
-                image-fit: fill;
-                colorize: root.tint;
-                opacity: wash.strength;
-            }
-            for corner in 2 : Path {
-                x: 0;
-                y: corner == 0 ? 0px : wash.height - wash.r;
-                width: wash.r;
-                height: wash.r;
-                viewbox-x: 0;
-                viewbox-y: 0;
-                viewbox-width: 1;
-                viewbox-height: 1;
-                commands: corner == 0 ? "M 1 1 L 0 1 A 1 1 0 0 1 1 0 Z" : "M 1 0 L 0 0 A 1 1 0 0 0 1 1 Z";
-                // The strip's alpha half way into the corner: (1 - u)^1.7.
-                fill: root.tint.with-alpha(wash.strength * pow(1 - 0.5 * wash.r / max(1px, wash.span), 1.7));
-                stroke: transparent;
-            }
-        }
-        // Glass: a light catches the top edge, brightest in the middle (two
-        // overlapping strokes, as a stroke's gradient comes out flat too).
-        for g in 2 : Path {
-            x: 0;
-            y: 0;
-            width: parent.width;
-            height: parent.height;
-            viewbox-x: 0;
-            viewbox-y: 0;
-            viewbox-width: parent.width / 1px;
-            viewbox-height: parent.height / 1px;
-            visible: !root.hidden;
-            property <float> w: parent.width / 1px;
-            property <float> half: self.w * (g == 0 ? 0.30 : 0.14);
-            commands: "M " + (self.w / 2 - self.half) + " 1.2 H " + (self.w / 2 + self.half);
-            stroke: #ffffff.with-alpha(g == 0 ? 0.07 : 0.10);
-            stroke-width: 1px;
-            fill: transparent;
+            r: root.island-r;
+            tint: root.tint;
+            strength: 0.30;
+            span: 0.45;
         }
 
         // Shown once the spring has settled at the size it was cut for.
-        // 1 px in, so the island's edge stays drawn around it.
         if root.has-bg : Image {
             x: 1px;
             y: 1px;
@@ -1614,383 +1196,309 @@ export component Island inherits Window {
         TouchArea {
             changed has-hover => { root.hover-changed(self.has-hover); }
 
-            // Compact, a notification: who, what, and the message (after v1's chip).
-            HorizontalLayout {
-                opacity: root.compact && root.notice && !root.line-held ? 1 : 0;
+            // Compact, a notification (Mini Island's popup): the app's round
+            // icon, title and message, the app's name in its colour and the time.
+            Rectangle {
+                opacity: root.show-notif ? 1 : 0;
                 animate opacity { duration: Ice.fade; }
                 visible: self.opacity > 0.01;
-                padding-left: 12px;
-                padding-right: 18px;
-                padding-top: 8px;
-                padding-bottom: 8px;
-                spacing: 10px;
-                if root.mascot-on : Mascot {
-                    size: 32px;
-                    mood: root.mascot-mood;
-                    dy: root.mascot-dy;
-                    left: root.mascot-left;
-                    y: (parent.height - self.height) / 2;
-                    clicked => { root.mascot-clicked(); }
-                }
+                AppIcon { x: 12px; y: (parent.height - self.height) / 2; accent: root.front.accent; initial: root.front.initial; }
                 VerticalLayout {
+                    x: 12px + 34px + 10px;
+                    width: parent.width - self.x - 8px - notif-right.width - 22px;
                     alignment: center;
                     spacing: 1px;
-                    horizontal-stretch: 1;
-                    HorizontalLayout {
-                        spacing: 6px;
-                        Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
-                        Text { text: root.front.source; color: Ice.dim; font-size: 12px; font-weight: 700; overflow: elide; horizontal-stretch: 1; }
-                    }
-                    Text { text: root.front.title; color: Ice.ink; font-size: 13.5px; font-weight: 700; overflow: elide; }
-                    Text { text: root.front.body; color: Ice.soft; font-size: 12.5px; wrap: word-wrap; overflow: elide; max-height: 30px; }
+                    Text { text: root.front.title; color: Mini.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+                    if root.front.body != "" : Text { text: root.front.body; color: Mini.text-2; font-size: 12px; overflow: elide; }
+                }
+                notif-right := VerticalLayout {
+                    x: parent.width - 22px - self.width;
+                    width: min(80px, max(app-name.preferred-width, notif-time.preferred-width));
+                    alignment: center;
+                    spacing: 1px;
+                    app-name := Text { text: root.front.source; color: Paint.readable(root.front.accent); font-size: 10.5px; font-weight: 600; horizontal-alignment: right; overflow: elide; }
+                    notif-time := Text { text: root.clock; color: Mini.label; font-size: 10.5px; horizontal-alignment: right; }
+                }
+                TouchArea { clicked => { root.front-clicked(); } }
+            }
+
+            // Compact, a question: the popup with its answers on the right.
+            Rectangle {
+                opacity: root.show-ask ? 1 : 0;
+                animate opacity { duration: Ice.fade; }
+                visible: self.opacity > 0.01;
+                AppIcon { x: 12px; y: (parent.height - self.height) / 2; accent: root.front.accent; initial: root.front.initial; }
+                VerticalLayout {
+                    x: 12px + 34px + 10px;
+                    width: parent.width - self.x - 8px - ask-actions.preferred-width - 16px;
+                    alignment: center;
+                    spacing: 1px;
+                    Text { text: root.front.title; color: Mini.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+                    if root.front.body != "" : Text { text: root.front.body; color: Mini.text-2; font-size: 12px; overflow: elide; }
+                }
+                ask-actions := HorizontalLayout {
+                    x: parent.width - 16px - self.preferred-width;
+                    y: (parent.height - 24px) / 2;
+                    width: self.preferred-width;
+                    height: 24px;
+                    spacing: 6px;
+                    for a in root.front.actions : ActionPill { label: a.label; clicked => { root.action-clicked(a.id); } }
                 }
             }
 
-            // Compact, Line: the line being sung on top; a notification, the
-            // volume and the like underneath, so the lyric is never covered.
-            VerticalLayout {
-                opacity: root.compact && root.line-held ? 1 : 0;
+            // Compact, the music's notice (a new song, play, pause): Mini Island's song popup.
+            Rectangle {
+                opacity: root.show-media ? 1 : 0;
                 animate opacity { duration: Ice.fade; }
                 visible: self.opacity > 0.01;
-                padding-left: 12px;
-                padding-right: 18px;
-                padding-top: 3px;
-                padding-bottom: 3px;
-                alignment: start;
-                HorizontalLayout {
-                    height: root.capsule-long ? 52px : 32px;
-                    spacing: 9px;
-                    if root.mascot-on : Mascot {
-                        size: 32px;
-                        mood: root.mascot-mood;
-                        dy: root.mascot-dy;
-                        left: root.mascot-left;
-                        y: (parent.height - self.height) / 2;
-                        clicked => { root.mascot-clicked(); }
-                    }
-                    // A long lyric wraps to a second line rather than being cut;
-                    // centred on the capsule (the space on the right matches the mascot's).
-                    Text {
-                        text: root.capsule-line;
-                        color: Ice.ink;
-                        font-size: root.capsule-long ? 12px : 13px;
-                        font-weight: 600;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                        wrap: word-wrap;
-                        overflow: elide;
-                    }
-                    if root.mascot-on : Rectangle {
-                        width: 32px;
-                        if root.watching : Path {
-                            width: 12px;
-                            height: 12px;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
-                            commands: Icons.tv;
-                            stroke: Ice.dim;
-                            stroke-width: 2.2px;
-                            fill: transparent;
-                            x: 0;
-                            y: (parent.height - self.height) / 2;
-                        }
-                        if root.dnd : Path {
-                            x: parent.width - self.width;
-                            y: (parent.height - self.height) / 2;
-                            width: 12px;
-                            height: 12px;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
-                            commands: Icons.moon;
-                            fill: Ice.dim;
-                            stroke: transparent;
-                        }
-                    }
-                }
-                if root.line-notice : Rectangle { height: 1px; background: root.tint.with-alpha(0.22); }
-                if root.line-notice : HorizontalLayout {
-                    padding-top: 6px;
-                    padding-bottom: 6px;
-                    padding-left: root.mascot-on ? 41px : 0px;
-                    spacing: 8px;
-                    if root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
-                    if root.front.icon == "" : Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 1px;
-                        horizontal-stretch: 1;
-                        HorizontalLayout {
-                            spacing: 6px;
-                            if root.front.icon == "" : Text { text: root.front.source; color: Ice.dim; font-size: 12px; font-weight: 700; vertical-alignment: center; }
-                            Text { text: root.front.title; color: Ice.ink; font-size: 13px; font-weight: 700; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
-                        }
-                        if root.front.body != "" : Text { text: root.front.body; color: Ice.soft; font-size: 12.5px; overflow: elide; }
-                    }
-                    if root.front.has-progress : Bar {
-                        width: 70px;
-                        value: root.front.progress;
-                        y: (parent.height - self.height) / 2;
-                    }
-                    if root.waiting > 0 : Text {
-                        text: "+" + root.waiting;
-                        color: Ice.glow;
-                        font-size: 12px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
+                MusicCard {
+                    y: -4px + 1px;
+                    width: parent.width;
+                    card: false;
+                    music: root.music;
+                    accent: root.song-accent;
+                    volume: root.volume;
+                    live: root.show-media;
+                    line-held: root.line-held;
+                    command(c) => { root.music-command(c); }
                 }
             }
 
-            // Compact: one line.
-            HorizontalLayout {
-                opacity: root.compact && !root.notice && !root.line-held ? 1 : 0;
+            // Compact, the song (Mini Island's small pill): the cover, the
+            // line being sung (Line) or the song running by, the bars. A
+            // notice while Line holds shows underneath, so the lyric is never covered.
+            Rectangle {
+                opacity: root.show-song || root.show-line ? 1 : 0;
                 animate opacity { duration: Ice.fade; }
                 visible: self.opacity > 0.01;
-                padding-left: 12px;
-                padding-right: 16px;
-                spacing: 9px;
-                alignment: center;
-                if root.mascot-on : Mascot {
-                    // the tiny sprite at 1x in the capsule
-                    size: 32px;
-                    mood: root.mascot-mood;
-                    dy: root.mascot-dy;
-                    left: root.mascot-left;
-                    y: (parent.height - self.height) / 2;
-                    clicked => { root.mascot-clicked(); }
-                }
-                if root.has-front && root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
-                // Now playing: the cover, small, instead of the dot.
-                if root.has-front && root.front.icon == "" && root.front.kind == "ambient" && root.music.has-art : Rectangle {
-                    width: 20px;
-                    height: 20px;
-                    y: (parent.height - self.height) / 2;
+                property <length> pill-h: root.show-line && root.line-notice ? self.height - (root.front.body != "" ? 54px : 30px) : self.height;
+                Cover {
+                    x: 5px;
+                    y: (parent.pill-h - self.height) / 2;
+                    size: 19px;
+                    glyph-size: 11px;
                     border-radius: 6px;
-                    clip: true;
-                    Image { source: root.music.art; width: parent.width; height: parent.height; image-fit: cover; }
+                    music: root.music;
+                    accent: root.song-accent;
                 }
-                if root.has-front && root.front.icon == "" && !(root.front.kind == "ambient" && root.music.has-art) : Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
+                Equalizer {
+                    x: parent.width - 9px - self.width;
+                    y: (parent.pill-h - self.height) / 2;
+                    bar-w: 3px * 0.95;
+                    bar-h: 12px * 0.95;
+                    playing: root.music.playing;
+                    tint: Paint.readable(root.song-accent);
+                }
+                // Between the cover and the bars.
+                lyric-box := Rectangle {
+                    x: 24px + 7px;
+                    width: parent.width - self.x - 7px - 9px - 3 * 5px * 0.95;
+                    height: parent.pill-h;
+                    property <bool> lyric: root.show-line && root.capsule-line != "";
+                    if !lyric-box.lyric : Marquee {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: min(parent.width, 156px);
+                        height: 15px + 9px;
+                        music: root.music;
+                        accent: root.song-accent;
+                        live: root.show-song || root.show-line;
+                    }
+                    // The line: the song's colour lifted toward white, made
+                    // smaller when it is too long for the widest capsule.
+                    line-probe := Text { visible: false; text: root.capsule-line; font-size: 11.5px * Mini.k; font-weight: 600; }
+                    if lyric-box.lyric : VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: root.capsule-line;
+                            color: Paint.lift(root.song-accent, 0.55);
+                            font-size: 11.5px * Mini.k * min(1, lyric-box.width / max(1px, line-probe.preferred-width));
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                        }
+                        if root.capsule-romaji != "" : Text {
+                            text: root.capsule-romaji;
+                            color: Paint.lift(root.song-accent, 0.55).with-alpha(0.85);
+                            font-size: 8.5px * Mini.k * min(1, lyric-box.width / max(1px, line-probe.preferred-width));
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+                if root.show-line && root.line-notice : Rectangle {
+                    y: parent.pill-h;
+                    height: parent.height - parent.pill-h;
+                    Rectangle { x: 14px; width: parent.width - 28px; y: 0; height: 1px; background: #ffffff1f; }
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 16px;
+                        spacing: 10px;
+                        if root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
+                        if root.front.icon == "" : AppIcon { size: 26px; accent: root.front.accent; initial: root.front.initial; y: (parent.height - self.height) / 2; }
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            Text { text: root.front.title; color: Mini.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+                            if root.front.body != "" : Text { text: root.front.body; color: Mini.text-2; font-size: 12px; overflow: elide; }
+                        }
+                        if root.front.has-progress : Bar { width: 70px; value: root.front.progress; tint: Paint.readable(root.front.accent); y: (parent.height - self.height) / 2; }
+                        if root.waiting > 0 : Text { text: "+" + root.waiting; color: Mini.label; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                    }
+                }
+            }
+
+            // Compact, anything else on one line (a system notice, a
+            // progress, a status), or the time when nothing goes on.
+            HorizontalLayout {
+                opacity: root.show-one ? 1 : 0;
+                animate opacity { duration: Ice.fade; }
+                visible: self.opacity > 0.01;
+                padding-left: 14px;
+                padding-right: 16px;
+                spacing: 10px;
+                alignment: center;
+                if root.has-front && root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
+                if root.has-front && root.front.icon == "" : AppIcon { size: 26px; accent: root.front.accent; initial: root.front.initial; y: (parent.height - self.height) / 2; }
                 Text {
                     text: root.has-front ? root.front.title : root.clock;
-                    color: Ice.ink;
-                    font-size: 13px;
-                    font-weight: 600;
+                    color: Mini.ink;
+                    font-size: root.has-front ? 13px : 16px;
+                    font-weight: root.has-front ? 600 : 700;
                     vertical-alignment: center;
                     overflow: elide;
                 }
-                if root.has-front && root.front.has-progress : Bar {
-                    width: 70px;
-                    value: root.front.progress;
-                    y: (parent.height - self.height) / 2;
-                }
-                if root.has-front && root.front.kind == "ambient" && root.music.playing : Equalizer {
-                    playing: true;
-                    tint: root.tint;
-                    height: 14px;
-                    y: (parent.height - self.height) / 2;
-                }
-                if root.waiting > 0 : Text {
-                    text: "+" + root.waiting;
-                    color: Ice.glow;
-                    font-size: 12px;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                }
-                if root.watching : Path {
-                    width: 12px;
-                    height: 12px;
-                    y: (parent.height - self.height) / 2;
-                    viewbox-width: 24;
-                    viewbox-height: 24;
-                    commands: Icons.tv;
-                    stroke: Ice.dim;
-                    stroke-width: 2.2px;
-                    fill: transparent;
-                }
-                if root.dnd : Path {
-                    width: 12px;
-                    height: 12px;
-                    y: (parent.height - self.height) / 2;
-                    viewbox-width: 24;
-                    viewbox-height: 24;
-                    commands: Icons.moon;
-                    fill: Ice.dim;
-                    stroke: transparent;
-                }
+                if root.has-front && root.front.has-progress : Bar { width: 70px; value: root.front.progress; tint: Paint.readable(root.front.accent); y: (parent.height - self.height) / 2; }
+                if root.waiting > 0 : Text { text: "+" + root.waiting; color: Mini.label; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                if root.watching : Glyph { width: 14px; text: Glyphs.video; font-size: 11px; color: Mini.label; }
+                if root.dnd : Glyph { width: 14px; text: Glyphs.moon; font-size: 11px; color: Mini.label; }
             }
 
-            // Expanded: tabs, then the page of the active one.
-            VerticalLayout {
+            // Open: the tabs and the time, the page, the gear.
+            Rectangle {
                 opacity: root.expanded ? 1 : 0;
                 animate opacity { duration: Ice.fade; easing: ease-out; }
                 visible: self.opacity > 0.01;
-                padding: 14px;
-                padding-top: 10px;
-                spacing: 10px;
+                property <length> inner-x: 1px + 8px;
+                property <length> inner-w: self.width - 2 * self.inner-x;
 
-                HorizontalLayout {
-                    spacing: 2px;
+                // The tab track: one tab per page, the open one a lighter pill with its name.
+                Rectangle {
+                    x: parent.inner-x;
+                    y: 1px + 12px;
+                    width: tab-row.preferred-width + 6px;
                     height: 36px;
-                    Panel {
-                        border-radius: 14px;
-                        HorizontalLayout {
-                    padding: 2px;
-                    spacing: 2px;
-                    Chip { id: "home"; show-label: true; accent: root.tint; label: "Home"; active: root.active-tab == "home"; clicked => { root.tab-clicked("home"); } }
-                    for t in root.tabs : Chip { id: t.id; accent: root.tint; label: t.label; active: root.active-tab == t.id; clicked => { root.tab-clicked(t.id); } }
+                    border-radius: 13px;
+                    background: #ffffff1e;
+                    tab-row := HorizontalLayout {
+                        x: 3px;
+                        width: self.preferred-width;
+                        y: 3px;
+                        height: 30px;
+                        for t in root.tabs : Rectangle {
+                            property <bool> on: root.active-tab == t.id;
+                            width: self.on ? tab-label.preferred-width + 10px + 14px + 7px + 12px : 34px;
+                            height: 30px;
+                            border-radius: 10px;
+                            background: self.on ? #ffffff3a : tab-area.has-hover ? #ffffff1a : transparent;
+                            animate background { duration: 150ms; }
+                            Glyph {
+                                x: parent.on ? 10px : (parent.width - self.width) / 2;
+                                width: 14px;
+                                text: Glyphs.tab(t.id);
+                                font-size: 14px;
+                                color: parent.on || tab-area.has-hover ? Mini.ink : Mini.text-3;
+                            }
+                            tab-label := Text {
+                                x: 10px + 14px + 7px;
+                                width: self.preferred-width;
+                                height: 100%;
+                                visible: parent.on;
+                                text: t.label;
+                                color: Mini.ink;
+                                font-size: 13px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                            tab-area := TouchArea { enabled: !parent.on; mouse-cursor: pointer; clicked => { root.tab-clicked(t.id); } }
                         }
                     }
-                    Rectangle { horizontal-stretch: 1; }
-                    Text { text: root.clock; color: Ice.ink; font-size: 16px; font-weight: 800; vertical-alignment: center; }
-                    Rectangle { width: 8px; }
-                    Rectangle { width: root.watching ? 0px : 4px; }
-                    // The docked video: click keeps it shown or lets it follow
-                    // the island; right-click sends it back to its tab.
-                    if root.watching : WatchButton {
-                        held: root.watch-held;
-                        title: root.watch-title;
-                        clicked => { root.watch-clicked(); }
-                        back => { root.watch-back(); }
-                    }
-                    // Do not disturb, beside Settings.
-                    IconButton { icon: Icons.moon; size: 28px; icon-size: 15px; stroke-width: 1.8px; on: root.dnd; filled: root.dnd; clicked => { root.dnd-clicked(); } }
-                    IconButton { icon: Icons.gear; size: 32px; icon-size: 18px; stroke-width: 1.8px; clicked => { root.open-settings(); } }
+                }
+                Text {
+                    x: parent.inner-x + parent.inner-w - 8px - self.width;
+                    width: self.preferred-width;
+                    y: 1px + 12px;
+                    height: 36px;
+                    text: root.clock;
+                    color: Mini.ink;
+                    font-size: 16px;
+                    font-weight: 700;
+                    vertical-alignment: center;
                 }
 
+                // The page.
                 Rectangle {
-                    vertical-stretch: 1;
-
-                    // Home with nothing (or only music): the mascot, a big clock.
+                    x: parent.inner-x;
+                    y: 1px + 12px + 36px + 8px;
+                    width: parent.inner-w;
+                    height: parent.height - self.y - 1px - 12px - 18px - 5px;
                     Page {
-                        shown: root.active-tab == "home" && (!root.has-front || root.front.kind == "ambient");
-                        HorizontalLayout {
-                            spacing: 18px;
-                            alignment: start;
-                            if root.mascot-on : Mascot {
-                                size: 128px;
-                                mood: root.mascot-mood;
-                                dx: root.mascot-dx;
-                                dy: root.mascot-dy;
-                                left: root.mascot-left;
-                                y: (parent.height - self.height) / 2;
-                                clicked => { root.mascot-clicked(); }
-                            }
-                            VerticalLayout {
-                                alignment: center;
-                                spacing: 2px;
-                                Hud { text: root.date; }
-                                Text { text: root.clock; color: Ice.ink; font-size: 48px; font-weight: 800; }
-                                if !root.has-front : Text { text: "All quiet. Pick a tab, or drop a file here."; color: Ice.dim; font-size: 12.5px; }
-                                if root.has-front : HorizontalLayout {
-                                    spacing: 8px;
-                                    Equalizer { playing: root.music.playing; height: 12px; tint: root.tint; }
-                                    Text { text: root.front.title + "  ·  " + root.front.body; color: Ice.soft; font-size: 13px; overflow: elide; }
-                                }
-                            }
-                        }
+                        shown: root.active-tab == "notifications";
+                        NotifPage { items: root.notifications; clicked(i) => { root.notif-clicked(i); } clear => { root.notif-clear(); } }
                     }
-
-                    // Home with something going on: it in full, then who waits.
-                    Page {
-                        shown: root.active-tab == "home" && root.has-front && root.front.kind != "ambient";
-                        VerticalLayout {
-                        spacing: 6px;
-                        Panel {
-                        VerticalLayout {
-                            padding: 12px;
-                            spacing: 6px;
-                            HorizontalLayout {
-                                spacing: 8px;
-                                Dot { accent: root.front.accent; y: (parent.height - self.height) / 2; }
-                                Hud { text: root.front.source; horizontal-stretch: 1; }
-                                RoundButton { glyph: "×"; size: 22px; clicked => { root.dismiss(); } }
-                            }
-                            Text {
-                                text: root.front.title;
-                                color: front-area.has-hover ? Ice.glow : Ice.ink;
-                                font-size: 17px;
-                                font-weight: 800;
-                                overflow: elide;
-                                animate color { duration: 120ms; }
-                                front-area := TouchArea { clicked => { root.front-clicked(); } }
-                            }
-                            if root.front.body != "" : Text {
-                                text: root.front.body;
-                                color: Ice.soft;
-                                font-size: 13.5px;
-                                wrap: word-wrap;
-                                overflow: elide;
-                                max-height: 54px;
-                            }
-                            if root.front.has-progress : Bar { value: root.front.progress; }
-                            if root.front.actions.length > 0 : HorizontalLayout {
-                                spacing: 8px;
-                                alignment: start;
-                                for a in root.front.actions : Pill { label: a.label; clicked => { root.action-clicked(a.id); } }
-                            }
-                        }
-                        }
-                            for item in root.others : HorizontalLayout {
-                                spacing: 8px;
-                                height: 18px;
-                                Dot { accent: item.accent; y: (parent.height - self.height) / 2; }
-                                Text { text: item.title; color: Ice.dim; font-size: 12.5px; vertical-alignment: center; overflow: elide; }
-                            }
-                            Rectangle { }
-                        }
-                    }
-
                     Page {
                         shown: root.active-tab == "music";
-                        MusicPage { music: root.music; tint: root.tint; live: root.expanded && root.active-tab == "music"; held: root.held; line-held: root.line-held; command(c) => { root.music-command(c); } nudge(d) => { root.lyrics-nudge(d); } }
-                    }
-                    Page {
-                        shown: root.active-tab == "focus";
-                        FocusPage { pomodoro: root.pomodoro; command(c) => { root.focus-command(c); } }
-                    }
-                    Page {
-                        shown: root.active-tab == "water";
-                        WaterPage { water: root.water; command(c) => { root.water-command(c); } }
-                    }
-                    Page {
-                        shown: root.active-tab == "todo";
-                        TodoPage {
-                            tasks: root.tasks;
-                            log: root.todo-log;
-                            show-log <=> root.todo-show-log;
-                            add(t) => { root.todo-add(t); }
-                            toggle(id) => { root.todo-toggle(id); }
-                            remove(id) => { root.todo-remove(id); }
-                            move(id, to) => { root.todo-move(id, to); }
-                            clear-done => { root.todo-clear-done(); }
-                            open-count: root.todo-open;
+                        MusicCard {
+                            y: 0;
+                            width: parent.width;
+                            music: root.music;
+                            accent: root.song-accent;
+                            volume: root.volume;
+                            live: root.expanded && root.active-tab == "music";
+                            line-held: root.line-held;
+                            command(c) => { root.music-command(c); }
                         }
                     }
                     Page {
-                        shown: root.active-tab == "shelf";
-                        ShelfPage {
-                            items: root.shelf;
-                            drop-hover: root.drop-hover;
-                            open(i) => { root.shelf-open(i); }
-                            copy(i) => { root.shelf-copy(i); }
-                            remove(i) => { root.shelf-remove(i); }
-                            clear => { root.shelf-clear(); }
+                        shown: root.active-tab == "lyrics";
+                        LyricsPage {
+                            y: 0;
+                            width: parent.width;
+                            music: root.music;
+                            accent: root.song-accent;
+                            held: root.held;
+                            japanese: root.lyrics-japanese;
+                            command(c) => { root.music-command(c); }
                         }
                     }
                     Page {
                         shown: root.active-tab == "accounts";
                         AccountsPage {
+                            y: 0;
+                            width: parent.width;
+                            height: self.preferred-height;
                             groups: root.account-groups;
                             pending: root.account-pending;
                             note: root.account-note;
                             clicked(id) => { root.account-clicked(id); }
                         }
                     }
-                    Page {
-                        shown: root.active-tab == "notifications";
-                        NotifPage { items: root.notifications; clicked(i) => { root.notif-clicked(i); } clear => { root.notif-clear(); } }
+                }
+
+                // The footer: the gear on the right (Do not disturb and a
+                // docked video beside it).
+                HorizontalLayout {
+                    x: parent.inner-x + parent.inner-w - 2px - self.preferred-width;
+                    width: self.preferred-width;
+                    y: parent.height - 1px - 12px - 18px;
+                    height: 18px;
+                    spacing: 4px;
+                    if root.watching : FooterButton {
+                        glyph: Glyphs.video;
+                        on: root.watch-held;
+                        clicked => { root.watch-clicked(); }
+                        right-clicked => { root.watch-back(); }
                     }
+                    FooterButton { glyph: Glyphs.moon; on: root.dnd; clicked => { root.dnd-clicked(); } }
+                    FooterButton { glyph: Glyphs.gear; clicked => { root.open-settings(); } }
                 }
             }
         }

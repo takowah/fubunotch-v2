@@ -15,7 +15,7 @@ pub struct Account {
 }
 
 /// The services shown, in order, with their titles.
-pub const SERVICES: [(&str, &str); 3] = [("desktop", "CLAUDE DESKTOP"), ("claude", "CLAUDE CODE"), ("codex", "CODEX")];
+pub const SERVICES: [(&str, &str); 3] = [("desktop", "Claude Desktop"), ("claude", "Claude Code"), ("codex", "Codex")];
 
 fn home() -> PathBuf {
     std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_default()

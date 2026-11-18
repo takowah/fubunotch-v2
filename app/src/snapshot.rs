@@ -11,8 +11,11 @@ use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgb
 use slint::platform::{Platform, WindowAdapter, WindowEvent};
 use slint::PlatformError;
 
-/// Pixels per logical pixel in the PNG: sharp enough to judge.
-pub const SCALE: f32 = 1.5;
+/// Pixels per logical pixel in the PNG: sharp enough to judge (1.5), or\r
+/// FUBUNOTCH_V2_SNAPSHOT_SCALE (1 for pixel-for-pixel checks against a screenshot).
+pub fn scale() -> f32 {
+    std::env::var("FUBUNOTCH_V2_SNAPSHOT_SCALE").ok().and_then(|v| v.parse().ok()).filter(|s: &f32| *s >= 0.5 && *s <= 4.0).unwrap_or(1.5)
+}
 
 struct SnapPlatform;
 
@@ -29,7 +32,7 @@ struct Shared {
 impl Platform for SnapPlatform {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
         let w = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
-        w.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: SCALE });
+        w.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: scale() });
         PLATFORM.with(|p| {
             if let Some(p) = p.borrow().as_ref() {
                 p.windows.borrow_mut().push(w.clone());
@@ -77,7 +80,7 @@ pub fn write(index: usize, size: (f32, f32), path: &str) -> Result<(), Box<dyn s
     let window = PLATFORM
         .with(|p| p.borrow().as_ref().and_then(|p| p.windows.borrow().get(index).cloned()))
         .ok_or("no such window")?;
-    let (w, h) = ((size.0 * SCALE).round() as u32, (size.1 * SCALE).round() as u32);
+    let (w, h) = ((size.0 * scale()).round() as u32, (size.1 * scale()).round() as u32);
     window.set_size(slint::PhysicalSize::new(w, h));
     advance(50);
     let mut buf = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
