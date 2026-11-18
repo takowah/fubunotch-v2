@@ -1442,10 +1442,18 @@ fn capsule_lyric(state: &State) -> String {
 /// The line being sung now, for the capsule (its text and romaji).
 /// The capsule lyric's karaoke sweep: how far into its line the song is (ms)
 /// and how long the line lasts (ms, until the next line, at most 12 s).
+/// How much later the lines run than they were timed (an MV's intro). Not for a
+/// browser: its length is missing or 2x-6x the song, which pushed the lyrics up
+/// to 8 s late (18 Nov 2026).
+fn intro_shift(snap: &music::Snapshot, timed_for: f64) -> f64 {
+    let browser = matches!(snap.app.to_lowercase().as_str(), "chrome" | "edge" | "firefox" | "brave" | "opera" | "vivaldi");
+    if browser { 0.0 } else { island_lyrics::intro_shift(snap.duration, timed_for) }
+}
+
 fn capsule_sweep(state: &State) -> (i32, i32) {
     let snap = &state.music;
     let Some(l) = state.lyrics.as_ref().filter(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty()) else { return (0, 0) };
-    let shift = island_lyrics::intro_shift(snap.duration, l.duration) + state.lyrics_nudge;
+    let shift = intro_shift(snap, l.duration) + state.lyrics_nudge;
     let at = snap.position_now() - shift;
     let Some(i) = island_lyrics::line_at(&l.lines, at) else { return (0, 0) };
     let start = l.lines[i].time;
@@ -1456,7 +1464,7 @@ fn capsule_sweep(state: &State) -> (i32, i32) {
 fn capsule_lyric_line(state: &State) -> Option<&island_lyrics::Line> {
     let snap = &state.music;
     let l = state.lyrics.as_ref().filter(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty())?;
-    let shift = island_lyrics::intro_shift(snap.duration, l.duration) + state.lyrics_nudge;
+    let shift = intro_shift(snap, l.duration) + state.lyrics_nudge;
     island_lyrics::line_at(&l.lines, snap.position_now() - shift).map(|i| &l.lines[i])
 }
 
@@ -1487,7 +1495,7 @@ fn music_view(
     let position = snap.position_now();
     // The lines are timed for the recording they came from: an MV's intro
     // (and the user's nudge) moves them later.
-    let shift = lyrics.as_ref().map_or(0.0, |l| island_lyrics::intro_shift(snap.duration, l.duration)) + nudge;
+    let shift = lyrics.as_ref().map_or(0.0, |l| intro_shift(snap, l.duration)) + nudge;
     let sung_at = position - shift;
     // The song's length: a browser's (Apple Music on the web) is missing or 2x-6x
     // the song, so the length the lyrics were timed for wins there, and anywhere
