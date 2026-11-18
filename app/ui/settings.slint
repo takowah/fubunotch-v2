@@ -101,6 +101,9 @@ export struct SettingsView {
     prayer-place: string,
     prayer-remind: int,
     prayer-at-time: bool,
+    // Day Progress: wake and bedtime, minutes after midnight.
+    day-wake: int,
+    day-bedtime: int,
     data-folder: string,
     claude-status: string,
     claude-installed: bool,
@@ -147,6 +150,7 @@ global SetGlyphs {
             : id == "water" ? "\u{EB42}"
             : id == "focus" ? "\u{E916}"
             : id == "prayer" ? "\u{E823}"
+            : id == "day" ? "\u{EB05}"
             : id == "system" ? "\u{E7F4}"
             : id == "claude" ? "\u{E756}"
             : id == "todo" ? "\u{E73A}"
@@ -792,6 +796,7 @@ export component SettingsWindow inherits Window {
                 NavItem { label: "Water"; id: "water"; active: root.page == "water"; clicked => { root.page = "water"; } }
                 NavItem { label: "Focus"; id: "focus"; active: root.page == "focus"; clicked => { root.page = "focus"; } }
                 NavItem { label: "Prayer"; id: "prayer"; active: root.page == "prayer"; clicked => { root.page = "prayer"; } }
+                NavItem { label: "Day Progress"; id: "day"; active: root.page == "day"; clicked => { root.page = "day"; } }
                 NavItem { label: "System"; id: "system"; active: root.page == "system"; clicked => { root.page = "system"; } }
                 NavItem { label: "Claude Code"; id: "claude"; active: root.page == "claude"; clicked => { root.page = "claude"; } }
                 Rectangle { vertical-stretch: 1; }
@@ -824,7 +829,7 @@ export component SettingsWindow inherits Window {
                         Text {
                             text: root.page == "general" ? "General" : root.page == "look" ? "Appearance" : root.page == "modules" ? "Modules"
                                 : root.page == "music" ? "Music" : root.page == "notifications" ? "Notifications" : root.page == "water" ? "Water"
-                                : root.page == "focus" ? "Focus" : root.page == "prayer" ? "Prayer" : root.page == "system" ? "System" : "Claude Code";
+                                : root.page == "focus" ? "Focus" : root.page == "prayer" ? "Prayer" : root.page == "day" ? "Day Progress" : root.page == "system" ? "System" : "Claude Code";
                             color: K.ink;
                             font-size: 24px;
                             font-weight: 700;
@@ -838,6 +843,7 @@ export component SettingsWindow inherits Window {
                                 : root.page == "water" ? "A glass at a time toward a daily goal."
                                 : root.page == "focus" ? "Pomodoro rounds and breaks."
                                 : root.page == "prayer" ? "Today's prayer times (Kemenag), worked out on this PC."
+                                : root.page == "day" ? "How much of your day, week, month and year has gone."
                                 : root.page == "system" ? "Small notices for what changes on this PC."
                                 : "Answer Claude Code's permission requests from the island.";
                             color: K.hint;
@@ -1254,6 +1260,13 @@ export component SettingsWindow inherits Window {
                 if root.page == "prayer" : Card {
                     SettingRow { title: "Remind before"; hint: "Minutes before each prayer; 0 for none."; Stepper { value: root.s.prayer-remind; minimum: 0; maximum: 30; unit: "min"; changed(v) => { root.number-changed("prayer.remind_before_min", v); } } }
                     SettingRow { title: "At prayer time"; hint: "Subuh, Dzuhur, Ashar, Maghrib and Isya."; last: true; Toggle { on: root.s.prayer-at-time; toggled(v) => { root.flag-changed("prayer.at_time", v); } } }
+                }
+
+                // ── Day Progress ──
+                if root.page == "day" : Heading { text: "YOUR DAY"; }
+                if root.page == "day" : Card {
+                    SettingRow { title: "Wake time"; hint: "Where the day's bar starts."; Stepper { value: root.s.day-wake; minimum: 0; maximum: root.s.day-bedtime - 30; step: 30; time: true; changed(v) => { root.number-changed("day.wake", v); } } }
+                    SettingRow { title: "Bedtime"; hint: "Where it ends; the island counts down to it."; last: true; Stepper { value: root.s.day-bedtime; minimum: root.s.day-wake + 30; maximum: 1439; step: 30; time: true; changed(v) => { root.number-changed("day.bedtime", v); } } }
                 }
 
                 if root.page == "system" : Heading { text: "NOTICES"; }

@@ -8,6 +8,7 @@
 
 mod autostart;
 mod prayer;
+mod day;
 mod watch;
 mod banners;
 mod mascot;
@@ -884,7 +885,14 @@ fn refresh(ui: &Island) {
             .collect();
         ui.set_others(ModelRc::new(VecModel::from(others)));
         // KANMURI_DEMO_PRAYER: the header's clock says the pretend time too.
-        let clock = if std::env::var_os("KANMURI_DEMO_PRAYER").is_some() { prayer::hh_mm(prayer_now().3 / 60) } else { local_time::clock_text() };
+        // So does KANMURI_DEMO_DAY.
+        let clock = if std::env::var_os("KANMURI_DEMO_DAY").is_some() {
+            prayer::hh_mm(day_now().3 / 60)
+        } else if std::env::var_os("KANMURI_DEMO_PRAYER").is_some() {
+            prayer::hh_mm(prayer_now().3 / 60)
+        } else {
+            local_time::clock_text()
+        };
         ui.set_clock(SharedString::from(clock));
 
         // Tabs, as Mini Island's list: Notifications (when there are some, or
@@ -902,6 +910,9 @@ fn refresh(ui: &Island) {
         }
         if state.settings.is_on("prayer") {
             tab_ids.push(("prayer", "Prayer"));
+        }
+        if state.settings.is_on("day") {
+            tab_ids.push(("day", "Day Progress"));
         }
         if accounts::installed() {
             tab_ids.push(("accounts", "Accounts"));
@@ -964,6 +975,10 @@ fn refresh(ui: &Island) {
         ui.set_water(water_view(state));
         if state.active_tab == "prayer" {
             ui.set_prayer(prayer_view(&mut state.prayer_day, &state.settings));
+        }
+        // Day Progress moves with the clock's per-minute wake (no timer of its own).
+        if state.active_tab == "day" {
+            ui.set_day(day_view(&mut state.prayer_day, &state.settings));
         }
         let tasks: Vec<TaskRow> = state.data.todo.ordered().into_iter().map(|t| TaskRow { id: t.id as i32, text: t.text.as_str().into(), done: t.done }).collect();
         ui.set_tasks(ModelRc::new(VecModel::from(tasks)));
@@ -1106,7 +1121,7 @@ fn refresh(ui: &Island) {
             Mode::Expanded => {
                 let page = match state.active_tab.as_str() {
                     "music" if has_lyrics => sizes.expanded_tall_h - EXPANDED_CHROME,
-                    "music" | "prayer" => page_h,
+                    "music" | "prayer" | "day" => page_h,
                     "accounts" => accounts_h.max(page_h),
                     _ if state.notifications.is_empty() && ask_count == 0 => page_h,
                     _ => {
@@ -2105,6 +2120,74 @@ fn prayer_view(cache: &mut Option<(String, prayer::Day)>, settings: &Settings) -
     }
 }
 
+// ── Day Progress ──────────────────────────────────────────────────────────────
+
+/// Now for Day Progress: (year, month, day, seconds since midnight).
+/// KANMURI_DEMO_DAY=HH:MM pretends it is that time today (snapshots).
+fn day_now() -> (i32, u32, u32, u32) {
+    static DEMO: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    let demo = *DEMO.get_or_init(|| std::env::var("KANMURI_DEMO_DAY").ok().and_then(|v| parse_hh_mm(&v)));
+    let (y, m, d, secs) = local_time::now_parts();
+    (y, m, d, demo.map_or(secs, |min| min * 60))
+}
+
+/// The Day Progress page: the waking day (wake to bedtime) with now on it,
+/// the week, month and year, and the next prayer when Prayer is on (Kanmuri
+/// has no calendar, so nothing else is "coming up").
+fn day_view(cache: &mut Option<(String, prayer::Day)>, settings: &Settings) -> DayView {
+    let (y, m, d, secs) = day_now();
+    let (wake, bed) = settings.day.span();
+    let f = day::day_fraction(secs, wake, bed);
+    let detail = if secs < wake * 60 {
+        format!("of your day · it starts at {}", prayer::hh_mm(wake))
+    } else if secs >= bed * 60 {
+        format!("of your day · past bedtime ({})", prayer::hh_mm(bed))
+    } else {
+        String::new()
+    };
+    let left = if detail.is_empty() { day::h_m(day::left_until(secs, bed).max(1)) } else { String::new() };
+    let card = |label: &str, f: f32| DayCard { label: label.into(), percent: format!("{}%", day::percent(f)).into(), fraction: f };
+    let mut next = (String::new(), String::new(), String::new());
+    if settings.is_on("prayer") {
+        let today = prayer_day(cache, settings, y, m, d);
+        let found = today.prayers().into_iter().find(|(_, at)| at * 60 > secs).map(|(w, at)| (w, at, at * 60));
+        let found = found.or_else(|| {
+            let (_, lat, lon) = prayer_place(settings);
+            let (ty, tm, td) = local_time::add_days(y, m, d, 1);
+            let at = prayer::day(ty, tm, td, lat, lon, local_time::utc_offset_hours()).get(prayer::Which::Subuh);
+            Some((prayer::Which::Subuh, at, 24 * 3600 + at * 60))
+        });
+        if let Some((w, at, at_s)) = found {
+            let tomorrow = at_s >= 24 * 3600;
+            let mins = (at_s - secs).div_ceil(60);
+            next = (
+                w.name().into(),
+                format!("{}{}", prayer::hh_mm(at), if tomorrow { " tomorrow" } else { "" }),
+                format!("in {}", day::h_m(mins)),
+            );
+        }
+    }
+    DayView {
+        percent: format!("{}%", day::percent(f)).into(),
+        left: left.into(),
+        bedtime: prayer::hh_mm(bed).into(),
+        detail: detail.into(),
+        fraction: f,
+        ticks: ModelRc::new(VecModel::from(
+            day::ticks(wake, bed).into_iter().map(|(t, at)| DayTick { text: prayer::hh_mm(t).into(), at }).collect::<Vec<_>>(),
+        )),
+        cards: ModelRc::new(VecModel::from(vec![
+            card("WEEK", day::week_fraction(y, m, d, secs)),
+            card("MONTH", day::month_fraction(y, m, d, secs)),
+            card("YEAR", day::year_fraction(y, m, d, secs)),
+        ])),
+        has_next: !next.0.is_empty(),
+        next_name: next.0.into(),
+        next_when: next.1.into(),
+        next_in: next.2.into(),
+    }
+}
+
 fn start_music(ui: &Island) {
     let weak = ui.as_weak();
     music::start(move |snap| {
@@ -2223,6 +2306,8 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         prayer_place: prayer_place(s).0.into(),
         prayer_remind: s.prayer.remind_before_min.min(30) as i32,
         prayer_at_time: s.prayer.at_time,
+        day_wake: s.day.span().0 as i32,
+        day_bedtime: s.day.span().1 as i32,
         data_folder: store::data_dir().display().to_string().into(),
         claude_status: status.into(),
         claude_installed: installed,
@@ -2309,6 +2394,8 @@ fn set_number(s: &mut Settings, key: &str, v: i32) {
         "focus.long_min" => s.focus.long_min = u.clamp(1, 120),
         "focus.rounds" => s.focus.rounds = u.clamp(1, 12),
         "prayer.remind_before_min" => s.prayer.remind_before_min = u.min(30),
+        "day.wake" => s.day.wake = local_time::hh_mm(u.min(1439)),
+        "day.bedtime" => s.day.bedtime = local_time::hh_mm(u.min(1439)),
         _ => {}
     }
 }
