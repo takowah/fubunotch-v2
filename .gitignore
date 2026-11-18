@@ -3,3 +3,4 @@
 scripts/pixel/.cache/
 __pycache__/
 .claude/worktrees/
+tools/*.log

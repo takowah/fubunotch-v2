@@ -214,11 +214,13 @@ pub struct GeneralSettings {
     pub hide_after_s: u32,
     /// Pop the island up for activities (not asks: those always show).
     pub popups: bool,
+    /// The screen the island sits on, by Windows' name ("\\.\DISPLAY1"); "" = the main one.
+    pub screen: String,
 }
 
 impl Default for GeneralSettings {
     fn default() -> Self {
-        GeneralSettings { hide_after_s: 3, popups: true }
+        GeneralSettings { hide_after_s: 3, popups: true, screen: String::new() }
     }
 }
 

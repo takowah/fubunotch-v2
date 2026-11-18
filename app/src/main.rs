@@ -394,11 +394,18 @@ fn round_cover(rgba: &mut [u8], n: u32) {
     }
 }
 
-/// Puts the (fixed-size) window at the top centre of its monitor.
+/// The screen picked in Settings > General (Windows' name); "" = the main one.
+static SCREEN: Mutex<String> = Mutex::new(String::new());
+
+/// Puts the (fixed-size) window at the top centre of its monitor: the screen
+/// picked in Settings when it is connected, else the one it is on or the main one.
 fn place(ui: &Island) {
     ui.window().set_size(LogicalSize::new(WINDOW.0, WINDOW.1));
+    let want = SCREEN.lock().unwrap_or_else(|e| e.into_inner()).clone();
     ui.window().with_winit_window(|win: &winit::window::Window| {
-        if let Some(monitor) = win.current_monitor().or_else(|| win.primary_monitor()) {
+        let picked = if want.is_empty() { None } else { win.available_monitors().find(|m| m.name().as_deref() == Some(want.as_str())) };
+        let fallback = if want.is_empty() { win.current_monitor().or_else(|| win.primary_monitor()) } else { win.primary_monitor() };
+        if let Some(monitor) = picked.or(fallback) {
             let scale = monitor.scale_factor();
             let mw = monitor.size().width as f64;
             let x = monitor.position().x as f64 + (mw - WINDOW.0 as f64 * scale) / 2.0;
@@ -1760,7 +1767,21 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         .collect();
     let w = &s.water;
     let plan = w.plan();
+    // The screens to pick from: the main one first, then the others by name.
+    let mut screens: Vec<ScreenRow> = Vec::new();
+    win.window().with_winit_window(|w: &winit::window::Window| {
+        let main = w.primary_monitor().and_then(|m| m.name());
+        let mut all: Vec<String> = w.available_monitors().filter_map(|m| m.name()).collect();
+        all.sort();
+        for (i, name) in all.iter().enumerate() {
+            let is_main = main.as_deref() == Some(name.as_str());
+            screens.push(ScreenRow { id: if is_main { "".into() } else { name.as_str().into() }, label: format!("Screen {}{}", i + 1, if is_main { " (main)" } else { "" }).into() });
+        }
+    });
+    screens.sort_by_key(|r| !r.id.is_empty());
     win.set_s(SettingsView {
+        screens: ModelRc::new(VecModel::from(screens)),
+        screen: s.general.screen.as_str().into(),
         modules: ModelRc::new(VecModel::from(modules)),
         lyrics: s.music.lyrics,
         lyrics_youtube: s.music.lyrics_youtube,
@@ -1804,6 +1825,7 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
 fn change_settings(ui: &Island, f: impl FnOnce(&mut Settings)) {
     let refill = with_state(|state| {
         f(&mut state.settings);
+        *SCREEN.lock().unwrap_or_else(|e| e.into_inner()) = state.settings.general.screen.clone();
         // Water and Focus follow at once (v1: new lengths apply to a phase not yet started).
         state.water_plan = state.settings.water.plan();
         let plan = state.settings.focus.plan();
@@ -2036,6 +2058,13 @@ fn open_settings(ui: &Island) {
                 with_state(|state| state.bg_preview = None);
                 update_background(&ui);
             }
+        }
+    });
+    let island = ui.as_weak();
+    win.on_screen_picked(move |id| {
+        if let Some(ui) = island.upgrade() {
+            change_settings(&ui, |s| s.general.screen = id.to_string());
+            recover_island(&ui);
         }
     });
     let island = ui.as_weak();
@@ -2275,6 +2304,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pinned = std::env::var_os("FUBUNOTCH_V2_EXPANDED").is_some();
     let first_tab = std::env::var("FUBUNOTCH_V2_TAB").unwrap_or_else(|_| "home".into());
     let mut settings = store::load();
+    *SCREEN.lock().unwrap_or_else(|e| e.into_inner()) = settings.general.screen.clone();
     // FUBUNOTCH_V2_THEME: a theme for this run only (checks of each look).
     if let Ok(t) = std::env::var("FUBUNOTCH_V2_THEME") {
         settings.look.theme = t;

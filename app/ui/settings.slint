@@ -22,7 +22,15 @@ export struct AppSwitch {
     on: bool,
 }
 
+// A screen the island can sit on (Settings > General > Screen).
+export struct ScreenRow {
+    id: string,
+    label: string,
+}
+
 export struct SettingsView {
+    screens: [ScreenRow],
+    screen: string,
     modules: [ModuleRow],
     lyrics: bool,
     lyrics-youtube: bool,
@@ -294,6 +302,7 @@ export component SettingsWindow inherits Window {
     callback apps-changed(string);
     callback notif-app-toggled(string, bool);
     callback theme-picked(string);
+    callback screen-picked(string);
     /// "background.pick", "background.clear", "open-data-folder".
     callback action(string);
     callback claude-connect(bool);
@@ -386,6 +395,15 @@ export component SettingsWindow inherits Window {
                 // ── General ──
                 if root.page == "general" : Card {
                     SettingRow { title: "Start with Windows"; hint: "The island comes up when you sign in."; Toggle { on: root.s.autostart; toggled(v) => { root.flag-changed("autostart", v); } } }
+                    if root.s.screens.length > 1 : SettingRow {
+                        title: "Screen";
+                        hint: "Which screen the island sits on.";
+                        for sc in root.s.screens : SmallButton {
+                            label: sc.label;
+                            primary: sc.id == root.s.screen;
+                            clicked => { root.screen-picked(sc.id); }
+                        }
+                    }
                     SettingRow { title: "Pop up for activities"; tall: true; hint: "The island drops down for new things. Questions from Claude Code always show."; Toggle { on: root.s.popups; toggled(v) => { root.flag-changed("general.popups", v); } } }
                     SettingRow {
                         title: "Hide when idle";
