@@ -106,8 +106,77 @@ fn toasts(listener: &UserNotificationListener) -> windows::core::Result<Vec<User
 /// An app's logo as Windows shows it (its tile), LOGO_PX square RGBA, kept
 /// per app (by AUMID) the first time one of its notifications is read, so the
 /// island draws the real icon instead of a letter. None when Windows has none
-/// (some unpackaged apps).
-pub const LOGO_PX: u32 = 48;
+/// (some unpackaged apps). Icons are drawn at 26-34 px (up to 51 at 1.5×
+/// scale): 48 came out blocky. Read big (SRC_PX), the empty margin cut off (a
+/// tile logo like WhatsApp's sits small in the middle of its square), then
+/// averaged down to LOGO_PX.
+pub const LOGO_PX: u32 = 64;
+const SRC_PX: u32 = 256;
+
+/// A square RGBA picture (side `n`): its transparent margin cut off, centred
+/// on a square, and averaged down to LOGO_PX. None when it is all transparent.
+fn fit_logo(px: &[u8], n: u32) -> Option<Vec<u8>> {
+    if px.len() != (n * n * 4) as usize {
+        return None;
+    }
+    let alpha = |x: u32, y: u32| px[((y * n + x) * 4 + 3) as usize];
+    let (mut x0, mut y0, mut x1, mut y1) = (n, n, 0u32, 0u32);
+    for y in 0..n {
+        for x in 0..n {
+            if alpha(x, y) > 16 {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x + 1);
+                y1 = y1.max(y + 1);
+            }
+        }
+    }
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let side = (x1 - x0).max(y1 - y0) as f32;
+    let left = (x0 + x1) as f32 / 2.0 - side / 2.0;
+    let top = (y0 + y1) as f32 / 2.0 - side / 2.0;
+    let out_n = LOGO_PX;
+    let step = side / out_n as f32;
+    let mut out = vec![0u8; (out_n * out_n * 4) as usize];
+    for oy in 0..out_n {
+        let (sy0, sy1) = (top + oy as f32 * step, top + (oy + 1) as f32 * step);
+        for ox in 0..out_n {
+            let (sx0, sx1) = (left + ox as f32 * step, left + (ox + 1) as f32 * step);
+            // Area average in premultiplied colour; outside the picture is transparent.
+            let (mut r, mut g, mut b, mut a, mut wsum) = (0f32, 0f32, 0f32, 0f32, 0f32);
+            let mut y = sy0.floor();
+            while y < sy1 {
+                let wy = (sy1.min(y + 1.0) - sy0.max(y)).max(0.0);
+                let mut x = sx0.floor();
+                while x < sx1 {
+                    let wx = (sx1.min(x + 1.0) - sx0.max(x)).max(0.0);
+                    let w = wx * wy;
+                    if x >= 0.0 && y >= 0.0 && (x as u32) < n && (y as u32) < n {
+                        let i = ((y as u32 * n + x as u32) * 4) as usize;
+                        let pa = px[i + 3] as f32 / 255.0;
+                        r += px[i] as f32 * pa * w;
+                        g += px[i + 1] as f32 * pa * w;
+                        b += px[i + 2] as f32 * pa * w;
+                        a += pa * w;
+                    }
+                    wsum += w;
+                    x += 1.0;
+                }
+                y += 1.0;
+            }
+            let o = ((oy * out_n + ox) * 4) as usize;
+            if a > 0.0 && wsum > 0.0 {
+                out[o] = (r / a).round().min(255.0) as u8;
+                out[o + 1] = (g / a).round().min(255.0) as u8;
+                out[o + 2] = (b / a).round().min(255.0) as u8;
+                out[o + 3] = (a / wsum * 255.0).round().min(255.0) as u8;
+            }
+        }
+    }
+    Some(out)
+}
 static LOGOS: std::sync::Mutex<Option<std::collections::HashMap<String, Option<Arc<Vec<u8>>>>>> = std::sync::Mutex::new(None);
 
 pub fn logo(aumid: &str) -> Option<Arc<Vec<u8>>> {
@@ -199,7 +268,7 @@ fn item_icon(name: &str) -> Option<Vec<u8>> {
     use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY};
     unsafe {
         let factory: IShellItemImageFactory = SHCreateItemFromParsingName(&HSTRING::from(name), None).ok()?;
-        let n = LOGO_PX as i32;
+        let n = SRC_PX as i32;
         let bmp = factory.GetImage(SIZE { cx: n, cy: n }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK).ok()?;
         let mut info = BITMAPINFO::default();
         info.bmiHeader = BITMAPINFOHEADER {
@@ -228,18 +297,21 @@ fn item_icon(name: &str) -> Option<Vec<u8>> {
             c[1] = un(g);
             c[2] = un(b);
         }
-        px.iter().skip(3).step_by(4).any(|&a| a > 0).then_some(px)
+        fit_logo(&px, SRC_PX)
     }
 }
 
 fn decode_logo(info: &windows::ApplicationModel::AppInfo) -> windows::core::Result<Vec<u8>> {
     use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapDecoder, BitmapPixelFormat, BitmapTransform, ColorManagementMode, ExifOrientationMode};
-    let size = windows::Foundation::Size { Width: LOGO_PX as f32, Height: LOGO_PX as f32 };
+    use windows::Graphics::Imaging::BitmapInterpolationMode;
+    let size = windows::Foundation::Size { Width: SRC_PX as f32, Height: SRC_PX as f32 };
     let stream = info.DisplayInfo()?.GetLogo(size)?.OpenReadAsync()?.get()?;
     let decoder = BitmapDecoder::CreateAsync(&stream)?.get()?;
     let transform = BitmapTransform::new()?;
-    transform.SetScaledWidth(LOGO_PX)?;
-    transform.SetScaledHeight(LOGO_PX)?;
+    transform.SetScaledWidth(SRC_PX)?;
+    transform.SetScaledHeight(SRC_PX)?;
+    // The default is nearest neighbour: jagged edges.
+    transform.SetInterpolationMode(BitmapInterpolationMode::Fant)?;
     let pixels = decoder
         .GetPixelDataTransformedAsync(
             BitmapPixelFormat::Rgba8,
@@ -249,7 +321,7 @@ fn decode_logo(info: &windows::ApplicationModel::AppInfo) -> windows::core::Resu
             ColorManagementMode::DoNotColorManage,
         )?
         .get()?;
-    Ok(pixels.DetachPixelData()?.to_vec())
+    fit_logo(&pixels.DetachPixelData()?.to_vec(), SRC_PX).ok_or_else(|| windows::core::Error::from(windows::Win32::Foundation::E_FAIL))
 }
 
 fn read(n: &UserNotification) -> Option<Notif> {
@@ -456,6 +528,27 @@ pub fn open(n: &Notif) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_small_logo_in_a_big_margin_fills_the_icon() {
+        // A 64 px green square in the middle of a 256 px transparent tile.
+        let n = 256u32;
+        let mut px = vec![0u8; (n * n * 4) as usize];
+        for y in 96..160 {
+            for x in 96..160 {
+                let i = ((y * n + x) * 4) as usize;
+                px[i..i + 4].copy_from_slice(&[0, 200, 80, 255]);
+            }
+        }
+        let out = fit_logo(&px, n).unwrap();
+        assert_eq!(out.len(), (LOGO_PX * LOGO_PX * 4) as usize);
+        // Corners and centre are now the logo itself, solid and the same colour.
+        for &(x, y) in &[(0, 0), (LOGO_PX - 1, LOGO_PX - 1), (LOGO_PX / 2, LOGO_PX / 2)] {
+            let i = ((y * LOGO_PX + x) * 4) as usize;
+            assert_eq!(&out[i..i + 4], &[0, 200, 80, 255], "at {x},{y}");
+        }
+        assert!(fit_logo(&vec![0u8; (n * n * 4) as usize], n).is_none(), "all transparent");
+    }
 
     #[test]
     fn the_allow_list() {

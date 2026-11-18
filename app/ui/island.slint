@@ -48,7 +48,7 @@ export struct TabInfo {
     label: string,
 }
 
-// One account NotchDeck manages (Accounts tab).
+// One Claude Desktop, Claude Code or Codex account (Accounts tab).
 // One limit window under an account (Accounts tab): "5-hour", 0.32, "32% used", "resets 22:00".
 export struct UsageRow {
     label: string,
@@ -207,6 +207,13 @@ export struct NotifRow {
     // The app's real logo (rounded by Rust), when Windows has one.
     logo: image,
     has-logo: bool,
+    // Where it is in the notification list (for a click).
+    index: int,
+    // How many the app has: more than one is a stack (its newest on top), a
+    // click opens it.
+    count: int,
+    // The app's stack this row belongs to.
+    key: string,
 }
 
 // A question from Claude Code waiting for Allow / Deny, at the top of the
@@ -1115,11 +1122,20 @@ component MusicWide inherits Rectangle {
 
 // Notifications: a header (how many, Clear all) and the six newest in two
 // columns, each row the app's round icon, the title and message, the time.
+// An app with several is one stack (as on an iPhone): its newest on top, a
+// card peeking under it and the count on its icon; a click opens the stack,
+// the header's "‹ App" closes it.
 component NotifPage inherits Rectangle {
     in property <[NotifRow]> items;
     // Claude Code's open questions, on top, one a row (the three newest).
     in property <[AskRow]> asks;
+    // The app whose stack is open ("" = all apps, stacked).
+    in property <string> open-app;
+    // How many notifications there are in all.
+    in property <int> total;
     callback clicked(int);
+    callback stack-clicked(string);
+    callback collapse();
     callback clear();
     callback answered(string, string);
     // One column for a single notification, else two.
@@ -1145,11 +1161,13 @@ component NotifPage inherits Rectangle {
             x: 0;
             width: self.preferred-width;
             height: 100%;
-            text: root.items.length > 6 ? "Notifications (6 of " + root.items.length + ")" : "Notifications";
-            color: Mini.label;
+            text: root.open-app != "" ? "‹  " + root.open-app + " (" + root.items.length + ")" : root.items.length > 6 ? "Notifications (6 of " + root.items.length + " apps)" : root.total > root.items.length ? "Notifications (" + root.total + ")" : "Notifications";
+            color: root.open-app != "" && back-area.has-hover ? Mini.ink : Mini.label;
             font-size: 11px;
             font-weight: 600;
             vertical-alignment: center;
+            animate color { duration: 180ms; }
+            back-area := TouchArea { enabled: root.open-app != ""; mouse-cursor: root.open-app != "" ? pointer : default; clicked => { root.collapse(); } }
         }
         if root.items.length > 0 : Text {
             x: parent.width - self.width;
@@ -1202,25 +1220,54 @@ component NotifPage inherits Rectangle {
         y: root.grid-y + floor(i / root.cols) * 50px;
         width: root.col-w;
         height: 48px;
-        Tinted { width: parent.width; height: parent.height; tint: n.accent; lit: row.has-hover; }
-        AppIcon { x: 8px; y: 9px; size: 30px; accent: n.accent; initial: n.initial; logo: n.logo; has-logo: n.has-logo; }
-        VerticalLayout {
-            x: 50px;
-            width: parent.width - 50px - 10px - 44px;
-            alignment: center;
-            Text { text: n.title == "" ? n.app : n.title; color: Mini.ink; font-size: 13px; font-weight: 600; overflow: elide; }
-            if n.body != "" : Text { text: n.body; color: Mini.text-3; font-size: 12px; overflow: elide; }
+        // The card under the top one: only its bottom edge shows (clip is
+        // square, so the cut is the straight top edge; the rounded corners stay).
+        if n.count > 1 : Rectangle {
+            x: 10px;
+            y: 41px;
+            width: parent.width - 20px;
+            height: 7px;
+            clip: true;
+            Rectangle {
+                y: -33px;
+                width: parent.width;
+                height: 40px;
+                border-radius: 12px;
+                background: Mini.wash.with-alpha(min(1, 0.07 * Mini.wk));
+            }
         }
-        Text {
-            x: parent.width - 8px - self.width;
-            width: self.preferred-width;
-            height: 100%;
-            text: n.time;
-            color: Mini.label;
-            font-size: 11px;
-            vertical-alignment: center;
+        Tinted { width: parent.width; height: n.count > 1 ? 41px : parent.height; tint: n.accent; lit: row.has-hover; }
+        Rectangle {
+            height: n.count > 1 ? 41px : parent.height;
+            AppIcon { x: 8px; y: (parent.height - self.height) / 2; size: 30px; accent: n.accent; initial: n.initial; logo: n.logo; has-logo: n.has-logo; }
+            // The stack's count on the icon's corner.
+            if n.count > 1 : Rectangle {
+                x: 8px + 30px - self.width + 4px;
+                y: (parent.height - 30px) / 2 + 30px - 14px + 2px;
+                width: max(14px, count-text.preferred-width + 8px);
+                height: 14px;
+                border-radius: 7px;
+                background: Mini.ink;
+                count-text := Text { text: n.count; color: Mini.base; font-size: 9px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+            }
+            VerticalLayout {
+                x: 50px;
+                width: parent.width - 50px - 10px - 44px;
+                alignment: center;
+                Text { text: n.title == "" ? n.app : n.title; color: Mini.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+                if n.body != "" : Text { text: n.body; color: Mini.text-3; font-size: 12px; overflow: elide; }
+            }
+            Text {
+                x: parent.width - 8px - self.width;
+                width: self.preferred-width;
+                height: 100%;
+                text: n.time;
+                color: Mini.label;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
         }
-        row := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(i); } }
+        row := TouchArea { mouse-cursor: pointer; clicked => { if (n.count > 1) { root.stack-clicked(n.key); } else { root.clicked(n.index); } } }
     }
 }
 
@@ -1351,10 +1398,12 @@ component LyricsPage inherits Rectangle {
 
 // Accounts: one column per app (its icon and name, then its accounts as
 // chips stacked: a round initial and the name). The one in use is solid
-// white; a click on another asks NotchDeck to switch.
+// white; a click on another switches to it (Claude Desktop asks for a second click).
 component AccountChip inherits Rectangle {
     in property <AccountRow> account;
     in property <bool> pending;
+    // Shown in place of the name: "Click again to restart Claude", or how a switch went.
+    in property <string> hint;
     callback clicked();
     height: 34px;
     border-radius: 17px;
@@ -1375,7 +1424,7 @@ component AccountChip inherits Rectangle {
         }
         Text {
             horizontal-stretch: 1;
-            text: root.pending && !root.account.active ? root.account.name + "  ..." : root.account.name;
+            text: root.hint != "" ? root.hint : root.pending && !root.account.active ? root.account.name + "  ..." : root.account.name;
             color: root.account.active && !Mini.light ? Mini.base : Mini.ink;
             font-size: 13px;
             font-weight: 600;
@@ -1424,9 +1473,10 @@ component UsageLine inherits Rectangle {
 component AccountBlock inherits VerticalLayout {
     in property <AccountRow> account;
     in property <bool> pending;
+    in property <string> hint;
     callback clicked();
     spacing: 5px;
-    AccountChip { account: root.account; pending: root.pending; clicked => { root.clicked(); } }
+    AccountChip { account: root.account; pending: root.pending; hint: root.hint; clicked => { root.clicked(); } }
     for w in root.account.windows : UsageLine { usage: w; }
     if root.account.note != "" : Text {
         height: root.account.note-lines * 13px;
@@ -1443,13 +1493,15 @@ component AccountsPage inherits Rectangle {
     in property <[AccountGroup]> groups;
     in property <string> pending;
     in property <string> note;
+    in property <string> hint-id;
+    in property <string> hint;
     callback clicked(string);
     property <length> gap: 10px;
     property <length> col-w: (root.width - (root.groups.length - 1) * self.gap) / max(1, root.groups.length);
     if root.groups.length == 0 : Text {
         width: parent.width;
         height: parent.height;
-        text: root.note == "" ? "No accounts in NotchDeck yet" : root.note;
+        text: root.note == "" ? "No accounts set up yet" : root.note;
         color: Mini.text-3;
         font-size: 13px;
         horizontal-alignment: center;
@@ -1474,7 +1526,7 @@ component AccountsPage inherits Rectangle {
                 Glyph { width: 13px; text: Glyphs.service(g.title); font-size: 12px; color: Mini.label; horizontal-alignment: left; }
                 Text { text: g.title; color: Mini.label; font-size: 12px; font-weight: 600; vertical-alignment: center; overflow: elide; }
             }
-            for a in g.accounts : AccountBlock { account: a; pending: root.pending == a.id; clicked => { root.clicked(a.id); } }
+            for a in g.accounts : AccountBlock { account: a; pending: root.pending == a.id; hint: root.hint-id == a.id ? root.hint : ""; clicked => { root.clicked(a.id); } }
         }
     }
 }
@@ -1763,6 +1815,9 @@ export component Island inherits Window {
     // Romaji of the line on the capsule (shown under it), when the lyrics have it.
     in property <string> capsule-romaji;
     in property <[NotifRow]> notifications;
+    // The app whose stack is open on the Notifications page ("" = stacked), and how many there are in all.
+    in property <string> notif-open-app;
+    in property <int> notif-total;
     in property <[AskRow]> asks;
     in property <FocusView> pomodoro;
     in property <WaterView> water;
@@ -1776,6 +1831,8 @@ export component Island inherits Window {
     in property <[AccountGroup]> account-groups;
     in property <string> account-pending;
     in property <string> account-note;
+    in property <string> account-hint-id;
+    in property <string> account-hint;
     callback account-clicked(string);
     in property <bool> drop-hover;
     // "hidden", "compact", "expanded".
@@ -1837,6 +1894,9 @@ export component Island inherits Window {
     callback hover-changed(bool);
     callback front-clicked();
     callback notif-clicked(int);
+    // A stacked app's row was clicked: open its stack; the header's "‹ App": close it.
+    callback notif-stack-clicked(string);
+    callback notif-collapse();
     callback notif-clear();
     callback action-clicked(string);
     // A question answered from its row on the Notifications page: its id, "allow" / "deny".
@@ -2287,7 +2347,7 @@ export component Island inherits Window {
                     QuickButton {
                         glyph: Glyphs.bell;
                         on: root.active-tab == "notifications";
-                        badge: root.notifications.length + root.asks.length;
+                        badge: root.notif-total + root.asks.length;
                         clicked => { root.tab-clicked("notifications"); }
                     }
                     QuickButton { glyph: Glyphs.gear; clicked => { root.open-settings(); } }
@@ -2304,7 +2364,11 @@ export component Island inherits Window {
                         NotifPage {
                             items: root.notifications;
                             asks: root.asks;
+                            open-app: root.notif-open-app;
+                            total: root.notif-total;
                             clicked(i) => { root.notif-clicked(i); }
+                            stack-clicked(k) => { root.notif-stack-clicked(k); }
+                            collapse => { root.notif-collapse(); }
                             clear => { root.notif-clear(); }
                             answered(id, a) => { root.ask-answered(id, a); }
                         }
@@ -2348,6 +2412,8 @@ export component Island inherits Window {
                             groups: root.account-groups;
                             pending: root.account-pending;
                             note: root.account-note;
+                            hint-id: root.account-hint-id;
+                            hint: root.account-hint;
                             clicked(id) => { root.account-clicked(id); }
                         }
                     }

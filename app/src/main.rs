@@ -98,6 +98,8 @@ const NOTIF_ROWS_MAX: usize = 6;
 const ASK_ROWS_MAX: usize = 3;
 /// Accounts: one column per app, its title and its chips stacked.
 const ACCOUNT_PAD: f32 = 8.0;
+/// On a Claude Desktop chip after the first click: the switch restarts Claude.
+const CONFIRM_DESKTOP: &str = "Click again to restart Claude";
 const ACCOUNT_TITLE_H: f32 = 20.0;
 const ACCOUNT_CHIP_H: f32 = 34.0;
 const ACCOUNT_SPACING: f32 = 8.0;
@@ -209,8 +211,13 @@ struct State {
     size_to: (f32, f32),
     region_timer: Timer,
     active_tab: String,
-    /// The account NotchDeck was just asked to switch to (shown as busy).
+    /// The app whose notification stack is open on the Notifications page ("" = all stacked).
+    notif_open: String,
+    /// The account being switched to (shown as busy).
     account_pending: String,
+    /// A line shown on one account's chip in place of its name: "Click again to
+    /// restart Claude", or how the last switch went. (account id, text)
+    account_hint: (String, String),
     /// The Accounts page was open at the last refresh (its usage is read when it opens).
     accounts_open: bool,
     settings: Settings,
@@ -433,6 +440,37 @@ fn activity_aumid(notifications: &VecDeque<notif::Notif>, a: &Activity) -> Strin
         return n.aumid.clone();
     }
     notifications.iter().find(|n| n.app == a.source).map(|n| n.aumid.clone()).or_else(|| notif::seen_apps().get(&a.source).cloned()).unwrap_or_default()
+}
+
+/// The stack a notification belongs to: its app (by AUMID, else its name).
+fn notif_key(n: &notif::Notif) -> &str {
+    if n.aumid.is_empty() {
+        &n.app
+    } else {
+        &n.aumid
+    }
+}
+
+/// The Notifications page's rows, as (index in the list, how many the stack
+/// has): one per app, its newest (the list is newest first), like an
+/// iPhone's stacks; or, with a stack open, every notification of that app.
+fn notif_view(list: &std::collections::VecDeque<notif::Notif>, open: &str) -> Vec<(usize, usize)> {
+    if !open.is_empty() && list.iter().any(|n| notif_key(n) == open) {
+        return list.iter().enumerate().filter(|(_, n)| notif_key(n) == open).map(|(i, _)| (i, 1)).collect();
+    }
+    let mut rows: Vec<(usize, usize)> = Vec::new();
+    let mut keys: Vec<&str> = Vec::new();
+    for (i, n) in list.iter().enumerate() {
+        let k = notif_key(n);
+        match keys.iter().position(|x| *x == k) {
+            Some(p) => rows[p].1 += 1,
+            None => {
+                keys.push(k);
+                rows.push((i, 1));
+            }
+        }
+    }
+    rows
 }
 
 /// An app's logo as an image with rounded corners, made once per app on the
@@ -1001,9 +1039,11 @@ fn morph_to(ui: &Island, state: &mut State, target: (f32, f32)) {
 }
 
 /// Shows what the arbiter and the modules say, sizes the island, sets the one timer.
-/// The Accounts tab: NotchDeck's accounts, one column per app.
+/// The Accounts tab: the Claude Desktop, Claude Code and Codex accounts, one column per app.
 /// Returns the page's height: the tallest column (its title, its chips stacked).
-fn set_accounts(ui: &Island, pending: &str) -> f32 {
+fn set_accounts(ui: &Island, pending: &str, hint: &(String, String)) -> f32 {
+    ui.set_account_hint_id(hint.0.as_str().into());
+    ui.set_account_hint(hint.1.as_str().into());
     let list = accounts::load();
     let mut groups: Vec<AccountGroup> = Vec::new();
     let mut tallest = 0.0f32;
@@ -1028,7 +1068,7 @@ fn set_accounts(ui: &Island, pending: &str) -> f32 {
                     id: a.id.as_str().into(),
                     name: a.name.as_str().into(),
                     initial: a.name.trim().chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
-                    // Once NotchDeck has switched, the pending one is the active one.
+                    // Once switched, the pending one is the active one.
                     active: a.active,
                     plan: v.plan.as_str().into(),
                     windows: ModelRc::new(VecModel::from(windows)),
@@ -1046,7 +1086,7 @@ fn set_accounts(ui: &Island, pending: &str) -> f32 {
     let pending = if list.iter().any(|a| a.id == pending && a.active) { "" } else { pending };
     ui.set_account_pending(pending.into());
     if groups.is_empty() {
-        ui.set_account_note(if accounts::installed() { "No accounts in NotchDeck yet" } else { "Install NotchDeck to switch Claude and Codex accounts here" }.into());
+        ui.set_account_note("No accounts set up yet".into());
     }
     ui.set_account_groups(ModelRc::new(VecModel::from(groups)));
     2.0 * ACCOUNT_PAD + tallest
@@ -1113,7 +1153,7 @@ fn refresh(ui: &Island) {
 
         // Tabs, as Mini Island's list: Notifications (when there are some, or
         // no song), Music and Lyrics (while a song plays, Lyrics when it has
-        // them), Accounts (with NotchDeck).
+        // them), Accounts (once accounts are set up).
         let has_lyrics = state.lyrics.as_ref().is_some_and(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty());
         let mut tab_ids: Vec<(&str, &str)> = Vec::new();
         let asks = ask_rows(&state.arbiter, &mut state.logos);
@@ -1142,13 +1182,24 @@ fn refresh(ui: &Island) {
         ui.set_tabs(ModelRc::new(VecModel::from(tabs)));
         ui.set_active_tab(state.active_tab.as_str().into());
         let lyrics_on = state.settings.music.lyrics || state.settings.music.lyrics_youtube;
+        if !state.notifications.iter().any(|n| notif_key(n) == state.notif_open) {
+            // The open stack is gone (cleared or read elsewhere).
+            state.notif_open.clear();
+        }
+        let view_rows = notif_view(&state.notifications, &state.notif_open);
+        let open_app = state.notifications.iter().find(|n| !state.notif_open.is_empty() && notif_key(n) == state.notif_open).map(|n| n.app.clone()).unwrap_or_default();
+        ui.set_notif_open_app(open_app.as_str().into());
+        ui.set_notif_total(state.notifications.len() as i32);
         let logos = &mut state.logos;
-        let rows: Vec<NotifRow> = state
-            .notifications
+        let rows: Vec<NotifRow> = view_rows
             .iter()
-            .map(|n| {
+            .filter_map(|&(i, count)| state.notifications.get(i).map(|n| (i, count, n)))
+            .map(|(i, count, n)| {
                 let logo = logo_image(logos, &n.aumid);
                 NotifRow {
+                    index: i as i32,
+                    count: count as i32,
+                    key: notif_key(n).into(),
                     app: n.app.as_str().into(),
                     title: n.title.as_str().into(),
                     body: n.body.as_str().into(),
@@ -1207,7 +1258,7 @@ fn refresh(ui: &Island) {
             accounts_opened(ui);
         }
         state.accounts_open = accounts_open;
-        let accounts_h = if state.active_tab == "accounts" { set_accounts(ui, &state.account_pending) } else { 0.0 };
+        let accounts_h = if state.active_tab == "accounts" { set_accounts(ui, &state.account_pending, &state.account_hint) } else { 0.0 };
         ui.set_drop_hover(state.drop_hover);
         *NOTIF_APPS.lock().unwrap_or_else(|e| e.into_inner()) = state.settings.notifications.filter();
         let rating = state.data.ratings.get(&song_key(&state.music)).copied().unwrap_or(0);
@@ -1360,7 +1411,7 @@ fn refresh(ui: &Island) {
                         // Claude Code's questions first, one a row; then the
                         // notifications in two columns (one for a single one).
                         let q = ask_count.min(ASK_ROWS_MAX);
-                        let n = state.notifications.len().min(NOTIF_ROWS_MAX);
+                        let n = notif_view(&state.notifications, &state.notif_open).len().min(NOTIF_ROWS_MAX);
                         let cols = if n == 1 { 1 } else { 2 };
                         (NOTIF_HEADER_H + (q + n.div_ceil(cols)) as f32 * NOTIF_ROW_PITCH).max(page_h)
                     }
@@ -3383,7 +3434,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             size_to: (0.0, 0.0),
             region_timer: Timer::default(),
             active_tab: first_tab,
+            notif_open: String::new(),
             account_pending: String::new(),
+            account_hint: (String::new(), String::new()),
             accounts_open: false,
             settings,
             music: music::Snapshot::default(),
@@ -3488,24 +3541,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let weak = ui.as_weak();
     ui.on_account_clicked(move |id| {
         let Some(ui) = weak.upgrade() else { return };
-        if let Err(e) = accounts::switch(id.as_str()) {
-            store::log(&format!("accounts: switch {id} failed: {e}"));
-            ui.set_account_note(format!("Couldn't switch: {e}").into());
+        let id = id.to_string();
+        let busy = with_state(|state| !state.account_pending.is_empty()).unwrap_or(false);
+        if busy {
             return;
         }
-        with_state(|state| state.account_pending = id.to_string());
-        refresh(&ui);
-        // NotchDeck writes its state within a second or so (Claude Desktop asks first): look again, then clear.
-        for (ms, last) in [(1200u64, false), (3500, false), (8000, true)] {
+        // Claude Desktop restarts on a switch: the first click only asks.
+        let asked = with_state(|state| state.account_hint.0 == id && state.account_hint.1 == CONFIRM_DESKTOP).unwrap_or(false);
+        if accounts::needs_confirm(&id) && !asked {
+            with_state(|state| state.account_hint = (id.clone(), CONFIRM_DESKTOP.to_string()));
+            refresh(&ui);
             let weak = ui.as_weak();
-            Timer::single_shot(std::time::Duration::from_millis(ms), move || {
+            Timer::single_shot(std::time::Duration::from_secs(5), move || {
                 let Some(ui) = weak.upgrade() else { return };
-                if last {
-                    with_state(|state| state.account_pending.clear());
-                }
+                with_state(|state| {
+                    if state.account_hint.1 == CONFIRM_DESKTOP {
+                        state.account_hint = (String::new(), String::new());
+                    }
+                });
                 refresh(&ui);
             });
+            return;
         }
+        with_state(|state| {
+            state.account_pending = id.clone();
+            state.account_hint = (String::new(), String::new());
+        });
+        refresh(&ui);
+        let weak = ui.as_weak();
+        std::thread::spawn(move || {
+            let result = accounts::switch(&id);
+            if let Err(e) = &result {
+                store::log(&format!("accounts: switch {id} failed: {e}"));
+            }
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                let line = match result {
+                    Ok(m) => m,
+                    Err(e) => format!("Couldn't switch: {e}"),
+                };
+                with_state(|state| {
+                    state.account_pending.clear();
+                    state.account_hint = (id.clone(), line);
+                });
+                refresh(&ui);
+                let weak = ui.as_weak();
+                Timer::single_shot(std::time::Duration::from_secs(6), move || {
+                    let Some(ui) = weak.upgrade() else { return };
+                    with_state(|state| {
+                        if state.account_hint.0 == id {
+                            state.account_hint = (String::new(), String::new());
+                        }
+                    });
+                    refresh(&ui);
+                });
+            });
+        });
     });
 
     let weak = ui.as_weak();
@@ -3815,6 +3906,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.on_notif_clear(move || {
         let Some(ui) = weak.upgrade() else { return };
         with_state(|state| state.notifications.clear());
+        refresh(&ui);
+    });
+
+    let weak = ui.as_weak();
+    ui.on_notif_stack_clicked(move |key| {
+        let Some(ui) = weak.upgrade() else { return };
+        with_state(|state| state.notif_open = key.to_string());
+        refresh(&ui);
+    });
+
+    let weak = ui.as_weak();
+    ui.on_notif_collapse(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        with_state(|state| state.notif_open.clear());
         refresh(&ui);
     });
 

@@ -1,4 +1,4 @@
-// Usage: each NotchDeck account's plan and how much of its limits is used,
+// Usage: each account's plan and how much of its limits is used,
 // shown under its chip on the Accounts tab (the owner, 18 Nov 2026: "account
 // ama AI usage itu harusnya 1 tab").
 //

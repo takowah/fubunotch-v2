@@ -1,10 +1,22 @@
-// Accounts: the Claude Desktop, Claude Code and Codex accounts that NotchDeck
-// (an AccountDeck fork) manages, read from its state file, and a switch that
-// asks NotchDeck to do it. NotchDeck owns the switching (closing Claude
-// Desktop, swapping its login, the CLAUDE_CONFIG_DIR / CODEX_HOME user
-// variables); the island only shows the list and passes the click on.
+// Accounts: the Claude Desktop, Claude Code and Codex accounts, and the switch
+// between them. Kanmuri does the switching itself (it used to ask NotchDeck, an
+// AccountDeck fork, which is no longer needed); the accounts stay where
+// NotchDeck kept them, %USERPROFILE%\.accountdeck (state.json and one folder per
+// account), so nothing has to be set up again.
+//
+// How a switch works (as AccountDeck does it):
+//  - Claude Code / Codex: each account has its own config folder. The active one
+//    goes in the user variable CLAUDE_CONFIG_DIR / CODEX_HOME (the Main account
+//    removes it: %USERPROFILE%\.claude / .codex). New terminals pick it up.
+//  - Claude Desktop: its login lives in its data folder (cookie database and
+//    config.json). Switching closes Claude, saves those files into the current
+//    account's folder, puts the chosen account's back and opens Claude again.
+//    "Local State" (the key that unlocks them on this Windows account) stays.
+// Nothing is sent anywhere; tokens are never read out of their files.
 
-use std::path::PathBuf;
+use serde_json::Value;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Account {
@@ -23,28 +35,26 @@ fn home() -> PathBuf {
     std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_default()
 }
 
-/// NotchDeck's state: %USERPROFILE%\.accountdeck\state.json.
+/// Where the accounts live: %USERPROFILE%\.accountdeck.
+fn root() -> PathBuf {
+    home().join(".accountdeck")
+}
+
 fn state_path() -> PathBuf {
-    home().join(".accountdeck").join("state.json")
+    root().join("state.json")
 }
 
-/// NotchDeck as the per-user installer puts it.
-fn notchdeck_exe() -> Option<PathBuf> {
-    let p = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("Programs").join("NotchDeck").join("NotchDeck.exe");
-    p.exists().then_some(p)
-}
-
-/// KANMURI_DEMO_ACCOUNTS: made-up accounts (and NotchDeck counted as
-/// installed), for snapshots of the Accounts tab without NotchDeck.
+/// KANMURI_DEMO_ACCOUNTS: made-up accounts, for snapshots of the Accounts tab.
 fn demo() -> bool {
     std::env::var_os("KANMURI_DEMO_ACCOUNTS").is_some()
 }
 
+/// The Accounts tab shows once there are accounts to switch between.
 pub fn installed() -> bool {
-    demo() || notchdeck_exe().is_some()
+    demo() || state_path().exists()
 }
 
-/// The accounts in NotchDeck's order; empty when NotchDeck isn't set up.
+/// The accounts in their saved order; empty when none are set up.
 pub fn load() -> Vec<Account> {
     if demo() {
         return parse(DEMO);
@@ -61,7 +71,7 @@ const DEMO: &[u8] = br#"{"accounts":[
     "active":{"desktop":"desktop-partner","claude":"claude-partner","codex":"codex-main"}}"#;
 
 pub fn parse(bytes: &[u8]) -> Vec<Account> {
-    let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else { return Vec::new() };
+    let Ok(v) = serde_json::from_slice::<Value>(bytes) else { return Vec::new() };
     let active = v.get("active");
     let Some(list) = v.get("accounts").and_then(|x| x.as_array()) else { return Vec::new() };
     list.iter()
@@ -79,18 +89,387 @@ pub fn parse(bytes: &[u8]) -> Vec<Account> {
         .collect()
 }
 
-/// An id NotchDeck made: letters, digits and dashes only (it goes on a command line).
-fn safe_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 80 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+/// A Claude Desktop switch restarts Claude: the island asks for a second click first.
+pub fn needs_confirm(id: &str) -> bool {
+    load().iter().any(|a| a.id == id && a.service == "desktop" && !a.active)
 }
 
-/// Asks NotchDeck to switch to the account. It confirms Claude Desktop restarts itself.
-pub fn switch(id: &str) -> Result<(), String> {
-    if !safe_id(id) {
-        return Err(format!("not an account id: {id}"));
+/// Switches to the account. Blocking (a Claude Desktop switch takes several
+/// seconds): call it off the UI thread. Returns a short line for the island.
+pub fn switch(id: &str) -> Result<String, String> {
+    if demo() {
+        return Err("demo accounts".into());
     }
-    let exe = notchdeck_exe().ok_or("NotchDeck is not installed")?;
-    std::process::Command::new(exe).arg(format!("--switch={id}")).spawn().map(|_| ()).map_err(|e| e.to_string())
+    let path = state_path();
+    let mut state: Value = std::fs::read(&path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .ok_or("no accounts set up")?;
+    let acc = state
+        .get("accounts")
+        .and_then(|l| l.as_array())
+        .and_then(|l| l.iter().find(|a| a.get("id").and_then(|x| x.as_str()) == Some(id)))
+        .cloned()
+        .ok_or_else(|| format!("no account {id}"))?;
+    let service = acc.get("service").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let name = acc.get("name").and_then(|x| x.as_str()).unwrap_or(id).to_string();
+    let current_id = state.get("active").and_then(|m| m.get(&service)).and_then(|x| x.as_str()).map(str::to_string);
+    if current_id.as_deref() == Some(id) {
+        return Ok(format!("Already {name}"));
+    }
+    match service.as_str() {
+        "claude" | "codex" => {
+            let var = if service == "claude" { "CLAUDE_CONFIG_DIR" } else { "CODEX_HOME" };
+            let is_default = acc.get("isDefault").and_then(|x| x.as_bool()).unwrap_or(false);
+            let dir = acc.get("dir").and_then(|x| x.as_str()).unwrap_or("");
+            set_user_env(var, if is_default || dir.is_empty() { None } else { Some(dir) })?;
+            set_active(&mut state, &service, id);
+            write_state(&path, &state)?;
+            Ok(format!("{name}: new terminals use it"))
+        }
+        "desktop" => {
+            let current = current_id.as_deref().and_then(|cid| {
+                state.get("accounts")?.as_array()?.iter().find(|a| a.get("id").and_then(|x| x.as_str()) == Some(cid)).cloned()
+            });
+            let carry = std::fs::read(root().join("settings.json"))
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                .and_then(|s| s.get("carryChat").and_then(|x| x.as_bool()))
+                .unwrap_or(true);
+            let target_dir = account_dir(&acc, id);
+            let current_dir = current.as_ref().and_then(|c| c.get("id").and_then(|x| x.as_str()).map(|cid| account_dir(c, cid)));
+            let last_exe = desktop::quit()?;
+            let sup = desktop::support();
+            let from_uuid = desktop::account_uuid(&sup.join("config.json"));
+            desktop::swap(current_dir.as_deref(), &target_dir, &sup, &root())?;
+            set_active(&mut state, "desktop", id);
+            write_state(&path, &state)?;
+            let carried = if carry {
+                desktop::carry_last_chat(from_uuid.as_deref(), desktop::account_uuid(&sup.join("config.json")).as_deref(), &sup, &root())
+            } else {
+                None
+            };
+            if !desktop::launch(last_exe.as_deref()) {
+                return Ok(format!("Claude is {name}: open it from Start"));
+            }
+            Ok(match carried {
+                Some(t) => format!("Claude is {name}, with \"{t}\""),
+                None if desktop::slot_has_login(&target_dir) || desktop::has_login(&sup) => format!("Claude is {name}"),
+                None => format!("Sign in to Claude as {name}"),
+            })
+        }
+        _ => Err(format!("can't switch {service}")),
+    }
+}
+
+/// An account's folder: "dir" as saved, else %USERPROFILE%\.accountdeck\<service>\<id>.
+fn account_dir(acc: &Value, id: &str) -> PathBuf {
+    match acc.get("dir").and_then(|x| x.as_str()) {
+        Some(d) if !d.is_empty() => PathBuf::from(d),
+        _ => root().join(acc.get("service").and_then(|x| x.as_str()).unwrap_or("desktop")).join(id),
+    }
+}
+
+fn set_active(state: &mut Value, service: &str, id: &str) {
+    if !state.get("active").is_some_and(|a| a.is_object()) {
+        state["active"] = Value::Object(Default::default());
+    }
+    state["active"][service] = Value::String(id.to_string());
+}
+
+/// Written beside and renamed over, so a crash never leaves half a file.
+fn write_state(path: &Path, state: &Value) -> Result<(), String> {
+    let tmp = path.with_extension("json.tmp");
+    let text = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
+/// Sets (None: removes) a per-user environment variable in HKCU\Environment and
+/// tells Windows, so Explorer and terminals opened after this see it.
+fn set_user_env(name: &str, value: Option<&str>) -> Result<(), String> {
+    use windows::core::{w, HSTRING};
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE};
+    let key = w!("Environment");
+    let n = HSTRING::from(name);
+    unsafe {
+        match value {
+            Some(v) => {
+                let v = HSTRING::from(v);
+                let bytes = std::slice::from_raw_parts(v.as_ptr() as *const u8, (v.len() + 1) * 2);
+                RegSetKeyValueW(HKEY_CURRENT_USER, key, &n, REG_SZ.0, Some(bytes.as_ptr() as *const _), bytes.len() as u32)
+                    .ok()
+                    .map_err(|e| e.to_string())?;
+            }
+            None => {
+                let r = RegDeleteKeyValueW(HKEY_CURRENT_USER, key, &n);
+                if !(r.is_ok() || r.0 == 2) {
+                    return Err(format!("{r:?}"));
+                }
+            }
+        }
+        SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            WPARAM(0),
+            LPARAM(w!("Environment").as_ptr() as isize),
+            SMTO_ABORTIFHUNG,
+            5000,
+            None,
+        );
+    }
+    Ok(())
+}
+
+mod desktop {
+    use super::*;
+
+    /// The files that hold Claude Desktop's login. Current versions keep the
+    /// cookie database in Network\, older ones at the top level: both handled.
+    pub const FILES: [&str; 5] = ["Cookies", "Cookies-journal", "Network\\Cookies", "Network\\Cookies-journal", "config.json"];
+    const COOKIES: [&str; 2] = ["Cookies", "Network\\Cookies"];
+
+    fn env_dir(var: &str) -> PathBuf {
+        std::env::var_os(var).map(PathBuf::from).unwrap_or_default()
+    }
+
+    fn mtime(p: &Path) -> u64 {
+        std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0)
+    }
+
+    fn dirs(p: &Path) -> Vec<(String, PathBuf)> {
+        std::fs::read_dir(p)
+            .map(|r| r.flatten().filter(|e| e.path().is_dir()).map(|e| (e.file_name().to_string_lossy().into_owned(), e.path())).collect())
+            .unwrap_or_default()
+    }
+
+    /// Claude Desktop's data folder. Direct installer: %APPDATA%\Claude. Store /
+    /// MSIX: %LOCALAPPDATA%\Claude-Data\claude_<publisher> (5.x) or the package's
+    /// LocalCache. When several exist, the one used most recently wins.
+    pub fn support() -> PathBuf {
+        let local = env_dir("LOCALAPPDATA");
+        let mut c: Vec<PathBuf> = Vec::new();
+        for (name, p) in dirs(&local.join("Claude-Data")) {
+            if name.to_ascii_lowercase().starts_with("claude") {
+                c.push(p);
+            }
+        }
+        for (name, p) in dirs(&local.join("Packages")) {
+            let l = name.to_ascii_lowercase();
+            if l.starts_with("claude_") || l.starts_with("anthropic.claude_") {
+                for sub in ["LocalCache\\Roaming\\Claude", "LocalCache\\Local\\Claude"] {
+                    if p.join(sub).is_dir() {
+                        c.push(p.join(sub));
+                    }
+                }
+            }
+        }
+        let direct = env_dir("APPDATA").join("Claude");
+        if direct.is_dir() {
+            c.push(direct.clone());
+        }
+        let score = |d: &PathBuf| mtime(&d.join("config.json")).max(mtime(&d.join("Network\\Cookies"))).max(mtime(&d.join("Cookies")));
+        c.into_iter().max_by_key(score).unwrap_or(direct)
+    }
+
+    pub fn has_login(sup: &Path) -> bool {
+        COOKIES.iter().any(|f| sup.join(f).exists())
+    }
+
+    pub fn slot_has_login(dir: &Path) -> bool {
+        has_login(dir)
+    }
+
+    pub fn account_uuid(config: &Path) -> Option<String> {
+        let v: Value = serde_json::from_slice(&std::fs::read(config).ok()?).ok()?;
+        v.get("lastKnownAccountUuid")?.as_str().map(str::to_string)
+    }
+
+    fn copy(from: &Path, to: &Path) -> Result<(), String> {
+        if let Some(d) = to.parent() {
+            std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+        }
+        std::fs::copy(from, to).map(|_| ()).map_err(|e| format!("{}: {e}", to.display()))
+    }
+
+    fn rm(p: &Path) -> Result<(), String> {
+        match std::fs::remove_file(p) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{}: {e}", p.display())),
+            _ => Ok(()),
+        }
+    }
+
+    /// Saves the login in Claude now into `current`'s folder and puts `target`'s
+    /// in place (a new account: signed out, the app's own settings kept).
+    pub fn swap(current: Option<&Path>, target: &Path, sup: &Path, base: &Path) -> Result<(), String> {
+        // One-time safety copy of the login there was before any switch.
+        let backup = base.join("desktop").join("_original-backup");
+        if !backup.exists() {
+            std::fs::create_dir_all(&backup).map_err(|e| e.to_string())?;
+            for f in FILES {
+                if sup.join(f).exists() {
+                    copy(&sup.join(f), &backup.join(f))?;
+                }
+            }
+        }
+        if let Some(cur) = current {
+            std::fs::create_dir_all(cur).map_err(|e| e.to_string())?;
+            for f in FILES {
+                rm(&cur.join(f))?;
+                if sup.join(f).exists() {
+                    copy(&sup.join(f), &cur.join(f))?;
+                }
+            }
+        }
+        if slot_has_login(target) {
+            for f in FILES {
+                rm(&sup.join(f))?;
+                if target.join(f).exists() {
+                    copy(&target.join(f), &sup.join(f))?;
+                }
+            }
+        } else {
+            for f in FILES.iter().filter(|f| **f != "config.json") {
+                rm(&sup.join(f))?;
+            }
+            let cfg = sup.join("config.json");
+            if let Some(mut v) = std::fs::read(&cfg).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) {
+                if let Some(o) = v.as_object_mut() {
+                    o.retain(|k, _| !k.starts_with("oauth:") && k != "lastKnownAccountUuid");
+                }
+                std::fs::write(&cfg, serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Moves the most recently opened Code-tab chat into the new account's list
+    /// (claude-code-sessions\<account>\<org>\local_*.json), a copy kept in
+    /// .accountdeck\moved-chats. Returns its title.
+    pub fn carry_last_chat(from: Option<&str>, to: Option<&str>, sup: &Path, base: &Path) -> Option<String> {
+        let (from, to) = (from?, to?);
+        if from == to {
+            return None;
+        }
+        let sessions = sup.join("claude-code-sessions");
+        let mut last: Option<(PathBuf, Value, f64)> = None;
+        for (_, org) in dirs(&sessions.join(from)) {
+            for e in std::fs::read_dir(&org).ok()?.flatten() {
+                let f = e.file_name().to_string_lossy().into_owned();
+                if !(f.starts_with("local_") && f.ends_with(".json")) {
+                    continue;
+                }
+                let Some(j) = std::fs::read(e.path()).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else { continue };
+                if j.get("isArchived").and_then(|x| x.as_bool()) == Some(true) {
+                    continue;
+                }
+                let t = j.get("lastFocusedAt").and_then(|x| x.as_f64()).unwrap_or(0.0);
+                if last.as_ref().is_none_or(|l| t > l.2) {
+                    last = Some((e.path(), j, t));
+                }
+            }
+        }
+        let (path, mut json, _) = last?;
+        let to_dir = sessions.join(to);
+        let newest = |org: &Path| {
+            std::fs::read_dir(org)
+                .map(|r| r.flatten().filter(|e| e.file_name().to_string_lossy().starts_with("local_")).map(|e| mtime(&e.path())).max().unwrap_or(0))
+                .unwrap_or(0)
+        };
+        let org = dirs(&to_dir).into_iter().map(|(_, p)| p).max_by_key(|p| newest(p))?;
+        let name = path.file_name()?.to_owned();
+        let dest = org.join(&name);
+        if dest.exists() {
+            return None;
+        }
+        let keep = base.join("moved-chats");
+        let _ = std::fs::create_dir_all(&keep);
+        let _ = std::fs::copy(&path, keep.join(&name));
+        let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        json["lastFocusedAt"] = Value::from(now);
+        std::fs::write(&dest, serde_json::to_string(&json).ok()?).ok()?;
+        let _ = std::fs::remove_file(&path);
+        Some(json.get("title").and_then(|x| x.as_str()).unwrap_or("your last chat").to_string())
+    }
+
+    /// Runs a PowerShell script without a window; its output, trimmed.
+    fn ps(script: &str) -> Option<String> {
+        use std::os::windows::process::CommandExt;
+        let wide: Vec<u8> = script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        let out = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", &base64(&wide)])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .output()
+            .ok()?;
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    pub(super) fn base64(b: &[u8]) -> String {
+        const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut s = String::with_capacity(b.len().div_ceil(3) * 4);
+        for c in b.chunks(3) {
+            let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+            for i in 0..4 {
+                s.push(if i <= c.len() { T[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+            }
+        }
+        s
+    }
+
+    // Claude Desktop is claude.exe, and so can Claude Code's CLI be: matched by install folder, never by name alone.
+    const FILTER: &str = r"function Get-Desk { Get-Process -Name claude -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ($_.Path -like '*\AnthropicClaude\*' -or $_.Path -like '*\WindowsApps\Claude_*' -or $_.Path -like '*\WindowsApps\Anthropic*' -or $_.Path -like '*\Programs\Claude\*' -or $_.Path -like '*\Anthropic\Claude\*') } }";
+
+    /// Closes Claude Desktop: politely first, then ends it. Returns the exe it
+    /// ran from (to open the same one again), or an error when it won't close.
+    pub fn quit() -> Result<Option<String>, String> {
+        let script = format!(
+            r"{FILTER}
+$p = @(Get-Desk)
+if ($p.Count -eq 0) {{ 'exe:'; 'gone'; exit }}
+'exe:' + $p[0].Path
+$p | ForEach-Object {{ try {{ [void]$_.CloseMainWindow() }} catch {{}} }}
+for ($i = 0; $i -lt 8; $i++) {{ Start-Sleep -Milliseconds 500; if (@(Get-Desk).Count -eq 0) {{ Start-Sleep -Milliseconds 1000; 'gone'; exit }} }}
+Get-Desk | Stop-Process -Force -ErrorAction SilentlyContinue
+for ($i = 0; $i -lt 40; $i++) {{ Start-Sleep -Milliseconds 500; if (@(Get-Desk).Count -eq 0) {{ Start-Sleep -Milliseconds 1200; 'gone'; exit }} }}
+'still'"
+        );
+        let out = ps(&script).ok_or("couldn't run PowerShell")?;
+        let exe = out.lines().find_map(|l| l.strip_prefix("exe:")).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+        if out.lines().any(|l| l.trim() == "gone") {
+            Ok(exe)
+        } else {
+            Err("Claude didn't close: quit it from its tray icon".into())
+        }
+    }
+
+    fn start_app(app_id: &str) -> bool {
+        std::process::Command::new("explorer.exe").arg(format!("shell:AppsFolder\\{app_id}")).spawn().is_ok()
+    }
+
+    /// Opens Claude Desktop again: the Store app through its AppID, or the installed exe.
+    pub fn launch(last_exe: Option<&str>) -> bool {
+        let store = last_exe.is_none_or(|e| e.to_ascii_lowercase().contains("\\windowsapps\\"));
+        if store {
+            if let Some(id) = ps("(Get-StartApps | Where-Object { $_.AppID -like 'Claude_*!*' -or $_.AppID -like 'Anthropic*Claude*!*' } | Select-Object -First 1).AppID").filter(|s| !s.is_empty()) {
+                return start_app(&id);
+            }
+        }
+        let local = env_dir("LOCALAPPDATA");
+        let pf = std::env::var_os("ProgramFiles").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("C:\\Program Files"));
+        let mut list = vec![local.join("AnthropicClaude\\claude.exe"), local.join("Programs\\Claude\\Claude.exe"), pf.join("Claude\\Claude.exe")];
+        if let Some(e) = last_exe {
+            list.push(PathBuf::from(e));
+        }
+        if let Some(exe) = list.into_iter().find(|p| p.exists()) {
+            return std::process::Command::new(&exe).current_dir(exe.parent().unwrap_or(Path::new("."))).spawn().is_ok();
+        }
+        match ps("(Get-StartApps | Where-Object { $_.Name -eq 'Claude' } | Select-Object -First 1).AppID").filter(|s| !s.is_empty()) {
+            Some(id) => start_app(&id),
+            None => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -121,11 +500,120 @@ mod tests {
     }
 
     #[test]
-    fn ids_that_could_break_the_command_line_are_refused() {
-        assert!(safe_id("claude-daffa-kyou-team"));
-        assert!(!safe_id(""));
-        assert!(!safe_id("a b"));
-        assert!(!safe_id("x\" --evil"));
-        assert!(!safe_id("..\\x"));
+    fn base64_matches_the_standard() {
+        assert_eq!(desktop_b64(b""), "");
+        assert_eq!(desktop_b64(b"f"), "Zg==");
+        assert_eq!(desktop_b64(b"fo"), "Zm8=");
+        assert_eq!(desktop_b64(b"foo"), "Zm9v");
+        assert_eq!(desktop_b64(b"foobar"), "Zm9vYmFy");
+    }
+
+    fn desktop_b64(b: &[u8]) -> String {
+        desktop::base64(b)
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("kanmuri-accounts-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn desktop_swap_saves_the_current_login_and_restores_the_target() {
+        let base = scratch("swap");
+        let sup = base.join("sup");
+        let cur = base.join("desktop").join("a");
+        let tgt = base.join("desktop").join("b");
+        std::fs::create_dir_all(sup.join("Network")).unwrap();
+        std::fs::write(sup.join("Network\\Cookies"), "A-cookies").unwrap();
+        std::fs::write(sup.join("config.json"), r#"{"lastKnownAccountUuid":"ua","theme":"dark"}"#).unwrap();
+        std::fs::create_dir_all(tgt.join("Network")).unwrap();
+        std::fs::write(tgt.join("Network\\Cookies"), "B-cookies").unwrap();
+        std::fs::write(tgt.join("config.json"), r#"{"lastKnownAccountUuid":"ub"}"#).unwrap();
+
+        desktop::swap(Some(&cur), &tgt, &sup, &base).unwrap();
+
+        assert_eq!(std::fs::read_to_string(cur.join("Network\\Cookies")).unwrap(), "A-cookies");
+        assert_eq!(std::fs::read_to_string(sup.join("Network\\Cookies")).unwrap(), "B-cookies");
+        assert_eq!(desktop::account_uuid(&sup.join("config.json")).as_deref(), Some("ub"));
+        assert!(base.join("desktop\\_original-backup\\Network\\Cookies").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn desktop_swap_to_a_new_account_signs_out_and_keeps_settings() {
+        let base = scratch("new");
+        let sup = base.join("sup");
+        let tgt = base.join("desktop").join("fresh");
+        std::fs::create_dir_all(&sup).unwrap();
+        std::fs::write(sup.join("Cookies"), "x").unwrap();
+        std::fs::write(sup.join("config.json"), r#"{"oauth:tokenCacheV2":"t","lastKnownAccountUuid":"u","theme":"dark"}"#).unwrap();
+
+        desktop::swap(None, &tgt, &sup, &base).unwrap();
+
+        assert!(!sup.join("Cookies").exists());
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(sup.join("config.json")).unwrap()).unwrap();
+        assert!(v.get("oauth:tokenCacheV2").is_none());
+        assert!(v.get("lastKnownAccountUuid").is_none());
+        assert_eq!(v["theme"], "dark");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn the_last_chat_moves_to_the_new_account() {
+        let base = scratch("chat");
+        let sup = base.join("sup");
+        let from = sup.join("claude-code-sessions\\ua\\org1");
+        let to = sup.join("claude-code-sessions\\ub\\org2");
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::create_dir_all(&to).unwrap();
+        std::fs::write(from.join("local_old.json"), r#"{"title":"old","lastFocusedAt":1}"#).unwrap();
+        std::fs::write(from.join("local_new.json"), r#"{"title":"new one","lastFocusedAt":5}"#).unwrap();
+        std::fs::write(from.join("local_arch.json"), r#"{"title":"arch","lastFocusedAt":9,"isArchived":true}"#).unwrap();
+
+        let t = desktop::carry_last_chat(Some("ua"), Some("ub"), &sup, &base);
+
+        assert_eq!(t.as_deref(), Some("new one"));
+        assert!(to.join("local_new.json").exists());
+        assert!(!from.join("local_new.json").exists());
+        assert!(base.join("moved-chats\\local_new.json").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Live, on this PC's real accounts: Claude Code to its first other
+    /// account and back to Main, checking the user variable and state.json.
+    /// Run outside any app container: `cargo test -p kanmuri live_claude -- --ignored`.
+    #[test]
+    #[ignore]
+    fn live_claude_code_round_trip() {
+        use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+        let read_var = || -> Option<String> {
+            let mut buf = vec![0u16; 1024];
+            let mut len = (buf.len() * 2) as u32;
+            let r = unsafe {
+                RegGetValueW(HKEY_CURRENT_USER, windows::core::w!("Environment"), windows::core::w!("CLAUDE_CONFIG_DIR"), RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr().cast()), Some(&mut len))
+            };
+            r.is_ok().then(|| String::from_utf16_lossy(&buf[..(len as usize / 2).saturating_sub(1)]))
+        };
+        let list = load();
+        let main = list.iter().find(|a| a.service == "claude" && a.id == "claude-default").expect("Main account").clone();
+        let other = list.iter().find(|a| a.service == "claude" && a.id != main.id).expect("a second Claude Code account").clone();
+        assert!(main.active, "start from Main");
+        println!("before: {:?}", read_var());
+        println!("{}", switch(&other.id).unwrap());
+        assert_eq!(read_var().as_deref(), Some(other.dir.as_str()));
+        assert!(load().iter().any(|a| a.id == other.id && a.active));
+        println!("{}", switch(&main.id).unwrap());
+        assert_eq!(read_var(), None, "Main removes the variable");
+        assert!(load().iter().any(|a| a.id == main.id && a.active));
+        println!("round trip ok");
+    }
+
+    #[test]
+    fn active_is_set_even_when_missing() {
+        let mut v: Value = serde_json::from_str(r#"{"accounts":[]}"#).unwrap();
+        set_active(&mut v, "claude", "claude-x");
+        assert_eq!(v["active"]["claude"], "claude-x");
     }
 }

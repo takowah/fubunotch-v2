@@ -9,15 +9,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use windows::core::Ref;
 use windows::Foundation::TypedEventHandler;
-use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapDecoder, BitmapPixelFormat, BitmapTransform, ColorManagementMode, ExifOrientationMode};
+use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapDecoder, BitmapInterpolationMode, BitmapPixelFormat, BitmapTransform, ColorManagementMode, ExifOrientationMode};
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession as Session, GlobalSystemMediaTransportControlsSessionManager as Manager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
 };
 use windows::Media::MediaPlaybackAutoRepeatMode as RepeatMode;
 
-/// Artwork is scaled to this many pixels a side (shown at 52 px, sharp at 2× scale).
-pub const ART_PX: u32 = 112;
+/// Artwork is scaled to this many pixels a side (the Music page's cover is ~170 px, 255 at 1.5× scale; 112 came out blocky).
+pub const ART_PX: u32 = 256;
 
 /// What is playing, as the UI needs it. Plain data, so it crosses threads.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -332,6 +332,8 @@ pub fn decode_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
     let transform = BitmapTransform::new().ok()?;
     transform.SetScaledWidth(ART_PX).ok()?;
     transform.SetScaledHeight(ART_PX).ok()?;
+    // The default is nearest neighbour: jagged edges.
+    transform.SetInterpolationMode(BitmapInterpolationMode::Fant).ok()?;
     let pixels = decoder
         .GetPixelDataTransformedAsync(
             BitmapPixelFormat::Rgba8,
@@ -352,6 +354,8 @@ fn decode_art(thumbnail: &windows::Storage::Streams::IRandomAccessStreamReferenc
     let transform = BitmapTransform::new()?;
     transform.SetScaledWidth(ART_PX)?;
     transform.SetScaledHeight(ART_PX)?;
+    // The default is nearest neighbour: jagged edges.
+    transform.SetInterpolationMode(BitmapInterpolationMode::Fant)?;
     let pixels = decoder
         .GetPixelDataTransformedAsync(
             BitmapPixelFormat::Rgba8,
