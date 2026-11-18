@@ -207,13 +207,8 @@ export struct NotifRow {
     // The app's real logo (rounded by Rust), when Windows has one.
     logo: image,
     has-logo: bool,
-    // Where it is in the notification list (for a click).
+    // Where it is in the notification list (for a click; an app shows at most two rows).
     index: int,
-    // How many the app has: more than one is a stack (its newest on top), a
-    // click opens it.
-    count: int,
-    // The app's stack this row belongs to.
-    key: string,
 }
 
 // A question from Claude Code waiting for Allow / Deny, at the top of the
@@ -1122,20 +1117,14 @@ component MusicWide inherits Rectangle {
 
 // Notifications: a header (how many, Clear all) and the six newest in two
 // columns, each row the app's round icon, the title and message, the time.
-// An app with several is one stack (as on an iPhone): its newest on top, a
-// card peeking under it and the count on its icon; a click opens the stack,
-// the header's "‹ App" closes it.
+// One app gets two rows at most, so it can't fill the page.
 component NotifPage inherits Rectangle {
     in property <[NotifRow]> items;
     // Claude Code's open questions, on top, one a row (the three newest).
     in property <[AskRow]> asks;
-    // The app whose stack is open ("" = all apps, stacked).
-    in property <string> open-app;
     // How many notifications there are in all.
     in property <int> total;
     callback clicked(int);
-    callback stack-clicked(string);
-    callback collapse();
     callback clear();
     callback answered(string, string);
     // One column for a single notification, else two.
@@ -1161,13 +1150,11 @@ component NotifPage inherits Rectangle {
             x: 0;
             width: self.preferred-width;
             height: 100%;
-            text: root.open-app != "" ? "‹  " + root.open-app + " (" + root.items.length + ")" : root.items.length > 6 ? "Notifications (6 of " + root.items.length + " apps)" : root.total > root.items.length ? "Notifications (" + root.total + ")" : "Notifications";
-            color: root.open-app != "" && back-area.has-hover ? Mini.ink : Mini.label;
+            text: root.total > min(6, root.items.length) ? "Notifications (" + min(6, root.items.length) + " of " + root.total + ")" : "Notifications";
+            color: Mini.label;
             font-size: 11px;
             font-weight: 600;
             vertical-alignment: center;
-            animate color { duration: 180ms; }
-            back-area := TouchArea { enabled: root.open-app != ""; mouse-cursor: root.open-app != "" ? pointer : default; clicked => { root.collapse(); } }
         }
         if root.items.length > 0 : Text {
             x: parent.width - self.width;
@@ -1220,54 +1207,25 @@ component NotifPage inherits Rectangle {
         y: root.grid-y + floor(i / root.cols) * 50px;
         width: root.col-w;
         height: 48px;
-        // The card under the top one: only its bottom edge shows (clip is
-        // square, so the cut is the straight top edge; the rounded corners stay).
-        if n.count > 1 : Rectangle {
-            x: 10px;
-            y: 41px;
-            width: parent.width - 20px;
-            height: 7px;
-            clip: true;
-            Rectangle {
-                y: -33px;
-                width: parent.width;
-                height: 40px;
-                border-radius: 12px;
-                background: Mini.wash.with-alpha(min(1, 0.07 * Mini.wk));
-            }
+        Tinted { width: parent.width; height: parent.height; tint: n.accent; lit: row.has-hover; }
+        AppIcon { x: 8px; y: 9px; size: 30px; accent: n.accent; initial: n.initial; logo: n.logo; has-logo: n.has-logo; }
+        VerticalLayout {
+            x: 50px;
+            width: parent.width - 50px - 10px - 44px;
+            alignment: center;
+            Text { text: n.title == "" ? n.app : n.title; color: Mini.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+            if n.body != "" : Text { text: n.body; color: Mini.text-3; font-size: 12px; overflow: elide; }
         }
-        Tinted { width: parent.width; height: n.count > 1 ? 41px : parent.height; tint: n.accent; lit: row.has-hover; }
-        Rectangle {
-            height: n.count > 1 ? 41px : parent.height;
-            AppIcon { x: 8px; y: (parent.height - self.height) / 2; size: 30px; accent: n.accent; initial: n.initial; logo: n.logo; has-logo: n.has-logo; }
-            // The stack's count on the icon's corner.
-            if n.count > 1 : Rectangle {
-                x: 8px + 30px - self.width + 4px;
-                y: (parent.height - 30px) / 2 + 30px - 14px + 2px;
-                width: max(14px, count-text.preferred-width + 8px);
-                height: 14px;
-                border-radius: 7px;
-                background: Mini.ink;
-                count-text := Text { text: n.count; color: Mini.base; font-size: 9px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-            }
-            VerticalLayout {
-                x: 50px;
-                width: parent.width - 50px - 10px - 44px;
-                alignment: center;
-                Text { text: n.title == "" ? n.app : n.title; color: Mini.ink; font-size: 13px; font-weight: 600; overflow: elide; }
-                if n.body != "" : Text { text: n.body; color: Mini.text-3; font-size: 12px; overflow: elide; }
-            }
-            Text {
-                x: parent.width - 8px - self.width;
-                width: self.preferred-width;
-                height: 100%;
-                text: n.time;
-                color: Mini.label;
-                font-size: 11px;
-                vertical-alignment: center;
-            }
+        Text {
+            x: parent.width - 8px - self.width;
+            width: self.preferred-width;
+            height: 100%;
+            text: n.time;
+            color: Mini.label;
+            font-size: 11px;
+            vertical-alignment: center;
         }
-        row := TouchArea { mouse-cursor: pointer; clicked => { if (n.count > 1) { root.stack-clicked(n.key); } else { root.clicked(n.index); } } }
+        row := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(n.index); } }
     }
 }
 
@@ -1815,8 +1773,7 @@ export component Island inherits Window {
     // Romaji of the line on the capsule (shown under it), when the lyrics have it.
     in property <string> capsule-romaji;
     in property <[NotifRow]> notifications;
-    // The app whose stack is open on the Notifications page ("" = stacked), and how many there are in all.
-    in property <string> notif-open-app;
+    // How many notifications there are in all (the page shows at most two per app).
     in property <int> notif-total;
     in property <[AskRow]> asks;
     in property <FocusView> pomodoro;
@@ -1894,9 +1851,6 @@ export component Island inherits Window {
     callback hover-changed(bool);
     callback front-clicked();
     callback notif-clicked(int);
-    // A stacked app's row was clicked: open its stack; the header's "‹ App": close it.
-    callback notif-stack-clicked(string);
-    callback notif-collapse();
     callback notif-clear();
     callback action-clicked(string);
     // A question answered from its row on the Notifications page: its id, "allow" / "deny".
@@ -2364,11 +2318,8 @@ export component Island inherits Window {
                         NotifPage {
                             items: root.notifications;
                             asks: root.asks;
-                            open-app: root.notif-open-app;
                             total: root.notif-total;
                             clicked(i) => { root.notif-clicked(i); }
-                            stack-clicked(k) => { root.notif-stack-clicked(k); }
-                            collapse => { root.notif-collapse(); }
                             clear => { root.notif-clear(); }
                             answered(id, a) => { root.ask-answered(id, a); }
                         }

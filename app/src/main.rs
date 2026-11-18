@@ -211,8 +211,6 @@ struct State {
     size_to: (f32, f32),
     region_timer: Timer,
     active_tab: String,
-    /// The app whose notification stack is open on the Notifications page ("" = all stacked).
-    notif_open: String,
     /// The account being switched to (shown as busy).
     account_pending: String,
     /// A line shown on one account's chip in place of its name: "Click again to
@@ -451,23 +449,29 @@ fn notif_key(n: &notif::Notif) -> &str {
     }
 }
 
-/// The Notifications page's rows, as (index in the list, how many the stack
-/// has): one per app, its newest (the list is newest first), like an
-/// iPhone's stacks; or, with a stack open, every notification of that app.
-fn notif_view(list: &std::collections::VecDeque<notif::Notif>, open: &str) -> Vec<(usize, usize)> {
-    if !open.is_empty() && list.iter().any(|n| notif_key(n) == open) {
-        return list.iter().enumerate().filter(|(_, n)| notif_key(n) == open).map(|(i, _)| (i, 1)).collect();
-    }
-    let mut rows: Vec<(usize, usize)> = Vec::new();
-    let mut keys: Vec<&str> = Vec::new();
+/// The most rows one app gets on the Notifications page, so a chatty app
+/// can't fill it (the owner, 18 Nov 2026).
+const NOTIF_PER_APP: usize = 2;
+
+/// The Notifications page's rows (indexes in the list, newest first): as
+/// before, one a notification, but at most NOTIF_PER_APP of each app.
+fn notif_view(list: &std::collections::VecDeque<notif::Notif>) -> Vec<usize> {
+    let mut seen: Vec<(&str, usize)> = Vec::new();
+    let mut rows = Vec::new();
     for (i, n) in list.iter().enumerate() {
         let k = notif_key(n);
-        match keys.iter().position(|x| *x == k) {
-            Some(p) => rows[p].1 += 1,
-            None => {
-                keys.push(k);
-                rows.push((i, 1));
+        let c = match seen.iter_mut().find(|(x, _)| *x == k) {
+            Some(e) => {
+                e.1 += 1;
+                e.1
             }
+            None => {
+                seen.push((k, 1));
+                1
+            }
+        };
+        if c <= NOTIF_PER_APP {
+            rows.push(i);
         }
     }
     rows
@@ -1182,24 +1186,16 @@ fn refresh(ui: &Island) {
         ui.set_tabs(ModelRc::new(VecModel::from(tabs)));
         ui.set_active_tab(state.active_tab.as_str().into());
         let lyrics_on = state.settings.music.lyrics || state.settings.music.lyrics_youtube;
-        if !state.notifications.iter().any(|n| notif_key(n) == state.notif_open) {
-            // The open stack is gone (cleared or read elsewhere).
-            state.notif_open.clear();
-        }
-        let view_rows = notif_view(&state.notifications, &state.notif_open);
-        let open_app = state.notifications.iter().find(|n| !state.notif_open.is_empty() && notif_key(n) == state.notif_open).map(|n| n.app.clone()).unwrap_or_default();
-        ui.set_notif_open_app(open_app.as_str().into());
         ui.set_notif_total(state.notifications.len() as i32);
+        let view_rows = notif_view(&state.notifications);
         let logos = &mut state.logos;
         let rows: Vec<NotifRow> = view_rows
             .iter()
-            .filter_map(|&(i, count)| state.notifications.get(i).map(|n| (i, count, n)))
-            .map(|(i, count, n)| {
+            .filter_map(|&i| state.notifications.get(i).map(|n| (i, n)))
+            .map(|(i, n)| {
                 let logo = logo_image(logos, &n.aumid);
                 NotifRow {
                     index: i as i32,
-                    count: count as i32,
-                    key: notif_key(n).into(),
                     app: n.app.as_str().into(),
                     title: n.title.as_str().into(),
                     body: n.body.as_str().into(),
@@ -1411,7 +1407,7 @@ fn refresh(ui: &Island) {
                         // Claude Code's questions first, one a row; then the
                         // notifications in two columns (one for a single one).
                         let q = ask_count.min(ASK_ROWS_MAX);
-                        let n = notif_view(&state.notifications, &state.notif_open).len().min(NOTIF_ROWS_MAX);
+                        let n = notif_view(&state.notifications).len().min(NOTIF_ROWS_MAX);
                         let cols = if n == 1 { 1 } else { 2 };
                         (NOTIF_HEADER_H + (q + n.div_ceil(cols)) as f32 * NOTIF_ROW_PITCH).max(page_h)
                     }
@@ -3434,7 +3430,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             size_to: (0.0, 0.0),
             region_timer: Timer::default(),
             active_tab: first_tab,
-            notif_open: String::new(),
             account_pending: String::new(),
             account_hint: (String::new(), String::new()),
             accounts_open: false,
@@ -3910,20 +3905,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak = ui.as_weak();
-    ui.on_notif_stack_clicked(move |key| {
-        let Some(ui) = weak.upgrade() else { return };
-        with_state(|state| state.notif_open = key.to_string());
-        refresh(&ui);
-    });
-
-    let weak = ui.as_weak();
-    ui.on_notif_collapse(move || {
-        let Some(ui) = weak.upgrade() else { return };
-        with_state(|state| state.notif_open.clear());
-        refresh(&ui);
-    });
-
-    let weak = ui.as_weak();
     ui.on_notif_clicked(move |index| {
         let Some(ui) = weak.upgrade() else { return };
         with_state(|state| {
@@ -4330,6 +4311,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The island is hidden from the taskbar, so closing Settings must not end the app.
     slint::run_event_loop_until_quit()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod notif_view_tests {
+    use super::*;
+
+    #[test]
+    fn one_app_gets_two_rows_at_most_and_the_order_stays() {
+        let mk = |id: u32, app: &str| notif::Notif { id, app: app.into(), aumid: format!("{app}!App"), title: String::new(), body: String::new(), time: String::new() };
+        // Newest first: five from WhatsApp around one from Discord.
+        let list: std::collections::VecDeque<notif::Notif> =
+            [mk(7, "WhatsApp"), mk(6, "WhatsApp"), mk(5, "WhatsApp"), mk(4, "Discord"), mk(3, "WhatsApp"), mk(2, "WhatsApp")].into_iter().collect();
+        assert_eq!(notif_view(&list), vec![0, 1, 3]);
+    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 # Kanmuri
 
-A small "dynamic island" for Windows: a capsule at the top of the screen that shows what is going on. The song playing (with synced lyrics), your notifications stacked per app, volume and device changes, prayer times, how much of the day is left, Pomodoro and water reminders, Claude Code's permission questions, and a switch between your Claude and Codex accounts.
+A small "dynamic island" for Windows: a capsule at the top of the screen that shows what is going on. The song playing (with synced lyrics), your notifications, volume and device changes, prayer times, how much of the day is left, Pomodoro and water reminders, Claude Code's permission questions, and a switch between your Claude and Codex accounts.
 
 Native Rust, no browser engine: about 40 MB of RAM and next to no CPU while it sits hidden.
 
@@ -30,7 +30,7 @@ The open island has one bar on top: the tabs, the time, and round buttons for a 
 | | |
 |---|---|
 | ![Music](docs/screens/music.png) | **Music**: whatever is playing in Spotify, YouTube Music in a browser, or any player that shows in Windows' media controls. Play/pause, next, previous, a seek bar; shuffle and repeat when the player allows it (for YouTube Music in Chrome or Edge, add the small [extension](extension/ytm), since browsers don't pass shuffle and repeat to Windows). Synced lyrics from LRCLIB, or YouTube Music when LRCLIB has none, with furigana and romaji for Japanese. **Line** keeps the island a small capsule with just the line being sung. **Watch in island**: put a video in Chrome or Edge into picture-in-picture and Kanmuri docks it under the island. |
-| ![Notifications](docs/screens/notifications.png) | **Notifications**: Windows notifications, mirrored on the island, with each app's own icon. Several from one app make one stack, as on an iPhone: the newest on top with the count on its icon; a click opens the stack, **‹ App** closes it. A click on a notification opens the app. A switch per app in Settings. While the module is on, Windows' own pop-up banners stay off for those apps (they still reach Windows' notification centre); turning the module off, or quitting Kanmuri, puts every app back as it was. **Do not disturb** keeps the island down for notifications, calls excepted. |
+| ![Notifications](docs/screens/notifications.png) | **Notifications**: Windows notifications, mirrored on the island, with each app's own icon. One app shows two at most, so a busy chat can't fill the page (the header counts them all). A click on a notification opens the app. A switch per app in Settings. While the module is on, Windows' own pop-up banners stay off for those apps (they still reach Windows' notification centre); turning the module off, or quitting Kanmuri, puts every app back as it was. **Do not disturb** keeps the island down for notifications, calls excepted. |
 | ![Accounts](docs/screens/accounts.png) | **Accounts**: your Claude Desktop, Claude Code and Codex accounts, each with its plan and how much of its limits is used. A click switches: Claude Code and Codex through their config folder (new terminals use it), Claude Desktop by swapping its saved login (it restarts, so it asks for a second click first). Accounts set up with AccountDeck / NotchDeck (`%USERPROFILE%\.accountdeck`) are picked up as they are. |
 
 Also:
