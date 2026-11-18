@@ -32,14 +32,31 @@ fn notchdeck_exe() -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
+/// FUBUNOTCH_V2_DEMO_ACCOUNTS: made-up accounts (and NotchDeck counted as
+/// installed), for snapshots of the Accounts tab without NotchDeck.
+fn demo() -> bool {
+    std::env::var_os("FUBUNOTCH_V2_DEMO_ACCOUNTS").is_some()
+}
+
 pub fn installed() -> bool {
-    notchdeck_exe().is_some()
+    demo() || notchdeck_exe().is_some()
 }
 
 /// The accounts in NotchDeck's order; empty when NotchDeck isn't set up.
 pub fn load() -> Vec<Account> {
+    if demo() {
+        return parse(DEMO);
+    }
     std::fs::read(state_path()).map(|b| parse(&b)).unwrap_or_default()
 }
+
+const DEMO: &[u8] = br#"{"accounts":[
+    {"id":"desktop-daffa","service":"desktop","name":"Daffa Max"},
+    {"id":"desktop-partner","service":"desktop","name":"Partner Kyou Ultra"},
+    {"id":"claude-partner","service":"claude","name":"Partner Area Ultra"},
+    {"id":"claude-daffa","service":"claude","name":"Daffa Max"},
+    {"id":"codex-main","service":"codex","name":"Main"}],
+    "active":{"desktop":"desktop-partner","claude":"claude-partner","codex":"codex-main"}}"#;
 
 pub fn parse(bytes: &[u8]) -> Vec<Account> {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else { return Vec::new() };

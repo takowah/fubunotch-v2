@@ -77,35 +77,30 @@ const LINE_NOTICE_H: f32 = 54.0;
 const LINE_NOTICE_SHORT_H: f32 = 30.0;
 /// About as many characters as fit on Line's widest capsule.
 const LYRIC_ONE_LINE: usize = 56;
-/// The open list: $WIDE_W wide; its chrome (margins, tabs, footer, edge)
-/// plus the page, each page as tall as its content.
-const EXPANDED: (f32, f32) = (340.0, 179.0);
-const EXPANDED_CHROME: f32 = 93.0;
-/// The Music page: the card ($MEDIA content, 86).
-const EXPANDED_MUSIC: (f32, f32) = (340.0, EXPANDED_CHROME + 86.0);
-/// The Lyrics page: the card ($LYRICS_PAGE_H).
-const EXPANDED_LYRICS: (f32, f32) = (340.0, EXPANDED_CHROME + 196.0);
-/// Notifications: a header and up to four rows ($ITEM_H + 2 each).
+/// The open island, laid out like Poni's: a wide panel, one top bar (tabs,
+/// time, quick buttons) and the page under it across the full width, no
+/// footer. Its chrome (edge, margins, the bar) plus the page; a normal page
+/// makes a 196 px panel, a tall one (lyrics) 268 px, and a page with more in
+/// it (notifications, accounts) grows to fit.
+const EXPANDED_W: f32 = 680.0;
+const EXPANDED_CHROME: f32 = 74.0;
+const PAGE_H: f32 = 122.0;
+const PAGE_TALL_H: f32 = 194.0;
+const EXPANDED: (f32, f32) = (EXPANDED_W, EXPANDED_CHROME + PAGE_H);
+/// Notifications: a header and up to six rows in two columns ($ITEM_H + 2 each).
 const NOTIF_HEADER_H: f32 = 28.0;
 const NOTIF_ROW_PITCH: f32 = 50.0;
-const NOTIF_ROWS_MAX: usize = 4;
-const NOTIF_EMPTY_H: f32 = 30.0;
-/// Accounts: an app's title, a line of chips, the gap after an app.
-const ACCOUNT_TITLE_H: f32 = 24.0;
-const ACCOUNT_LINE_H: f32 = 34.0;
-const ACCOUNT_GAP_H: f32 = 6.0;
-/// The room a line of chips has, and a chip's width without its name.
-const ACCOUNT_LINE_W: f32 = 318.0;
-const ACCOUNT_CHIP_PAD: f32 = 59.0;
-/// A name's width per character at 13 px semibold.
-const ACCOUNT_CHAR_W: f32 = 7.4;
-/// Prayer: the next prayer and the day's timeline (two columns).
-const PRAYER_PAGE_H: f32 = 80.0;
-/// The timeline's width (the right column) and the room at its ends: half
-/// a label (wide enough for "Maghrib" at 10 px), so the end labels sit
-/// right under their dots too.
-const PRAYER_TRACK_W: f32 = 200.0;
-const PRAYER_TRACK_INSET: f32 = 19.0;
+const NOTIF_ROWS_MAX: usize = 6;
+/// Accounts: one column per app, its title and its chips stacked.
+const ACCOUNT_PAD: f32 = 8.0;
+const ACCOUNT_TITLE_H: f32 = 20.0;
+const ACCOUNT_CHIP_H: f32 = 34.0;
+const ACCOUNT_SPACING: f32 = 6.0;
+/// Prayer: the timeline's width (the right column) and the room at its
+/// ends: half a label (wide enough for "Maghrib" at 11.5 px), so the end
+/// labels sit right under their dots too.
+const PRAYER_TRACK_W: f32 = 420.0;
+const PRAYER_TRACK_INSET: f32 = 28.0;
 /// A prayer pop-up still comes this many minutes late (the PC was asleep
 /// at the time); later than that it is skipped.
 const PRAYER_LATE_MIN: u32 = 5;
@@ -148,7 +143,7 @@ fn hide_after(s: &Settings) -> u64 {
 /// region follows once it is done.
 const MORPH_MS: u64 = 450;
 /// The window never changes size: the largest island and its glow.
-const WINDOW: (f32, f32) = (LYRIC_MAX_W + 2.0 * GLOW + 8.0, TOP + EXPANDED_MAX_H + GLOW + 4.0);
+const WINDOW: (f32, f32) = (if EXPANDED_W > LYRIC_MAX_W { EXPANDED_W } else { LYRIC_MAX_W } + 2.0 * GLOW + 8.0, TOP + EXPANDED_MAX_H + GLOW + 4.0);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Mode {
@@ -692,13 +687,12 @@ fn morph_to(ui: &Island, state: &mut State, target: (f32, f32)) {
 }
 
 /// Shows what the arbiter and the modules say, sizes the island, sets the one timer.
-/// The Accounts tab: NotchDeck's accounts, one group per app.
-/// Returns the page's height: each app's title, its lines of chips (a line
-/// holds the chips that fit, as Mini Island's wrap panel does), a gap after.
+/// The Accounts tab: NotchDeck's accounts, one column per app.
+/// Returns the page's height: the tallest column (its title, its chips stacked).
 fn set_accounts(ui: &Island, pending: &str) -> f32 {
     let list = accounts::load();
     let mut groups: Vec<AccountGroup> = Vec::new();
-    let mut height = 2.0;
+    let mut most = 0usize;
     for (service, title) in accounts::SERVICES.iter() {
         let rows: Vec<AccountRow> = list
             .iter()
@@ -714,30 +708,16 @@ fn set_accounts(ui: &Island, pending: &str) -> f32 {
         if rows.is_empty() {
             continue;
         }
-        let mut lines: Vec<Vec<AccountRow>> = vec![Vec::new()];
-        let mut used = 0.0;
-        for row in rows {
-            let w = ACCOUNT_CHIP_PAD + ACCOUNT_CHAR_W * row.name.chars().count() as f32;
-            if used > 0.0 && used + w > ACCOUNT_LINE_W {
-                lines.push(Vec::new());
-                used = 0.0;
-            }
-            used += w;
-            lines.last_mut().map(|l| l.push(row));
-        }
-        height += ACCOUNT_TITLE_H + lines.len() as f32 * ACCOUNT_LINE_H + ACCOUNT_GAP_H;
-        for (i, line) in lines.into_iter().enumerate() {
-            groups.push(AccountGroup { title: if i == 0 { (*title).into() } else { SharedString::new() }, accounts: ModelRc::new(VecModel::from(line)) });
-        }
+        most = most.max(rows.len());
+        groups.push(AccountGroup { title: (*title).into(), accounts: ModelRc::new(VecModel::from(rows)) });
     }
     let pending = if list.iter().any(|a| a.id == pending && a.active) { "" } else { pending };
     ui.set_account_pending(pending.into());
     if groups.is_empty() {
         ui.set_account_note(if accounts::installed() { "No accounts in NotchDeck yet" } else { "Install NotchDeck to switch Claude and Codex accounts here" }.into());
-        height = 30.0;
     }
     ui.set_account_groups(ModelRc::new(VecModel::from(groups)));
-    height
+    2.0 * ACCOUNT_PAD + ACCOUNT_TITLE_H + most as f32 * (ACCOUNT_SPACING + ACCOUNT_CHIP_H)
 }
 
 fn refresh(ui: &Island) {
@@ -971,12 +951,16 @@ fn refresh(ui: &Island) {
             // Each page as tall as its content, as Mini Island's list.
             Mode::Expanded => {
                 let page = match state.active_tab.as_str() {
-                    "music" => EXPANDED_MUSIC.1 - EXPANDED_CHROME,
-                    "lyrics" => EXPANDED_LYRICS.1 - EXPANDED_CHROME,
-                    "accounts" => accounts_h,
-                    "prayer" => PRAYER_PAGE_H,
-                    _ if state.notifications.is_empty() => NOTIF_EMPTY_H,
-                    _ => NOTIF_HEADER_H + state.notifications.len().min(NOTIF_ROWS_MAX) as f32 * NOTIF_ROW_PITCH,
+                    "music" | "prayer" => PAGE_H,
+                    "lyrics" => PAGE_TALL_H,
+                    "accounts" => accounts_h.max(PAGE_H),
+                    _ if state.notifications.is_empty() => PAGE_H,
+                    _ => {
+                        // Two columns (one for a single notification).
+                        let n = state.notifications.len().min(NOTIF_ROWS_MAX);
+                        let cols = if n == 1 { 1 } else { 2 };
+                        (NOTIF_HEADER_H + n.div_ceil(cols) as f32 * NOTIF_ROW_PITCH).max(PAGE_H)
+                    }
                 };
                 (EXPANDED.0, (EXPANDED_CHROME + page).min(EXPANDED_MAX_H))
             }
@@ -3095,6 +3079,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(path) = snapshot {
         // The watcher threads (notifications, music) report in real time.
         std::thread::sleep(std::time::Duration::from_millis(2000));
+        // The first refresh ran before the demo data: a tab that only exists
+        // with it (Lyrics) fell back to the first one. Ask for it again.
+        if let Ok(tab) = std::env::var("FUBUNOTCH_V2_TAB") {
+            with_state(|s| s.active_tab = tab);
+        }
         refresh(&ui);
         snapshot::advance(1500);
         refresh(&ui);

@@ -581,18 +581,41 @@ component PageToggle inherits Rectangle {
     area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
-// The footer's small buttons (the gear): a grey glyph, a faint disc and white when pointed at.
-component FooterButton inherits Rectangle {
+// The top bar's round quick buttons (Do not disturb, notifications, the
+// gear, a docked video): a faint disc, lighter when pointed at or on; an
+// optional red count in the corner.
+component QuickButton inherits Rectangle {
     in property <string> glyph;
     in property <bool> on;
+    in property <int> badge;
     callback clicked();
     callback right-clicked();
-    width: 22px;
-    height: 18px;
-    border-radius: 9px;
-    background: area.has-hover ? #ffffff2e : transparent;
+    width: 30px;
+    height: 30px;
+    border-radius: 15px;
+    background: root.on ? #ffffff40 : area.has-hover ? #ffffff2e : #ffffff14;
     animate background { duration: 180ms; }
-    Glyph { text: root.glyph; font-size: 11px; color: area.has-hover || root.on ? Mini.ink : Mini.faint; animate color { duration: 180ms; } }
+    Glyph { text: root.glyph; font-size: 13px; color: area.has-hover || root.on ? Mini.ink : Mini.text-3; animate color { duration: 180ms; } }
+    if root.badge > 0 : Rectangle {
+        x: parent.width - self.width + 4px;
+        y: -3px;
+        width: max(15px, badge-text.preferred-width + 8px);
+        height: 15px;
+        border-radius: 7.5px;
+        background: #ff453a;
+        border-width: 1.5px;
+        border-color: Mini.base;
+        badge-text := Text {
+            width: 100%;
+            height: 100%;
+            text: root.badge > 9 ? "9+" : root.badge;
+            color: Mini.ink;
+            font-size: 9px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
     area := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
@@ -846,16 +869,108 @@ component MusicCard inherits Rectangle {
     }
 }
 
-// Notifications: a header (how many, Clear all) and the four newest as rows
-// with the app's round icon, the title and message, and the time.
+// The open island's Music page, laid across its width: a big cover on the
+// left; the title (and the bars), artist and player beside it; the controls
+// and (when the player's level is known) the volume on the right; the song's
+// progress along the bottom with the lyric switch.
+component MusicWide inherits Rectangle {
+    in property <Music> music;
+    in property <color> accent;
+    in property <float> volume;
+    in property <bool> live;
+    in property <bool> line-held;
+    callback command(string);
+    property <length> pad: 14px;
+    property <length> cover: self.height - 2 * self.pad;
+    property <length> text-x: self.pad + self.cover + 16px;
+    property <length> controls-w: 3 * 34px + 2 * 6px;
+    property <length> volume-w: root.volume >= 0 ? 170px : 0px;
+    Tinted { width: parent.width; height: parent.height; tint: root.accent; lit: true; }
+    Cover { x: root.pad; y: root.pad; size: root.cover; glyph-size: 30px; music: root.music; accent: root.accent; }
+    VerticalLayout {
+        x: root.text-x;
+        y: root.pad;
+        width: root.width - root.text-x - root.pad - root.controls-w - root.volume-w - 16px;
+        height: 56px;
+        alignment: start;
+        spacing: 1px;
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Text { text: root.music.title; color: Mini.ink; font-size: 17px; font-weight: 700; overflow: elide; vertical-alignment: center; }
+            Equalizer { playing: root.music.playing; tint: Paint.readable(root.accent); y: (parent.height - self.height) / 2; }
+        }
+        Text { text: root.music.artist; color: Mini.text-3; font-size: 13px; overflow: elide; }
+        if root.music.app != "" : Text { text: root.music.app; color: Mini.label; font-size: 11px; overflow: elide; }
+    }
+    // The volume row: speaker, slider, level.
+    if root.volume >= 0 : HorizontalLayout {
+        x: root.width - root.pad - root.controls-w - 14px - root.volume-w;
+        y: root.pad + 5px;
+        width: root.volume-w;
+        height: 24px;
+        spacing: 4px;
+        Rectangle { width: 18px; Glyph { text: Glyphs.volume; font-size: 12px; color: #ffffffe6; } }
+        VolumeSlider { horizontal-stretch: 1; value: root.volume; tint: Paint.lift(root.accent, 0.35); y: (parent.height - self.height) / 2; }
+        Text { text: round(root.volume * 100) + "%"; color: Mini.text-2; font-size: 10.5px; min-width: 32px; horizontal-alignment: right; vertical-alignment: center; }
+    }
+    HorizontalLayout {
+        x: root.width - root.pad - root.controls-w;
+        y: root.pad;
+        width: root.controls-w;
+        height: 34px;
+        spacing: 6px;
+        MediaButton { width: 34px; height: 34px; border-radius: 17px; glyph: Glyphs.prev; glyph-size: 13px; clicked => { root.command("previous"); } }
+        MediaButton { width: 34px; height: 34px; border-radius: 17px; glyph: root.music.playing ? Glyphs.pause : Glyphs.play; glyph-size: 16px; ring: true; clicked => { root.command("play-pause"); } }
+        MediaButton { width: 34px; height: 34px; border-radius: 17px; glyph: Glyphs.next; glyph-size: 13px; clicked => { root.command("next"); } }
+    }
+    // The song's progress: time, the wave, length, and the lyric switch.
+    HorizontalLayout {
+        x: root.text-x;
+        y: root.height - root.pad - 26px;
+        width: root.width - root.text-x - root.pad;
+        height: 26px;
+        Text { text: root.music.elapsed; color: Mini.text-2; font-size: 11px; min-width: 34px; vertical-alignment: center; }
+        WaveBar {
+            horizontal-stretch: 1;
+            y: 26px / 2 + 2px - self.height;
+            value: root.music.position;
+            playing: root.music.playing;
+            live: root.live;
+            tint: root.accent;
+        }
+        Rectangle { width: 8px; }
+        Text { text: root.music.remaining; color: Mini.text-2; font-size: 11px; min-width: 34px; horizontal-alignment: right; vertical-alignment: center; }
+        // Line: the song's lyric on the capsule (Mini Island's lyric switch).
+        Rectangle {
+            width: 34px;
+            Rectangle {
+                x: 8px;
+                y: (parent.height - self.height) / 2;
+                width: 26px;
+                height: 26px;
+                border-radius: 13px;
+                background: line-area.has-hover ? #ffffff33 : root.line-held ? #ffffff40 : transparent;
+                Glyph { text: Glyphs.line; font-size: 12px; color: root.line-held ? Mini.ink : #ffffffb3; }
+                line-area := TouchArea { mouse-cursor: pointer; clicked => { root.command("line-hold"); } }
+            }
+        }
+    }
+}
+
+// Notifications: a header (how many, Clear all) and the six newest in two
+// columns, each row the app's round icon, the title and message, the time.
 component NotifPage inherits Rectangle {
     in property <[NotifRow]> items;
     callback clicked(int);
     callback clear();
+    // One column for a single notification, else two.
+    property <int> cols: root.items.length == 1 ? 1 : 2;
+    property <length> col-w: (root.width - (self.cols - 1) * 10px) / self.cols;
     if root.items.length == 0 : Text {
-        y: 6px;
         width: parent.width;
-        height: 18px;
+        height: parent.height;
+        vertical-alignment: center;
         text: "No notifications";
         color: Mini.text-3;
         font-size: 13px;
@@ -870,7 +985,7 @@ component NotifPage inherits Rectangle {
             x: 0;
             width: self.preferred-width;
             height: 100%;
-            text: root.items.length > 4 ? "Notifications (4 of " + root.items.length + ")" : "Notifications";
+            text: root.items.length > 6 ? "Notifications (6 of " + root.items.length + ")" : "Notifications";
             color: Mini.label;
             font-size: 11px;
             font-weight: 600;
@@ -890,8 +1005,10 @@ component NotifPage inherits Rectangle {
         }
     }
     for n[i] in root.items : Rectangle {
-        visible: i < 4;
-        y: 28px + i * 50px;
+        visible: i < 6;
+        x: mod(i, root.cols) * (root.col-w + 10px);
+        y: 28px + floor(i / root.cols) * 50px;
+        width: root.col-w;
         height: 48px;
         Tinted { width: parent.width; height: parent.height; tint: n.accent; lit: row.has-hover; }
         AppIcon { x: 8px; y: 9px; size: 30px; accent: n.accent; initial: n.initial; }
@@ -927,10 +1044,25 @@ component LyricsPage inherits Rectangle {
     in-out property <bool> furigana: true;
     in-out property <bool> romaji: true;
     callback command(string);
-    height: 196px;
+    // The song on the left (cover, title, artist), the lines beside it.
+    property <length> side: 196px;
     Tinted { width: parent.width; height: parent.height; tint: root.accent; lit: true; }
+    Cover { x: 16px; y: 16px; size: 72px; glyph-size: 24px; music: root.music; accent: root.accent; }
+    VerticalLayout {
+        x: 16px;
+        y: 16px + 72px + 10px;
+        width: root.side - 16px - 12px;
+        height: root.height - self.y - 14px;
+        alignment: start;
+        spacing: 1px;
+        Text { text: root.music.title; color: Mini.ink; font-size: 13px; font-weight: 700; wrap: word-wrap; max-height: 36px; overflow: elide; }
+        Text { text: root.music.artist; color: Mini.text-3; font-size: 12px; overflow: elide; }
+        if root.music.lyrics-shift != "" : Text { text: root.music.lyrics-shift; color: Mini.label; font-size: 10.5px; overflow: elide; }
+    }
+    Rectangle { x: root.side; y: 16px; width: 1px; height: root.height - 32px; background: #ffffff14; }
     view := Rectangle {
-        width: parent.width;
+        x: root.side + 1px;
+        width: parent.width - root.side - 1px - 36px;
         height: parent.height;
         clip: true;
         list := VerticalLayout {
@@ -986,20 +1118,20 @@ component LyricsPage inherits Rectangle {
     }
 }
 
-// Accounts: per app its icon and name, then its accounts as chips (a round
-// initial and the name). The one in use is solid white; a click on another
-// asks NotchDeck to switch.
+// Accounts: one column per app (its icon and name, then its accounts as
+// chips stacked: a round initial and the name). The one in use is solid
+// white; a click on another asks NotchDeck to switch.
 component AccountChip inherits Rectangle {
     in property <AccountRow> account;
     in property <bool> pending;
     callback clicked();
-    width: chip-row.preferred-width + 19px;
     height: 34px;
     border-radius: 17px;
     background: root.account.active ? #fffffff2 : area.has-hover ? #ffffff3a : root.pending ? #ffffff45 : #ffffff1f;
     animate background { duration: 150ms; }
-    chip-row := HorizontalLayout {
+    HorizontalLayout {
         x: 5px;
+        width: parent.width - 5px - 12px;
         spacing: 8px;
         Rectangle {
             width: 24px;
@@ -1010,45 +1142,53 @@ component AccountChip inherits Rectangle {
             Text { width: 100%; height: 100%; horizontal-alignment: center; vertical-alignment: center; text: root.account.initial; color: Mini.ink; font-size: 11.5px; font-weight: 700; }
         }
         Text {
+            horizontal-stretch: 1;
             text: root.pending && !root.account.active ? root.account.name + "  ..." : root.account.name;
             color: root.account.active ? #000000 : Mini.ink;
             font-size: 13px;
             font-weight: 600;
             vertical-alignment: center;
+            overflow: elide;
         }
     }
     area := TouchArea { enabled: !root.account.active; mouse-cursor: root.account.active ? default : pointer; clicked => { root.clicked(); } }
 }
 
-component AccountsPage inherits VerticalLayout {
+component AccountsPage inherits Rectangle {
     in property <[AccountGroup]> groups;
     in property <string> pending;
     in property <string> note;
     callback clicked(string);
-    padding-left: 2px;
-    padding-right: 2px;
+    property <length> gap: 10px;
+    property <length> col-w: (root.width - (root.groups.length - 1) * self.gap) / max(1, root.groups.length);
     if root.groups.length == 0 : Text {
+        width: parent.width;
+        height: parent.height;
         text: root.note == "" ? "No accounts in NotchDeck yet" : root.note;
         color: Mini.text-3;
         font-size: 13px;
         horizontal-alignment: center;
+        vertical-alignment: center;
         wrap: word-wrap;
     }
-    for g[i] in root.groups : VerticalLayout {
-        // The last line of an app's chips leaves a gap before the next app.
-        padding-bottom: i + 1 < root.groups.length && root.groups[i + 1].title == "" ? 0px : 6px;
-        if g.title != "" : HorizontalLayout {
-            padding-left: 2px;
-            padding-top: 2px;
-            padding-bottom: 6px;
-            spacing: 7px;
+    for g[i] in root.groups : Rectangle {
+        x: i * (root.col-w + root.gap);
+        width: root.col-w;
+        height: parent.height;
+        border-radius: 14px;
+        background: #ffffff0a;
+        VerticalLayout {
+            padding: 8px;
+            spacing: 6px;
             alignment: start;
-            Glyph { width: 13px; text: Glyphs.service(g.title); font-size: 12px; color: Mini.label; horizontal-alignment: left; }
-            Text { text: g.title; color: Mini.label; font-size: 12px; font-weight: 600; vertical-alignment: center; }
-        }
-        HorizontalLayout {
-            spacing: 8px;
-            alignment: start;
+            HorizontalLayout {
+                height: 20px;
+                padding-left: 4px;
+                spacing: 7px;
+                alignment: start;
+                Glyph { width: 13px; text: Glyphs.service(g.title); font-size: 12px; color: Mini.label; horizontal-alignment: left; }
+                Text { text: g.title; color: Mini.label; font-size: 12px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+            }
             for a in g.accounts : AccountChip { account: a; pending: root.pending == a.id; clicked => { root.clicked(a.id); } }
         }
     }
@@ -1062,22 +1202,32 @@ component AccountsPage inherits VerticalLayout {
 component PrayerPage inherits Rectangle {
     in property <PrayerView> p;
     out property <color> green: #30d158;
-    property <length> col-x: 118px;
-    property <length> col-w: 200px;
-    property <length> track-y: 35px;
+    // The timeline's width is PRAYER_TRACK_W in main.rs (the dots' x come from there).
+    property <length> col-x: 232px;
+    property <length> col-w: 420px;
+    property <length> track-y: 66px;
+    // A quiet card behind the countdown, the line beside it.
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: root.col-x - 16px;
+        height: root.height;
+        border-radius: 14px;
+        background: #ffffff0a;
+    }
 
     VerticalLayout {
-        x: 4px;
+        x: 16px;
         y: 0;
-        width: root.col-x - 14px;
+        width: root.col-x - 16px - 32px;
         height: root.height;
         alignment: center;
         spacing: 0px;
-        Text { text: root.p.next-name; color: root.green; font-size: 13px; font-weight: 700; overflow: elide; }
-        Text { text: root.p.countdown; color: Mini.ink; font-size: 24px; font-weight: 700; }
-        Text { text: root.p.when; color: Mini.text-2; font-size: 11px; overflow: elide; }
+        Text { text: root.p.next-name; color: root.green; font-size: 14px; font-weight: 700; overflow: elide; }
+        Text { text: root.p.countdown; color: Mini.ink; font-size: 32px; font-weight: 700; }
+        Text { text: root.p.when; color: Mini.text-2; font-size: 12px; overflow: elide; }
         HorizontalLayout {
-            padding-top: 3px;
+            padding-top: 4px;
             spacing: 4px;
             Glyph { width: 11px; text: Glyphs.place; font-size: 10px; color: Mini.label; }
             Text { text: root.p.place; color: Mini.label; font-size: 11px; overflow: elide; horizontal-stretch: 1; }
@@ -1091,23 +1241,24 @@ component PrayerPage inherits Rectangle {
         height: root.height;
         Text {
             x: 0;
-            y: 2px;
+            y: 10px;
             width: parent.width;
-            height: 13px;
+            height: 15px;
             text: root.p.info;
             color: Mini.label;
-            font-size: 10px;
+            font-size: 11px;
+            horizontal-alignment: center;
             overflow: elide;
         }
         // Now, above the line.
         Text {
             x: clamp(root.p.now-x - self.width / 2, 0px, parent.width - self.width);
-            y: root.track-y - 7px - 13px;
+            y: root.track-y - 8px - 15px;
             width: self.preferred-width;
-            height: 13px;
+            height: 15px;
             text: root.p.now-text;
             color: Mini.ink;
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 600;
         }
         // The line, filled as far as now.
@@ -1133,7 +1284,7 @@ component PrayerPage inherits Rectangle {
             width: parent.width;
             height: parent.height;
             Rectangle {
-                property <length> size: m.next ? 11px : 7px;
+                property <length> size: m.next ? 13px : 9px;
                 x: m.dot-x - self.size / 2;
                 y: root.track-y - self.size / 2;
                 width: self.size;
@@ -1145,23 +1296,23 @@ component PrayerPage inherits Rectangle {
             }
             Text {
                 x: m.dot-x - self.width / 2;
-                y: root.track-y + 9px;
-                width: 40px;
-                height: 13px;
+                y: root.track-y + 11px;
+                width: 56px;
+                height: 15px;
                 text: m.name;
                 color: m.next ? root.green : m.past ? Mini.label : Mini.text-2;
-                font-size: 10px;
+                font-size: 11.5px;
                 font-weight: m.next ? 700 : 600;
                 horizontal-alignment: center;
             }
             Text {
                 x: m.dot-x - self.width / 2;
-                y: root.track-y + 22px;
-                width: 40px;
-                height: 13px;
+                y: root.track-y + 27px;
+                width: 56px;
+                height: 15px;
                 text: m.time;
                 color: m.next ? root.green : Mini.label;
-                font-size: 10px;
+                font-size: 11px;
                 font-weight: m.next ? 700 : 400;
                 horizontal-alignment: center;
             }
@@ -1578,16 +1729,18 @@ export component Island inherits Window {
                 if root.dnd : Glyph { width: 14px; text: Glyphs.moon; font-size: 11px; color: Mini.label; }
             }
 
-            // Open: the tabs and the time, the page, the gear.
+            // Open (laid out like Poni's): one top bar (the tabs, the time,
+            // the quick buttons on the right), the page across the full width
+            // underneath, no footer.
             Rectangle {
                 opacity: root.expanded ? 1 : 0;
                 animate opacity { duration: Ice.fade; easing: ease-out; }
                 visible: self.opacity > 0.01;
-                property <length> inner-x: 1px + 8px;
+                property <length> inner-x: 1px + 14px;
                 property <length> inner-w: self.width - 2 * self.inner-x;
 
                 // The tab track: one tab per page, the open one a lighter pill with its name.
-                Rectangle {
+                tab-track := Rectangle {
                     x: parent.inner-x;
                     y: 1px + 12px;
                     width: tab-row.preferred-width + 6px;
@@ -1639,33 +1792,57 @@ export component Island inherits Window {
                         }
                     }
                 }
+                // The time, right after the tabs.
                 Text {
-                    x: parent.inner-x + parent.inner-w - 8px - self.width;
+                    x: tab-track.x + tab-track.width + 16px;
                     width: self.preferred-width;
                     y: 1px + 12px;
                     height: 36px;
                     text: root.clock;
                     color: Mini.ink;
-                    font-size: 16px;
+                    font-size: 18px;
                     font-weight: 700;
                     vertical-alignment: center;
+                }
+                // The quick buttons: a docked video (while one is), Do not
+                // disturb, the notifications with their count, the gear.
+                HorizontalLayout {
+                    x: parent.inner-x + parent.inner-w - self.preferred-width;
+                    width: self.preferred-width;
+                    y: 1px + 12px + 3px;
+                    height: 30px;
+                    spacing: 8px;
+                    if root.watching : QuickButton {
+                        glyph: Glyphs.video;
+                        on: root.watch-held;
+                        clicked => { root.watch-clicked(); }
+                        right-clicked => { root.watch-back(); }
+                    }
+                    QuickButton { glyph: Glyphs.moon; on: root.dnd; clicked => { root.dnd-clicked(); } }
+                    QuickButton {
+                        glyph: Glyphs.bell;
+                        on: root.active-tab == "notifications";
+                        badge: root.notifications.length;
+                        clicked => { root.tab-clicked("notifications"); }
+                    }
+                    QuickButton { glyph: Glyphs.gear; clicked => { root.open-settings(); } }
                 }
 
                 // The page.
                 Rectangle {
                     x: parent.inner-x;
-                    y: 1px + 12px + 36px + 8px;
+                    y: 1px + 12px + 36px + 10px;
                     width: parent.inner-w;
-                    height: parent.height - self.y - 1px - 12px - 18px - 5px;
+                    height: parent.height - self.y - 14px - 1px;
                     Page {
                         shown: root.active-tab == "notifications";
                         NotifPage { items: root.notifications; clicked(i) => { root.notif-clicked(i); } clear => { root.notif-clear(); } }
                     }
                     Page {
                         shown: root.active-tab == "music";
-                        MusicCard {
-                            y: 0;
+                        MusicWide {
                             width: parent.width;
+                            height: parent.height;
                             music: root.music;
                             accent: root.song-accent;
                             volume: root.volume;
@@ -1677,8 +1854,8 @@ export component Island inherits Window {
                     Page {
                         shown: root.active-tab == "lyrics";
                         LyricsPage {
-                            y: 0;
                             width: parent.width;
+                            height: parent.height;
                             music: root.music;
                             accent: root.song-accent;
                             held: root.held;
@@ -1693,9 +1870,8 @@ export component Island inherits Window {
                     Page {
                         shown: root.active-tab == "accounts";
                         AccountsPage {
-                            y: 0;
                             width: parent.width;
-                            height: self.preferred-height;
+                            height: parent.height;
                             groups: root.account-groups;
                             pending: root.account-pending;
                             note: root.account-note;
@@ -1704,23 +1880,6 @@ export component Island inherits Window {
                     }
                 }
 
-                // The footer: the gear on the right (Do not disturb and a
-                // docked video beside it).
-                HorizontalLayout {
-                    x: parent.inner-x + parent.inner-w - 2px - self.preferred-width;
-                    width: self.preferred-width;
-                    y: parent.height - 1px - 12px - 18px;
-                    height: 18px;
-                    spacing: 4px;
-                    if root.watching : FooterButton {
-                        glyph: Glyphs.video;
-                        on: root.watch-held;
-                        clicked => { root.watch-clicked(); }
-                        right-clicked => { root.watch-back(); }
-                    }
-                    FooterButton { glyph: Glyphs.moon; on: root.dnd; clicked => { root.dnd-clicked(); } }
-                    FooterButton { glyph: Glyphs.gear; clicked => { root.open-settings(); } }
-                }
             }
         }
     }
