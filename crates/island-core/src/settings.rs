@@ -119,6 +119,8 @@ pub struct LookSettings {
     pub style: String,
     /// The body's colour for the "color" look, "#rrggbb".
     pub color: String,
+    /// Liquid Glass' tint: "auto" (by what is behind), "dark" or "light".
+    pub glass_tint: String,
     /// After sunset the island's colours ease warmer, back at sunrise.
     pub night_warm: bool,
     /// How warm at night, 0..100 %.
@@ -137,7 +139,7 @@ pub struct LookSettings {
 
 impl Default for LookSettings {
     fn default() -> Self {
-        LookSettings {
+        LookSettings { glass_tint: "auto".into(),
             mascot: false,
             theme: "graphite".into(),
             background: String::new(),

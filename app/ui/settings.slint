@@ -72,6 +72,7 @@ export struct SettingsView {
     background-dim: int,
     // Look: "black" | "color" | "wallpaper" | "liquid".
     look-style: string,
+    glass-tint: string,
     look-color: color,
     // "#1f2a52", for the custom colour's field.
     look-color-hex: string,
@@ -994,6 +995,17 @@ export component SettingsWindow inherits Window {
                             : root.s.look-style == "wallpaper" ? "The island takes your wallpaper's colour, darkened so text stays readable."
                             : root.s.look-style == "liquid" ? "Glass over what is behind the island. Not seen in screenshots or recordings while on."
                             : "A solid black island.";
+                    }
+                }
+                // Liquid Glass' tint: by what is behind it, or always dark / light.
+                if root.page == "look" && root.s.look-style == "liquid" : HorizontalLayout {
+                    padding-left: 6px;
+                    spacing: 6px;
+                    alignment: start;
+                    for t in [{id: "auto", l: "Auto"}, {id: "dark", l: "Dark"}, {id: "light", l: "Light"}] : SmallButton {
+                        label: t.l;
+                        primary: root.s.glass-tint == t.id;
+                        clicked => { root.look-picked("tint:" + t.id); }
                     }
                 }
                 if root.page == "look" : Heading { text: "COLOR"; }

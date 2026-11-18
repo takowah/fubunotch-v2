@@ -33,16 +33,20 @@ $sf = Join-Path $data 'settings.json'
 New-Item -ItemType Directory -Force $data | Out-Null
 $j = if (Test-Path $sf) { Get-Content $sf -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
 foreach ($sec in 'music', 'look') { if (-not $j.$sec) { $j | Add-Member -NotePropertyName $sec -NotePropertyValue ([pscustomobject]@{}) -Force } }
-$j.music | Add-Member -NotePropertyName lyrics -NotePropertyValue $true -Force
-$j.music | Add-Member -NotePropertyName lyrics_youtube -NotePropertyValue $true -Force
-$j.music | Add-Member -NotePropertyName romaji -NotePropertyValue $true -Force
-$j.look | Add-Member -NotePropertyName theme -NotePropertyValue 'graphite' -Force
-$j.look | Add-Member -NotePropertyName mascot -NotePropertyValue $false -Force
-$j.look | Add-Member -NotePropertyName background -NotePropertyValue '' -Force
-$j | Add-Member -NotePropertyName autostart -NotePropertyValue $true -Force
-Copy-Item $sf "$sf.bak-before-mini-look" -ErrorAction SilentlyContinue
+# First install only: a setting the owner has already set is never touched again
+# (every update used to put the theme back to Graphite and clear the picture).
+function Set-IfMissing($obj, $name, $value) {
+    if ($null -eq $obj.PSObject.Properties[$name]) { $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value }
+}
+Set-IfMissing $j.music 'lyrics' $true
+Set-IfMissing $j.music 'lyrics_youtube' $true
+Set-IfMissing $j.music 'romaji' $true
+Set-IfMissing $j.look 'theme' 'graphite'
+Set-IfMissing $j.look 'mascot' $false
+Set-IfMissing $j 'autostart' $true
+Copy-Item $sf "$sf.bak-install" -ErrorAction SilentlyContinue
 [IO.File]::WriteAllText($sf, ($j | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
-"settings: lyrics on, YouTube Music on, romaji on, graphite, no mascot, autostart"
+"settings: kept as set (theme $($j.look.theme), picture '$($j.look.background)')"
 
 $rk = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 Remove-ItemProperty $rk -Name 'FubuNotch v2' -ErrorAction SilentlyContinue

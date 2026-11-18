@@ -84,7 +84,8 @@ impl Glass {
     /// Draws the island into `out` (w * h * 4 bytes, straight RGBA).
     /// `was_light`: the last frame's choice. Returns whether the glass is
     /// light (dark ink) now.
-    pub fn render(&mut self, s: &Shape, was_light: bool, out: &mut [u8]) -> bool {
+    /// `force`: Some(true) light, Some(false) dark, None = by the backdrop.
+    pub fn render(&mut self, s: &Shape, was_light: bool, force: Option<bool>, out: &mut [u8]) -> bool {
         let (sw, sh) = (self.sw, self.sh);
         if sw == 0 || sh == 0 || s.w == 0 || s.h == 0 || out.len() < s.w * s.h * 4 {
             return was_light;
@@ -97,7 +98,7 @@ impl Glass {
         for p in self.sharp.iter_mut().chain(self.blur.iter_mut()) {
             *p = saturate(*p, SATURATE);
         }
-        let light = backdrop_is_light(self.mean_luma(s), was_light);
+        let light = force.unwrap_or_else(|| backdrop_is_light(self.mean_luma(s), was_light));
 
         let band = (LENS_BAND * s.scale).min(s.w.min(s.h) as f32 * 0.5).max(1.0);
         let lens = LENS * s.scale;
@@ -378,7 +379,7 @@ mod tests {
         let mut out = vec![0u8; s.w * s.h * 4];
         // A white backdrop: light glass.
         g.load(&vec![255u8; cw * ch * 4], cw, ch, false);
-        assert!(g.render(&s, false, &mut out));
+        assert!(g.render(&s, false, None, &mut out));
         assert_eq!(out[3], 0, "the corner is cut");
         let mid = (20 * s.w + 60) * 4;
         assert_eq!(out[mid + 3], 255);
@@ -386,7 +387,7 @@ mod tests {
         // A black backdrop: dark glass, a bright rim on top.
         let black: Vec<u8> = [0u8, 0, 0, 255].repeat(cw * ch);
         g.load(&black, cw, ch, false);
-        assert!(!g.render(&s, true, &mut out));
+        assert!(!g.render(&s, true, None, &mut out));
         assert!(out[mid] < 40, "dark glass over black: {}", out[mid]);
         let top = (60) * 4;
         let bottom = ((s.h - 1) * s.w + 60) * 4;
@@ -409,7 +410,7 @@ mod tests {
         let mut g = Glass::new();
         let mut out = vec![0u8; s.w * s.h * 4];
         g.load(&px, cw, ch, false);
-        g.render(&s, false, &mut out);
+        g.render(&s, false, None, &mut out);
         let at = |x: usize, y: usize| ((y * s.w + x) * 4, ());
         let (top, _) = at(60, 3);
         let (mid, _) = at(60, 20);

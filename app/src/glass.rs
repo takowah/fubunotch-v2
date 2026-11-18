@@ -26,6 +26,17 @@ use island_core::glass::{self, Glass, Shape};
 pub const FACTOR: usize = 4;
 
 /// One frame to make: the island's rectangle in physical screen pixels.
+/// Settings → Appearance → Liquid Glass tint: 0 auto, 1 dark, 2 light.
+pub static TINT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+fn forced() -> Option<bool> {
+    match TINT.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => Some(false),
+        2 => Some(true),
+        _ => None,
+    }
+}
+
 pub struct Job {
     pub x: i32,
     pub y: i32,
@@ -97,7 +108,7 @@ fn live(g: &mut Glass, grab: &mut Grabber, out: &mut Vec<u8>, job: &Job) -> Done
     let factor = cw as f32 / lw as f32;
     let shape = Shape { w: job.w as usize, h: job.h as usize, radius: job.radius, scale: job.scale, ox: (job.x - cx) as f32, oy: (job.y - cy) as f32, factor };
     out.resize(shape.w * shape.h * 4, 0);
-    let light = g.render(&shape, job.was_light, out);
+    let light = g.render(&shape, job.was_light, forced(), out);
     Done { key: job.key.clone(), hash, light, pixels: Some((out.clone(), job.w, job.h)) }
 }
 
@@ -235,7 +246,7 @@ pub fn demo(win: (u32, u32), x: i32, y: i32, w: u32, h: u32, radius: f32, scale:
     g.load(&small, lw, lh, false);
     let shape = Shape { w: w as usize, h: h as usize, radius, scale, ox: (x - x0) as f32, oy: (y - y0) as f32, factor: FACTOR as f32 };
     let mut out = vec![0u8; w as usize * h as usize * 4];
-    let light = g.render(&shape, was_light, &mut out);
+    let light = g.render(&shape, was_light, forced(), &mut out);
     Some((out, light))
 }
 
@@ -259,7 +270,7 @@ mod tests {
         glass.load(&px, lw, lh, true);
         let shape = Shape { w: 200, h: 60, radius: 30.0, scale: 1.0, ox: 20.0, oy: 20.0, factor: cw as f32 / lw as f32 };
         let mut out = vec![0u8; 200 * 60 * 4];
-        glass.render(&shape, false, &mut out);
+        glass.render(&shape, false, forced(), &mut out);
         assert_eq!(out[3], 0);
         assert_eq!(out[(30 * 200 + 100) * 4 + 3], 255);
     }

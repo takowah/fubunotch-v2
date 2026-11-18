@@ -2386,6 +2386,7 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         background_preview: preview.unwrap_or_default(),
         background_dim: (s.look.background_dim.clamp(0.0, 0.9) * 100.0).round() as i32,
         look_style: s.look.style().into(),
+        glass_tint: s.look.glass_tint.as_str().into(),
         look_color: look::color(s.look.color_rgb()),
         look_color_hex: island_core::look::hex(s.look.color_rgb()).into(),
         wallpaper_color: look::color(wallpaper.unwrap_or((0x0b, 0x0b, 0x0d))),
@@ -2425,6 +2426,7 @@ fn change_settings(ui: &Island, f: impl FnOnce(&mut Settings)) {
     let refill = with_state(|state| {
         f(&mut state.settings);
         *SCREEN.lock().unwrap_or_else(|e| e.into_inner()) = state.settings.general.screen.clone();
+        glass::TINT.store(match state.settings.look.glass_tint.as_str() { "dark" => 1, "light" => 2, _ => 0 }, std::sync::atomic::Ordering::Relaxed);
         // Water and Focus follow at once (v1: new lengths apply to a phase not yet started).
         state.water_plan = state.settings.water.plan();
         let plan = state.settings.focus.plan();
@@ -2888,7 +2890,11 @@ fn open_settings(ui: &Island) {
     let island = ui.as_weak();
     win.on_look_picked(move |style| {
         if let Some(ui) = island.upgrade() {
-            change_settings(&ui, |s| s.look.style = style.to_string());
+            // "tint:auto|dark|light": Liquid Glass' tint; else the look itself.
+            match style.strip_prefix("tint:") {
+                Some(t) => change_settings(&ui, |s| s.look.glass_tint = t.to_string()),
+                None => change_settings(&ui, |s| s.look.style = style.to_string()),
+            }
         }
     });
     let island = ui.as_weak();
@@ -3107,6 +3113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let first_tab = std::env::var("KANMURI_TAB").unwrap_or_else(|_| "home".into());
     let mut settings = store::load();
     *SCREEN.lock().unwrap_or_else(|e| e.into_inner()) = settings.general.screen.clone();
+    glass::TINT.store(match settings.look.glass_tint.as_str() { "dark" => 1, "light" => 2, _ => 0 }, std::sync::atomic::Ordering::Relaxed);
     // KANMURI_THEME: a theme for this run only (checks of each look).
     if let Ok(t) = std::env::var("KANMURI_THEME") {
         settings.look.theme = t;
