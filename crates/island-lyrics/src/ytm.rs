@@ -120,17 +120,102 @@ fn is_instrumental(title: &str) -> bool {
     ["instrumental", "off vocal", "karaoke", "inst."].iter().any(|w| t.contains(w))
 }
 
-/// The hit to take: about the track's length (any length when the player
-/// doesn't say), and not an instrumental unless the track is one.
-pub fn pick<'a>(hits: &'a [Hit], query: &Query) -> Option<&'a Hit> {
-    let wants_instrumental = is_instrumental(&query.title);
-    hits.iter().take(HITS).find(|h| {
-        let near = query.duration <= 0.0 || h.duration.is_some_and(|d| (d - query.duration).abs() <= DURATION_SLACK);
-        near && is_instrumental(&h.title) == wants_instrumental
-    })
+/// Letters and digits only, lower case; with `strip`, "(Piano ver.)" and other
+/// bracketed parts are dropped first ("Haku" is in "ハク - Haku").
+pub fn plain(text: &str, strip: bool) -> String {
+    let mut out = String::new();
+    let mut depth = 0;
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '（' | '【' if strip => depth += 1,
+            ')' | ']' | '）' | '】' if strip && depth > 0 => depth -= 1,
+            _ if depth > 0 => {}
+            _ if c.is_alphanumeric() => out.extend(c.to_lowercase()),
+            _ => {}
+        }
+    }
+    out
 }
 
-/// The timed lyrics of a lyrics page; "♪" lines become pauses.
+/// A version of a song rather than the song: "(Piano ver.)", "Acoustic", "Live"...
+pub fn is_version(title: &str) -> bool {
+    const WORDS: &[&str] = &["piano", "acoustic", "live", "remix", "ver", "version", "cover", "tv", "short", "edit", "instrumental"];
+    title.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|w| WORDS.contains(&w))
+}
+
+/// Edit distance between two short strings (romaji spelled two ways).
+fn distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut cur = vec![i; b.len() + 1];
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            cur[j] = (cur[j - 1] + 1).min(prev[j] + 1).min(prev[j - 1] + cost);
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// The same title in letters, allowing romaji spelled another way ("10gatsu"
+/// and "Jugatsu"): a few letters apart at most.
+pub fn near_spelling(a: &str, b: &str) -> bool {
+    let (m, n) = (a.chars().count(), b.chars().count());
+    if m < 4 || n < 4 || m.abs_diff(n) > 2.max(m * 2 / 10) {
+        return false;
+    }
+    distance(a, b) <= 2.max(m.max(n) * 15 / 100)
+}
+
+/// The hits worth trying, best first, never just any first hit. A hit within
+/// 3 s of a believable track length (30 s to 15 min: a browser's isn't, see the
+/// app) is a strong match; a hit whose title holds the song's title (its own
+/// part after " - " may be romaji spelled another way) is a match too, unless
+/// a believable length says it is another recording. The same kind of version
+/// as the song (plain, or Piano / Acoustic / Live...) goes first, and an
+/// instrumental only for an instrumental.
+pub fn candidates<'a>(hits: &'a [Hit], query: &Query) -> Vec<&'a Hit> {
+    let want = plain(&query.title, true);
+    let want_version = is_version(&query.title);
+    let wants_instrumental = is_instrumental(&query.title);
+    let use_len = (30.0..=900.0).contains(&query.duration);
+    let mut scored: Vec<(u8, usize, &Hit)> = Vec::new();
+    for (i, h) in hits.iter().take(HITS + 1).enumerate() {
+        if is_instrumental(&h.title) != wants_instrumental {
+            continue;
+        }
+        let near_len = use_len && h.duration.is_some_and(|d| (d - query.duration).abs() <= DURATION_SLACK);
+        let far_len = use_len && h.duration.is_some_and(|d| (d - query.duration).abs() > 30.0);
+        let own = h.title.rsplit(" - ").next().unwrap_or(&h.title);
+        let named = want.chars().count() >= 3 && (plain(&h.title, false).contains(&want) || near_spelling(&want, &plain(own, true)));
+        let mut score = 0;
+        if named && !far_len {
+            score += 2;
+        }
+        if near_len {
+            score += 3;
+        }
+        if score == 0 {
+            continue;
+        }
+        if is_version(&h.title) == want_version {
+            score += 1;
+        }
+        scored.push((score, i, h));
+    }
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored.into_iter().map(|(_, _, h)| h).collect()
+}
+
+/// The first candidate (see `candidates`).
+pub fn pick<'a>(hits: &'a [Hit], query: &Query) -> Option<&'a Hit> {
+    candidates(hits, query).into_iter().next()
+}
+
+/// The timed lyrics of a lyrics page; "♪" lines become pauses. A page with
+/// lines but no times gives nothing.
 pub fn timed_lines(page: &Value) -> Vec<Line> {
     let Some(Value::Array(cues)) = all(page, "timedLyricsData").into_iter().next() else { return Vec::new() };
     let mut lines: Vec<Line> = cues
@@ -140,15 +225,28 @@ pub fn timed_lines(page: &Value) -> Vec<Line> {
             let start = cue.get("cueRange")?.get("startTimeMilliseconds")?;
             let ms = start.as_str().and_then(|s| s.parse::<f64>().ok()).or_else(|| start.as_f64())?;
             let text = if text == "♪" { "" } else { text };
-            Some(Line { time: ms / 1000.0, text: text.to_string() })
+            Some(Line { time: ms / 1000.0, text: text.to_string(), ..Default::default() })
         })
         .collect();
     lines.sort_by(|a, b| a.time.total_cmp(&b.time));
     lines
 }
 
-/// The track's synced lyrics from YouTube Music: Found, None, or Error when
-/// YouTube could not be asked.
+/// The timed lines of one hit: None when YouTube Music could not be asked.
+fn lines_of(http: &ureq::Agent, hit: &Hit) -> Option<Vec<Line>> {
+    let next = call(http, "next", android_client(), json!({ "videoId": hit.video_id }))?;
+    let Some(browse_id) = all(&next, "browseId").into_iter().filter_map(Value::as_str).find(|b| b.starts_with("MPLY")) else {
+        crate::log(format!("lyrics: YouTube Music \"{}\" ({}) has no lyrics tab", hit.title, hit.video_id));
+        return Some(Vec::new());
+    };
+    let page = call(http, "browse", android_client(), json!({ "browseId": browse_id }))?;
+    Some(timed_lines(&page))
+}
+
+/// The track's synced lyrics from YouTube Music: up to three candidates (the
+/// song's own version first), then LRCLIB under the title YouTube Music gives
+/// in the song's own script ("10月無口な君を忘れる"), then another version's
+/// lines as a last resort. Found, None, or Error when YouTube could not be asked.
 pub fn fetch(http: &ureq::Agent, query: &Query) -> Lyrics {
     let title = query.title.trim();
     if title.is_empty() {
@@ -160,31 +258,39 @@ pub fn fetch(http: &ureq::Agent, query: &Query) -> Lyrics {
         return Lyrics::of(Status::Error);
     };
     let found = hits(&answer);
-    let Some(hit) = pick(&found, query) else {
+    let tried = candidates(&found, query);
+    if tried.is_empty() {
         let seen: Vec<String> = found
             .iter()
             .take(HITS)
             .map(|h| format!("\"{}\" {}", h.title, h.duration.map_or("?".into(), |d| format!("{d:.0} s"))))
             .collect();
-        crate::log(format!("lyrics: YouTube Music has no song of about {:.0} s; saw {}", query.duration, if seen.is_empty() { "nothing".into() } else { seen.join(", ") }));
-        return none;
-    };
-    let Some(next) = call(http, "next", android_client(), json!({ "videoId": hit.video_id })) else {
-        return Lyrics::of(Status::Error);
-    };
-    let Some(browse_id) = all(&next, "browseId").into_iter().filter_map(Value::as_str).find(|b| b.starts_with("MPLY")) else {
-        crate::log(format!("lyrics: YouTube Music \"{}\" ({}) has no lyrics tab", hit.title, hit.video_id));
-        return none;
-    };
-    let Some(page) = call(http, "browse", android_client(), json!({ "browseId": browse_id })) else {
-        return Lyrics::of(Status::Error);
-    };
-    let lines = timed_lines(&page);
-    if lines.iter().all(|l| l.text.is_empty()) {
-        crate::log(format!("lyrics: YouTube Music \"{}\" ({}) has no synced lyrics (plain or none)", hit.title, hit.video_id));
+        crate::log(format!("lyrics: YouTube Music has no match for \"{title}\"; saw {}", if seen.is_empty() { "nothing".into() } else { seen.join(", ") }));
         return none;
     }
-    Lyrics { status: Status::Found, lines, duration: hit.duration.unwrap_or(0.0) }
+    let want_version = is_version(&query.title);
+    let mut other_version: Option<Lyrics> = None;
+    for hit in tried.iter().take(3) {
+        let Some(lines) = lines_of(http, hit) else { continue };
+        if lines.iter().all(|l| l.text.is_empty()) {
+            crate::log(format!("lyrics: YouTube Music \"{}\" ({}) has no synced lyrics", hit.title, hit.video_id));
+            continue;
+        }
+        let lyrics = Lyrics { status: Status::Found, lines, duration: hit.duration.unwrap_or(0.0) };
+        if is_version(&hit.title) == want_version {
+            return lyrics;
+        }
+        other_version.get_or_insert(lyrics);
+    }
+    let native = tried.iter().take(3).map(|h| h.title.split(" - ").next().unwrap_or("").trim()).find(|n| !n.is_empty() && !n.is_ascii());
+    if let Some(native) = native {
+        let length = tried.iter().find_map(|h| h.duration).unwrap_or(0.0);
+        if let Some(lyrics) = crate::lrclib_by_name(native, want_version, length) {
+            crate::log(format!("lyrics: LRCLIB by YouTube Music's name \"{native}\""));
+            return lyrics;
+        }
+    }
+    other_version.unwrap_or(none)
 }
 
 #[cfg(test)]
@@ -221,6 +327,32 @@ mod tests {
         assert_eq!(pick(&found, &query("FOXXXROOM", 208.0)).unwrap().video_id, "song");
         assert_eq!(pick(&found, &query("FOXXXROOM (Instrumental)", 207.0)).unwrap().video_id, "inst");
         assert!(pick(&found, &query("FOXXXROOM", 100.0)).is_none(), "no hit of about the length");
+    }
+
+    #[test]
+    fn a_title_that_holds_the_song_matches_without_a_length() {
+        let answer = json!({ "contents": [item("other", "Ureizakura", "4:36"), item("song", "雪冴ゆる - Yukisayuru", "4:01")] });
+        let found = hits(&answer);
+        assert_eq!(pick(&found, &query("Yukisayuru", 0.0)).unwrap().video_id, "song", "the title, not the first hit");
+        assert!(pick(&found, &query("Nothing like it", 0.0)).is_none(), "never just the first hit");
+    }
+
+    #[test]
+    fn romaji_spelled_another_way_still_matches() {
+        let answer = json!({ "contents": [item("song", "10月無口な君を忘れる - Jugatsu Mukuchinakimiwo Wasureru", "5:32")] });
+        let found = hits(&answer);
+        assert_eq!(pick(&found, &query("10gatsu mukuchina kimi wo wasureru", 0.0)).unwrap().video_id, "song");
+        assert!(!near_spelling("haku", "root"));
+    }
+
+    #[test]
+    fn the_songs_own_version_goes_first() {
+        let answer = json!({ "contents": [item("plain", "夏霞 - Summer haze", "4:20"), item("acoustic", "夏霞 - Summer haze (Acoustic ver.)", "4:45")] });
+        let found = hits(&answer);
+        let order: Vec<&str> = candidates(&found, &query("Summer haze (Acoustic ver.)", 0.0)).iter().map(|h| h.video_id.as_str()).collect();
+        assert_eq!(order, ["acoustic", "plain"]);
+        let order: Vec<&str> = candidates(&found, &query("Summer haze", 0.0)).iter().map(|h| h.video_id.as_str()).collect();
+        assert_eq!(order, ["plain", "acoustic"]);
     }
 
     #[test]

@@ -1188,19 +1188,24 @@ fn fetch_lyrics(ui: &Island) {
             state.lyrics = None;
             return None;
         }
+        // A browser's length can't be trusted (Apple Music in a browser reports 2x-6x the song,
+        // or nothing): the lookup goes by name there, and the key stays the same while that
+        // number moves.
+        let browser = matches!(state.music.app.to_lowercase().as_str(), "chrome" | "edge" | "firefox" | "brave" | "opera" | "vivaldi");
         let query = island_lyrics::Query {
             title: state.music.title.clone(),
             artist: state.music.artist.clone(),
             album: state.music.album.clone(),
-            duration: state.music.duration,
+            duration: if browser { 0.0 } else { state.music.duration },
         };
         let key = format!("{}\u{1f}{}{}{}", query.key(), sources.lrclib as u8, sources.youtube as u8, sources.romaji as u8);
         if key == state.lyrics_key {
             return None;
         }
         state.lyrics_nudge = 0.0;
-        // A live stream: nothing to look up (a search finds another song's).
-        if !island_lyrics::has_length(query.duration) {
+        // A live stream: nothing to look up (a search finds another song's). A music player's
+        // song without a length (it names an album) is still looked up.
+        if !island_lyrics::worth_looking_up(&query) {
             state.lyrics_key = key;
             state.lyrics = Some(island_lyrics::Lyrics::of(island_lyrics::Status::None));
             return None;
@@ -2717,7 +2722,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 lines: ["koko wa kitto yume no naka ne", "", "mezameta no wa uso mitai da, hontou no kimi wa doko ni iru no ka mada wakaranai mama", "kimi no koe ga kikoeru", "tooku made"]
                     .iter()
                     .zip([0.25, 4.78, 10.0, 14.5, 18.0])
-                    .map(|(t, s)| island_lyrics::Line { time: s, text: t.to_string() })
+                    .map(|(t, s)| island_lyrics::Line { time: s, text: t.to_string(), ..Default::default() })
                     .collect(),
                 duration: 0.0,
             });

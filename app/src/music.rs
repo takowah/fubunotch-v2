@@ -80,6 +80,85 @@ struct Watch {
 }
 
 static WATCH: Mutex<Option<Watch>> = Mutex::new(None);
+
+/// Where the song playing starts, for players that don't count from it (see
+/// `adjust`).
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Track {
+    key: String,
+    app: String,
+    /// Seconds of the player's stream before this song (Apple Music in a
+    /// browser plays its queue as one stream and keeps counting across songs).
+    base: f64,
+    /// When the song began (Unix ms), as far as can be told.
+    since_ms: Option<i64>,
+    /// `since_ms` is only the moment the island first saw a song already
+    /// playing: a clock while the player reports nothing, never a reason to
+    /// cut a position the player does report.
+    clock_only: bool,
+    paused_at_ms: Option<i64>,
+}
+
+static TRACK: Mutex<Track> = Mutex::new(Track { key: String::new(), app: String::new(), base: 0.0, since_ms: None, clock_only: false, paused_at_ms: None });
+
+/// The position as the song's own, whatever the player reports (Daffa, 17 Nov
+/// 2026: Apple Music in a browser, the lyrics far off or gone):
+/// - A player that plays its queue as one stream counts on across songs. When
+///   the song changes in the same player, a position already past 5 s is that
+///   stream's, and becomes this song's start; Chrome may first report the new
+///   song's own small position and the stream's a few seconds later, so a
+///   position well past the time since the song began is cut the same way.
+/// - A player that reports no position and no length at all: the island counts
+///   from the song's start itself, holding still while paused.
+pub fn adjust(track: &mut Track, snap: &mut Snapshot, now: i64) {
+    if !snap.has_session {
+        *track = Track::default();
+        return;
+    }
+    let raw_now = snap.position + if snap.playing { (now - snap.at_unix_ms).max(0) as f64 / 1000.0 } else { 0.0 };
+    let key = format!("{}\u{1f}{}\u{1f}{}", snap.app, snap.title, snap.artist);
+    if track.key != key {
+        let same_player = !track.key.is_empty() && track.app == snap.app;
+        *track = Track { key, app: snap.app.clone(), ..Default::default() };
+        if same_player {
+            if raw_now > 5.0 {
+                track.base = raw_now;
+            } else {
+                track.since_ms = Some(now - (raw_now * 1000.0) as i64);
+            }
+        } else if snap.position <= 0.0 && snap.duration <= 0.0 {
+            track.since_ms = Some(now);
+            track.clock_only = true;
+        }
+    } else if let Some(since) = track.since_ms {
+        let since_s = (now - since) as f64 / 1000.0;
+        if !track.clock_only && track.base == 0.0 && raw_now > since_s + 15.0 {
+            track.base = (raw_now - since_s).max(0.0);
+        }
+    }
+    if track.base > 0.0 {
+        snap.position = (snap.position - track.base).max(0.0);
+        if snap.duration > 0.0 {
+            snap.duration = (snap.duration - track.base).max(0.0);
+        }
+    }
+    if snap.position <= 0.0 && snap.duration <= 0.0 {
+        if let Some(since) = track.since_ms {
+            if snap.playing {
+                let since = match track.paused_at_ms.take() {
+                    Some(paused) => since + (now - paused),
+                    None => since,
+                };
+                track.since_ms = Some(since);
+                snap.position = (now - since) as f64 / 1000.0;
+            } else {
+                let paused = *track.paused_at_ms.get_or_insert(now);
+                snap.position = (paused - since) as f64 / 1000.0;
+            }
+            snap.at_unix_ms = now;
+        }
+    }
+}
 type Sink = Box<dyn Fn(Snapshot) + Send + Sync>;
 static SINK: Mutex<Option<Sink>> = Mutex::new(None);
 
@@ -197,6 +276,7 @@ fn publish() {
     if snap.title.is_empty() {
         snap.has_session = false;
     }
+    adjust(&mut TRACK.lock().unwrap_or_else(|e| e.into_inner()), &mut snap, now_unix_ms());
 
     // Artwork: decoded once a song.
     let key = format!("{}\u{1f}{}\u{1f}{}", snap.title, snap.artist, snap.album);
@@ -293,6 +373,74 @@ mod tests {
         assert_eq!(paused.position_now(), 10.0);
         let near_end = Snapshot { position: 199.5, ..playing };
         assert_eq!(near_end.position_now(), 200.0);
+    }
+
+    fn playing(app: &str, title: &str, position: f64, duration: f64, now: i64) -> Snapshot {
+        Snapshot { has_session: true, app: app.into(), title: title.into(), playing: true, position, duration, at_unix_ms: now, ..Default::default() }
+    }
+
+    #[test]
+    fn a_queue_played_as_one_stream_counts_from_each_songs_start() {
+        let mut t = Track::default();
+        let mut a = playing("Chrome", "Haku", 30.0, 600.0, 1_000_000);
+        adjust(&mut t, &mut a, 1_000_000);
+        // The next song in the same player, at 592 s of the stream
+        let mut b = playing("Chrome", "I am...", 592.0, 900.0, 2_000_000);
+        adjust(&mut t, &mut b, 2_000_000);
+        assert_eq!(b.position, 0.0);
+        let mut b2 = playing("Chrome", "I am...", 652.0, 960.0, 2_060_000);
+        adjust(&mut t, &mut b2, 2_060_000);
+        assert!((b2.position - 60.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_stream_position_reported_late_is_cut_too() {
+        let mut t = Track::default();
+        adjust(&mut t, &mut playing("Chrome", "drop", 100.0, 300.0, 0), 0);
+        // Chrome first says 1 s into the new song, then (10 s on) the stream's 430 s
+        adjust(&mut t, &mut playing("Chrome", "I am...", 1.0, 0.0, 10_000), 10_000);
+        let mut late = playing("Chrome", "I am...", 430.0, 710.0, 20_000);
+        adjust(&mut t, &mut late, 20_000);
+        assert!((late.position - 11.0).abs() < 0.1, "{}", late.position);
+    }
+
+    #[test]
+    fn no_position_at_all_the_island_counts_and_holds_while_paused() {
+        let mut t = Track::default();
+        adjust(&mut t, &mut playing("Chrome", "a", 50.0, 200.0, 0), 0);
+        let mut s = playing("Chrome", "soraaoimama", 0.0, 0.0, 1_000);
+        adjust(&mut t, &mut s, 1_000);
+        let mut s2 = playing("Chrome", "soraaoimama", 0.0, 0.0, 31_000);
+        adjust(&mut t, &mut s2, 31_000);
+        assert!((s2.position - 30.0).abs() < 0.01);
+        let mut paused = Snapshot { playing: false, ..playing("Chrome", "soraaoimama", 0.0, 0.0, 41_000) };
+        adjust(&mut t, &mut paused, 41_000);
+        let mut resumed = playing("Chrome", "soraaoimama", 0.0, 0.0, 101_000);
+        adjust(&mut t, &mut resumed, 101_000);
+        assert!((paused.position - 40.0).abs() < 0.01);
+        assert!((resumed.position - 40.0).abs() < 0.01, "a minute paused is not counted: {}", resumed.position);
+    }
+
+    #[test]
+    fn the_first_song_after_a_restart_is_never_cut() {
+        // The island starts in the middle of a song the player reports nothing for yet...
+        let mut t = Track::default();
+        adjust(&mut t, &mut playing("Chrome", "Asanagi", 0.0, 0.0, 0), 0);
+        // ...then the player reports 120 s: that is the song's own position
+        let mut s = playing("Chrome", "Asanagi", 120.0, 0.0, 5_000);
+        adjust(&mut t, &mut s, 5_000);
+        assert_eq!(s.position, 120.0);
+    }
+
+    #[test]
+    fn spotify_and_other_players_are_left_alone() {
+        let mut t = Track::default();
+        adjust(&mut t, &mut playing("Spotify", "a", 200.0, 210.0, 0), 0);
+        let mut b = playing("Spotify", "b", 0.5, 180.0, 1_000);
+        adjust(&mut t, &mut b, 1_000);
+        let mut b2 = playing("Spotify", "b", 40.0, 180.0, 41_000);
+        adjust(&mut t, &mut b2, 41_000);
+        assert_eq!((b.position, b2.position), (0.5, 40.0));
     }
 
     #[test]

@@ -21,11 +21,15 @@ const CACHE_SIZE: usize = 64;
 /// A search hit may be this many seconds longer or shorter than the track.
 const DURATION_SLACK: f64 = 3.0;
 
-/// One line of the lyrics, from `time` (seconds into the track).
-#[derive(Serialize, Clone, Debug, PartialEq)]
+/// One line of the lyrics, from `time` (seconds into the track). A Japanese
+/// line keeps its own text; `romaji` is its reading in Latin letters (empty
+/// otherwise), shown under it.
+#[derive(Serialize, Clone, Debug, PartialEq, Default)]
 pub struct Line {
     pub time: f64,
     pub text: String,
+    #[serde(default)]
+    pub romaji: String,
 }
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq)]
@@ -133,7 +137,7 @@ pub fn parse_lrc(text: &str) -> Vec<Line> {
             rest = after[end + 1..].trim_start();
         }
         for time in times {
-            lines.push(Line { time, text: rest.trim().to_string() });
+            lines.push(Line { time, text: rest.trim().to_string(), ..Default::default() });
         }
     }
     let shift = offset_ms / 1000.0;
@@ -257,6 +261,52 @@ pub fn lrclib(query: &Query) -> Lyrics {
     }
 }
 
+/// LRCLIB by the song's name in its own script (YouTube Music gives it:
+/// "10月無口な君を忘れる - Jugatsu ..."), when the player only gives romaji. The
+/// same song (by its letters, brackets aside) and the same kind of version
+/// ("(Piano ver.)" kept in the search when the song is one); of those, the
+/// length nearest `length` (YouTube Music's, 0 when unknown).
+pub fn lrclib_by_name(name: &str, want_version: bool, length: f64) -> Option<Lyrics> {
+    let agent = agent();
+    let search: String = if want_version { name.to_string() } else { strip_brackets(name) };
+    let base = ytm::plain(name, true);
+    if base.is_empty() {
+        return None;
+    }
+    let hits = match get_json(&agent, &format!("{LRCLIB}/api/search"), &[("q", search.trim())]) {
+        Ok(Some(Value::Array(hits))) => hits,
+        _ => return None,
+    };
+    let mut best: Option<(f64, Lyrics)> = None;
+    for hit in &hits {
+        let track = hit.get("trackName").and_then(Value::as_str).unwrap_or("");
+        let t = ytm::plain(track, true);
+        if t.is_empty() || !(t.contains(&base) || base.contains(&t)) || ytm::is_version(track) != want_version {
+            continue;
+        }
+        let Some(lyrics) = from_record(hit).filter(|l| l.status == Status::Found) else { continue };
+        let gap = if length > 0.0 { (lyrics.duration - length).abs() } else { 0.0 };
+        if best.as_ref().is_none_or(|(g, _)| gap < *g) {
+            best = Some((gap, lyrics));
+        }
+    }
+    best.map(|(_, l)| l)
+}
+
+fn strip_brackets(text: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0;
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '（' | '【' => depth += 1,
+            ')' | ']' | '）' | '】' if depth > 0 => depth -= 1,
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out.trim().to_string()
+}
+
 // ── The chain ─────────────────────────────────────────────────────────────────
 
 static CACHE: Mutex<VecDeque<(String, Lyrics)>> = Mutex::new(VecDeque::new());
@@ -268,10 +318,18 @@ pub fn has_length(duration: f64) -> bool {
     duration.is_finite() && duration >= 1.0
 }
 
+/// A song to look lyrics up for: one with a length, or a music player's one
+/// without (it names an album: Apple Music in a browser often reports no
+/// length, or a wrong one, which the app then leaves out). A live stream has
+/// neither and a search would only find another song's.
+pub fn worth_looking_up(query: &Query) -> bool {
+    has_length(query.duration) || !query.album.trim().is_empty()
+}
+
 /// LRCLIB, then YouTube Music when allowed (also when LRCLIB is down), then
 /// romaji for Japanese lines. Blocking.
 pub fn resolve(query: &Query, sources: Sources) -> Lyrics {
-    if (!sources.lrclib && !sources.youtube) || !has_length(query.duration) {
+    if (!sources.lrclib && !sources.youtube) || !worth_looking_up(query) {
         return Lyrics::of(Status::None);
     }
     let key = format!("{}\u{1f}{}{}", query.key(), sources.youtube as u8, sources.romaji as u8);
@@ -290,7 +348,9 @@ pub fn resolve(query: &Query, sources: Sources) -> Lyrics {
     log(format!("{trail}, {} lines", lyrics.lines.len()));
     if sources.romaji && lyrics.lines.iter().any(|l| romaji::is_japanese(&l.text)) {
         for line in &mut lyrics.lines {
-            line.text = romaji::line_to_romaji(&line.text);
+            if romaji::is_japanese(&line.text) {
+                line.romaji = romaji::line_to_romaji(&line.text);
+            }
         }
     }
     if lyrics.status != Status::Error {
@@ -321,7 +381,7 @@ mod tests {
     }
 
     fn line(time: f64, text: &str) -> Line {
-        Line { time, text: text.into() }
+        Line { time, text: text.into(), ..Default::default() }
     }
 
     #[test]
