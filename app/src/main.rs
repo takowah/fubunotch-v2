@@ -101,11 +101,11 @@ const ACCOUNT_CHIP_PAD: f32 = 59.0;
 const ACCOUNT_CHAR_W: f32 = 7.4;
 /// Prayer: the next prayer and the day's timeline (two columns).
 const PRAYER_PAGE_H: f32 = 80.0;
-/// The timeline's width (the right column), the room at its ends for the
-/// dots, and a prayer's label (wide enough for "Maghrib" at 10 px).
+/// The timeline's width (the right column) and the room at its ends: half
+/// a label (wide enough for "Maghrib" at 10 px), so the end labels sit
+/// right under their dots too.
 const PRAYER_TRACK_W: f32 = 200.0;
-const PRAYER_TRACK_INSET: f32 = 6.0;
-const PRAYER_LABEL_W: f32 = 38.0;
+const PRAYER_TRACK_INSET: f32 = 19.0;
 /// A prayer pop-up still comes this many minutes late (the PC was asleep
 /// at the time); later than that it is skipped.
 const PRAYER_LATE_MIN: u32 = 5;
@@ -1865,19 +1865,24 @@ fn prayer_tick(state: &mut State, now: u64) {
     upsert_json(state, serde_json::json!({ "id": "prayer:remind", "source": "icon:prayer", "kind": "alert", "title": title }), now);
 }
 
-/// Label centres along the timeline: under their dots, pushed apart just
-/// enough not to overlap, and kept inside the column.
-fn spread_labels(dots: &[f32], width: f32, label: f32) -> Vec<f32> {
-    let (lo, hi) = (label / 2.0, width - label / 2.0);
-    let mut c: Vec<f32> = dots.iter().map(|x| x.clamp(lo, hi)).collect();
-    for i in 1..c.len() {
-        c[i] = c[i].max(c[i - 1] + label);
+/// Where a minute of the day falls on the timeline, 0..1: the five
+/// prayers evenly spaced (0, 1/4 .. 1), and a time between two of them in
+/// between their dots by how much of that stretch has gone; before the
+/// first at the start, after the last at the end.
+fn timeline_at(times: &[u32], minute: f32) -> f32 {
+    let n = times.len();
+    if n < 2 {
+        return 0.0;
     }
-    for i in (0..c.len()).rev() {
-        let cap = if i + 1 < c.len() { c[i + 1] - label } else { hi };
-        c[i] = c[i].min(cap);
+    let step = 1.0 / (n - 1) as f32;
+    for (i, w) in times.windows(2).enumerate() {
+        let (a, b) = (w[0] as f32, w[1] as f32);
+        if minute < b {
+            let part = ((minute - a) / (b - a).max(1.0)).clamp(0.0, 1.0);
+            return (i as f32 + part) * step;
+        }
     }
-    c
+    1.0
 }
 
 /// The Prayer page: the next prayer and how long until it, the day's marks
@@ -1897,20 +1902,15 @@ fn prayer_view(cache: &mut Option<(String, prayer::Day)>, settings: &Settings) -
     };
     let left = next_s - secs;
     let (deg, point) = prayer::qibla(lat, lon);
-    let first = five.first().map_or(0, |p| p.1) as f32;
-    let last = five.last().map_or(1, |p| p.1) as f32;
+    let times: Vec<u32> = five.iter().map(|p| p.1).collect();
     let usable = PRAYER_TRACK_W - 2.0 * PRAYER_TRACK_INSET;
-    let x_of = |min: f32| PRAYER_TRACK_INSET + ((min - first) / (last - first).max(1.0)).clamp(0.0, 1.0) * usable;
-    let dots: Vec<f32> = five.iter().map(|(_, at)| x_of(*at as f32)).collect();
-    let labels = spread_labels(&dots, PRAYER_TRACK_W, PRAYER_LABEL_W);
+    let x_of = |min: f32| PRAYER_TRACK_INSET + timeline_at(&times, min) * usable;
     let marks: Vec<PrayerMark> = five
         .iter()
-        .zip(dots.iter().zip(labels))
-        .map(|(&(w, at), (&dot, label))| PrayerMark {
+        .map(|&(w, at)| PrayerMark {
             name: w.name().into(),
             time: prayer::hh_mm(at).into(),
-            dot_x: dot,
-            label_x: label,
+            dot_x: x_of(at as f32),
             past: at * 60 <= secs,
             next: w == next,
         })
@@ -1928,6 +1928,8 @@ fn prayer_view(cache: &mut Option<(String, prayer::Day)>, settings: &Settings) -
         .into(),
         now_text: prayer::hh_mm(secs / 60).into(),
         now_x: x_of(secs as f32 / 60.0),
+        track_from: PRAYER_TRACK_INSET,
+        track_to: PRAYER_TRACK_W - PRAYER_TRACK_INSET,
         marks: ModelRc::new(VecModel::from(marks)),
     }
 }
@@ -3217,15 +3219,18 @@ mod prayer_tests {
     use super::*;
 
     #[test]
-    fn labels_keep_apart_and_inside() {
-        // Kab. Bekasi's day: Maghrib and Isya's dots almost touch.
-        let dots = [6.0, 101.0, 148.0, 183.0, 194.0];
-        let c = spread_labels(&dots, PRAYER_TRACK_W, PRAYER_LABEL_W);
-        assert!(c.windows(2).all(|w| w[1] - w[0] >= PRAYER_LABEL_W - 0.01), "{c:?}");
-        assert!(c[0] >= PRAYER_LABEL_W / 2.0 && c[4] <= PRAYER_TRACK_W - PRAYER_LABEL_W / 2.0, "{c:?}");
-        // Far apart, they stay under their dots.
-        let wide = spread_labels(&[30.0, 100.0, 170.0], PRAYER_TRACK_W, PRAYER_LABEL_W);
-        assert_eq!(wide, vec![30.0, 100.0, 170.0]);
+    fn prayers_evenly_spaced_now_in_between() {
+        // Subuh 04:04, Dzuhur 11:40, Ashar 15:02, Maghrib 17:52, Isya 19:05.
+        let t = [244, 700, 902, 1072, 1145];
+        let at: Vec<f32> = t.iter().map(|&m| timeline_at(&t, m as f32)).collect();
+        assert_eq!(at, vec![0.0, 0.25, 0.5, 0.75, 1.0]);
+        assert_eq!(timeline_at(&t, 60.0), 0.0, "before Subuh: the start");
+        assert_eq!(timeline_at(&t, 1230.0), 1.0, "after Isya: the end");
+        // 16:27, halfway from Ashar to Maghrib.
+        assert!((timeline_at(&t, 987.0) - 0.625).abs() < 1e-6);
+        // 11:47: just past Dzuhur.
+        let x = timeline_at(&t, 707.0);
+        assert!(x > 0.25 && x < 0.27, "{x}");
     }
 
     #[test]

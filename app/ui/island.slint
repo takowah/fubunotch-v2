@@ -95,13 +95,12 @@ export struct WaterView {
     due: bool,
 }
 
-// Prayer: one of the five on the day's line; where its dot and its label
-// sit along the line (the labels pushed apart where prayers come close).
+// Prayer: one of the five on the day's line (evenly spaced), its label
+// right under its dot.
 export struct PrayerMark {
     name: string,
     time: string,
     dot-x: length,
-    label-x: length,
     past: bool,
     next: bool,
 }
@@ -116,7 +115,11 @@ export struct PrayerView {
     // "Imsak 03:54 · Terbit 05:21 · Qibla 295° WNW".
     info: string,
     now-text: string,
+    // Between the two prayers' dots around now, by time.
     now-x: length,
+    // The line runs from the first dot to the last.
+    track-from: length,
+    track-to: length,
     marks: [PrayerMark],
 }
 
@@ -1054,8 +1057,8 @@ component AccountsPage inherits VerticalLayout {
 // ── The island ───────────────────────────────────────────────────────────────
 
 // Prayer: the next prayer and the time left on the left; on the right the
-// day's marks and the five prayers on a line from Subuh to Isya, the part
-// already gone filled, now marked above it, the next one a green ring.
+// day's marks and the five prayers evenly along a line from Subuh to Isya,
+// the part already gone filled, now marked above it, the next one a green ring.
 component PrayerPage inherits Rectangle {
     in property <PrayerView> p;
     out property <color> green: #30d158;
@@ -1109,17 +1112,17 @@ component PrayerPage inherits Rectangle {
         }
         // The line, filled as far as now.
         Rectangle {
-            x: 0;
+            x: root.p.track-from;
             y: root.track-y - 1.5px;
-            width: parent.width;
+            width: root.p.track-to - root.p.track-from;
             height: 3px;
             border-radius: 1.5px;
             background: #ffffff26;
         }
         Rectangle {
-            x: 0;
+            x: root.p.track-from;
             y: root.track-y - 1.5px;
-            width: max(3px, root.p.now-x);
+            width: max(3px, root.p.now-x - root.p.track-from);
             height: 3px;
             border-radius: 1.5px;
             background: root.green.with-alpha(0.75);
@@ -1129,21 +1132,6 @@ component PrayerPage inherits Rectangle {
             y: 0;
             width: parent.width;
             height: parent.height;
-            // A thin line from the dot down to its label (slanted where the label moved over).
-            Path {
-                x: 0;
-                y: root.track-y + 4px;
-                width: parent.width;
-                height: 8px;
-                viewbox-x: 0;
-                viewbox-y: 0;
-                viewbox-width: self.width / 1px;
-                viewbox-height: self.height / 1px;
-                stroke: m.next ? root.green.with-alpha(0.7) : #ffffff47;
-                stroke-width: 1px;
-                MoveTo { x: m.dot-x / 1px; y: 0; }
-                LineTo { x: m.label-x / 1px; y: 8; }
-            }
             Rectangle {
                 property <length> size: m.next ? 11px : 7px;
                 x: m.dot-x - self.size / 2;
@@ -1156,8 +1144,8 @@ component PrayerPage inherits Rectangle {
                 border-color: root.green;
             }
             Text {
-                x: m.label-x - self.width / 2;
-                y: root.track-y + 13px;
+                x: m.dot-x - self.width / 2;
+                y: root.track-y + 9px;
                 width: 40px;
                 height: 13px;
                 text: m.name;
@@ -1167,8 +1155,8 @@ component PrayerPage inherits Rectangle {
                 horizontal-alignment: center;
             }
             Text {
-                x: m.label-x - self.width / 2;
-                y: root.track-y + 26px;
+                x: m.dot-x - self.width / 2;
+                y: root.track-y + 22px;
                 width: 40px;
                 height: 13px;
                 text: m.time;
