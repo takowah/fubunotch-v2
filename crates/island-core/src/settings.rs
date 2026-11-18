@@ -18,6 +18,7 @@ pub const MODULES: &[ModuleInfo] = &[
     ModuleInfo { id: "claude", name: "Claude Code", has_tab: false, default_on: true },
     ModuleInfo { id: "accounts", name: "Accounts", has_tab: true, default_on: true },
     ModuleInfo { id: "prayer", name: "Prayer", has_tab: true, default_on: true },
+    ModuleInfo { id: "day", name: "Day Progress", has_tab: true, default_on: true },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -308,6 +309,31 @@ impl Default for PrayerSettings {
     }
 }
 
+/// Day Progress: the waking day the bar runs over ("HH:MM").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DaySettings {
+    pub wake: String,
+    pub bedtime: String,
+}
+
+impl Default for DaySettings {
+    fn default() -> Self {
+        DaySettings { wake: "07:00".into(), bedtime: "23:00".into() }
+    }
+}
+
+impl DaySettings {
+    /// (wake, bedtime) in minutes after midnight; bedtime after wake by at
+    /// least 30 min (no crossing midnight), else the defaults.
+    pub fn span(&self) -> (u32, u32) {
+        match (parse_hh_mm(&self.wake), parse_hh_mm(&self.bedtime)) {
+            (Some(w), Some(b)) if b >= w + 30 => (w, b),
+            _ => (7 * 60, 23 * 60),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneralSettings {
@@ -340,6 +366,7 @@ pub struct Settings {
     pub water: WaterSettings,
     pub focus: FocusSettings,
     pub prayer: PrayerSettings,
+    pub day: DaySettings,
     pub general: GeneralSettings,
     pub autostart: bool,
 }
@@ -355,6 +382,7 @@ impl Default for Settings {
             water: WaterSettings::default(),
             focus: FocusSettings::default(),
             prayer: PrayerSettings::default(),
+            day: DaySettings::default(),
             general: GeneralSettings::default(),
             autostart: false,
         }
@@ -415,6 +443,7 @@ impl Settings {
             water: section(&v, "water"),
             focus: section(&v, "focus"),
             prayer: section(&v, "prayer"),
+            day: section(&v, "day"),
             general: section(&v, "general"),
             autostart: field(&v, "autostart"),
         }
@@ -470,6 +499,7 @@ mod tests {
         s.focus.rounds = 3;
         s.general.hide_after_s = 10;
         s.prayer = PrayerSettings { place: "Kota Bandung".into(), remind_before_min: 0, at_time: false };
+        s.day = DaySettings { wake: "05:30".into(), bedtime: "22:00".into() };
         assert_eq!(Settings::parse(s.to_json().as_bytes()), s);
     }
 
@@ -487,6 +517,9 @@ mod tests {
         let f = FocusSettings { focus_min: 0, short_min: 999, long_min: 15, rounds: 40 }.plan();
         assert_eq!((f.focus_min, f.short_min, f.rounds), (1, 60, 12));
         assert_eq!(LookSettings { theme: "pekora".into(), ..Default::default() }.theme(), "graphite");
+        assert_eq!(DaySettings { wake: "23:00".into(), bedtime: "07:00".into() }.span(), (420, 1380), "backwards: the defaults");
+        assert_eq!(DaySettings { wake: "06:15".into(), bedtime: "00:00".into() }.span(), (420, 1380));
+        assert_eq!(DaySettings { wake: "06:15".into(), bedtime: "22:45".into() }.span(), (375, 1365));
     }
 
     #[test]
@@ -510,7 +543,7 @@ mod tests {
     fn unknown_modules_go_new_ones_come_order_is_kept() {
         let s = Settings::parse(br#"{"modules":[{"id":"system","enabled":false},{"id":"weather","enabled":true},{"id":"music","enabled":true},{"id":"music","enabled":false}]}"#);
         let ids: Vec<&str> = s.modules.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(ids, ["system", "music", "notifications", "focus", "water", "todo", "shelf", "claude", "accounts", "prayer"], "weather dropped, duplicate ignored, the rest added");
+        assert_eq!(ids, ["system", "music", "notifications", "focus", "water", "todo", "shelf", "claude", "accounts", "prayer", "day"], "weather dropped, duplicate ignored, the rest added");
         assert!(!s.is_on("system"));
         assert!(s.is_on("music"));
     }
@@ -524,13 +557,15 @@ mod tests {
         assert!(s.system.caps_lock, "missing = default");
         assert_eq!(s.prayer, PrayerSettings::default(), "an old file gains Prayer's defaults");
         assert!(s.is_on("prayer"), "and the module, on");
+        assert_eq!(s.day.span(), (420, 1380), "Day Progress: 07:00 to 23:00");
+        assert!(s.is_on("day"));
         assert!(!s.autostart);
     }
 
     #[test]
     fn tabs_follow_order_and_switches() {
         let mut s = Settings::default();
-        assert_eq!(s.tabs().iter().map(|t| t.id).collect::<Vec<_>>(), ["music", "notifications", "focus", "water", "todo", "shelf", "accounts", "prayer"], "system has no tab");
+        assert_eq!(s.tabs().iter().map(|t| t.id).collect::<Vec<_>>(), ["music", "notifications", "focus", "water", "todo", "shelf", "accounts", "prayer", "day"], "system has no tab");
         s.move_module("notifications", -1);
         assert_eq!(s.tabs()[..2].iter().map(|t| t.id).collect::<Vec<_>>(), ["notifications", "music"]);
         s.modules.iter_mut().find(|m| m.id == "music").unwrap().enabled = false;

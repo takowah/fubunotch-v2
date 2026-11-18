@@ -23,3 +23,11 @@ strip = true
 # a build for no visible gain (the renderer, in the slint crates, stays at "s").
 [profile.release.package.kanmuri]
 opt-level = 1
+
+# Debug builds without debug info: the target folder was 6-8 GB a checkout,
+# mostly debug info of the windows and slint crates nobody steps through.
+[profile.dev]
+debug = 0
+
+[profile.dev.package."*"]
+debug = 0

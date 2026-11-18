@@ -146,6 +146,37 @@ export struct PrayerView {
     marks: [PrayerMark],
 }
 
+// Day Progress: an hour under the day's bar, where it falls (0..1).
+export struct DayTick {
+    text: string,
+    at: float,
+}
+
+// Week, month or year: "WEEK", "36%", how far.
+export struct DayCard {
+    label: string,
+    percent: string,
+    fraction: float,
+}
+
+export struct DayView {
+    // "30%" of the waking day.
+    percent: string,
+    // "11h 11m" until bedtime; empty before waking and after bedtime,
+    // when `detail` says the whole line instead.
+    left: string,
+    bedtime: string,
+    detail: string,
+    fraction: float,
+    ticks: [DayTick],
+    cards: [DayCard],
+    // The next prayer (Prayer on): "Ashar", "15:02" (or "04:04 tomorrow"), "in 3h 15m".
+    has-next: bool,
+    next-name: string,
+    next-when: string,
+    next-in: string,
+}
+
 export struct TaskRow {
     id: int,
     text: string,
@@ -324,7 +355,7 @@ global Glyphs {
     // Not in Segoe Fluent: a mosque, drawn (a dome, its spire, a door).
     out property <string> mosque: "M 3 20.5 H 21 M 6 20.5 V 13.5 A 6 6 0 0 1 18 13.5 V 20.5 M 12 7.5 V 4 M 10.5 20.5 V 17.5 A 1.5 1.5 0 0 1 13.5 17.5 V 20.5";
     public pure function tab(id: string) -> string {
-        return id == "notifications" ? "\u{EA8F}" : id == "music" ? "\u{EC4F}" : id == "lyrics" ? "\u{E8E4}" : id == "accounts" ? "\u{E716}" : "\u{E8D6}";
+        return id == "day" ? "\u{EB05}" : id == "notifications" ? "\u{EA8F}" : id == "music" ? "\u{EC4F}" : id == "lyrics" ? "\u{E8E4}" : id == "accounts" ? "\u{E716}" : "\u{E8D6}";
     }
     public pure function service(title: string) -> string {
         return title == "Claude Desktop" ? "\u{E7F4}" : title == "Claude Code" ? "\u{E756}" : "\u{E943}";
@@ -1393,6 +1424,109 @@ component AccountsPage inherits Rectangle {
 
 // ── The island ───────────────────────────────────────────────────────────────
 
+// Day Progress (as Poni's): how much of the waking day has gone, a bar from
+// wake to bedtime filled up to now with a marker on it and an hour every 3
+// under it; the week, month and year as small cards; on the right what comes
+// up next (the next prayer: Kanmuri has no calendar).
+component DayPage inherits Rectangle {
+    in property <DayView> d;
+    property <length> side-w: 176px;
+    property <length> col-w: root.d.has-next ? root.width - root.side-w - 14px : root.width;
+    property <length> bar-y: 42px;
+
+    // The top line: "30%  of your day · 11h 11m until bedtime (23:00)".
+    HorizontalLayout {
+        x: 2px;
+        y: 0;
+        width: root.col-w - 2px;
+        height: 36px;
+        spacing: 8px;
+        Text { text: root.d.percent; color: Mini.ink; font-size: 30px; font-weight: 700; vertical-alignment: center; }
+        HorizontalLayout {
+            padding-top: 7px;
+            spacing: 0px;
+            horizontal-stretch: 1;
+            if root.d.detail != "" : Text { text: root.d.detail; color: Mini.label; font-size: 13px; vertical-alignment: center; overflow: elide; }
+            if root.d.detail == "" : Text { text: "of your day · "; color: Mini.label; font-size: 13px; vertical-alignment: center; }
+            if root.d.detail == "" : Text { text: root.d.left; color: Mini.ink; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+            if root.d.detail == "" : Text { text: " until bedtime (" + root.d.bedtime + ")"; color: Mini.label; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        }
+    }
+
+    // The day's bar, filled up to now, the marker on now.
+    Rectangle {
+        x: 0;
+        y: root.bar-y;
+        width: root.col-w;
+        height: 12px;
+        border-radius: 6px;
+        background: Mini.wash.with-alpha(0.118 * Mini.wk);
+    }
+    if root.d.fraction > 0 : Rectangle {
+        x: 0;
+        y: root.bar-y;
+        width: max(12px, root.d.fraction * root.col-w);
+        height: 12px;
+        border-radius: 6px;
+        background: Mini.wash.with-alpha(0.42 * Mini.wk);
+    }
+    Rectangle {
+        x: clamp(root.d.fraction * root.col-w - 1.5px, 0px, root.col-w - 3px);
+        y: root.bar-y - 4px;
+        width: 3px;
+        height: 20px;
+        border-radius: 1.5px;
+        background: Mini.ink;
+    }
+    for t in root.d.ticks : Text {
+        x: clamp(t.at * root.col-w - self.width / 2, 0px, root.col-w - self.width);
+        y: root.bar-y + 18px;
+        width: self.preferred-width;
+        height: 14px;
+        text: t.text;
+        color: Mini.faint;
+        font-size: 10.5px;
+    }
+
+    // Week, month, year.
+    HorizontalLayout {
+        x: 0;
+        y: root.height - 42px;
+        width: root.col-w;
+        height: 42px;
+        spacing: 10px;
+        for c in root.d.cards : Rectangle {
+            border-radius: 10px;
+            background: Mini.wash.with-alpha(0.059 * Mini.wk);
+            horizontal-stretch: 1;
+            Text { x: 12px; y: 7px; height: 14px; text: c.label; color: Mini.label; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+            Text { x: parent.width - 12px - self.width; y: 6px; width: self.preferred-width; height: 16px; text: c.percent; color: Mini.ink; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+            Rectangle { x: 12px; y: 28px; width: parent.width - 24px; height: 4px; border-radius: 2px; background: Mini.wash.with-alpha(0.118 * Mini.wk); }
+            if c.fraction > 0 : Rectangle { x: 12px; y: 28px; width: max(4px, c.fraction * (parent.width - 24px)); height: 4px; border-radius: 2px; background: Mini.ink.with-alpha(0.8); }
+        }
+    }
+
+    // Coming up: the next prayer.
+    if root.d.has-next : Rectangle {
+        x: root.width - root.side-w;
+        y: 0;
+        width: root.side-w;
+        height: root.height;
+        border-radius: 14px;
+        background: Mini.wash.with-alpha(0.039 * Mini.wk);
+        VerticalLayout {
+            padding: 14px;
+            spacing: 4px;
+            alignment: start;
+            Text { text: "COMING UP"; color: Mini.label; font-size: 10px; font-weight: 700; }
+            Rectangle { height: 6px; }
+            Text { text: root.d.next-name; color: Mini.ink; font-size: 16px; font-weight: 700; overflow: elide; }
+            Text { text: root.d.next-when; color: Mini.text-2; font-size: 12px; overflow: elide; }
+            Text { text: root.d.next-in; color: Mini.label; font-size: 12px; overflow: elide; }
+        }
+    }
+}
+
 // Prayer: the next prayer and the time left on the left; on the right the
 // day's marks and the five prayers evenly along a line from Subuh to Isya,
 // the part already gone filled, now marked above it, the next one a green ring.
@@ -1568,6 +1702,7 @@ export component Island inherits Window {
     in property <FocusView> pomodoro;
     in property <WaterView> water;
     in property <PrayerView> prayer;
+    in property <DayView> day;
     in property <[TaskRow]> tasks;
     in property <[DoneRow]> todo-log;
     // The to-do page shows its log (set at start for snapshots of it).
@@ -2087,6 +2222,10 @@ export component Island inherits Window {
                     Page {
                         shown: root.active-tab == "prayer";
                         PrayerPage { width: parent.width; height: parent.height; p: root.prayer; }
+                    }
+                    Page {
+                        shown: root.active-tab == "day";
+                        DayPage { width: parent.width; height: parent.height; d: root.day; }
                     }
                     Page {
                         shown: root.active-tab == "accounts";
