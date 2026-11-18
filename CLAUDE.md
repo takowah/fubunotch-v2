@@ -24,6 +24,10 @@ Kanmuri: a rewrite of FubuNotch (v1) from scratch, native Rust. `crates/island-c
 
 - Product "Kanmuri" (renamed from FubuNotch v2 on 18 Nov 2026; crates, exe `kanmuri.exe` + `kanmuri-hook.exe`, env vars `KANMURI_*`, repo folder `C:\Codingers\kanmuri`; Claude Code's hooks run `%LOCALAPPDATA%\Kanmuri\kanmuri-hook.exe`, installed next to `kanmuri.exe`), data in `%APPDATA%\Kanmuri` (copied once from `%APPDATA%\FubuNotch v2`), webhook port 47821. Never touch v1's identifier, data folders, pipe (`\\.\pipe\fubunotch-<sid>`) or the `fubunotch-hook` marker in `~/.claude/settings.json`: v1 runs on the same PC.
 
+## Shipping
+
+- This laptop: build `--profile fast`, install with `tools/switch-from-mini-island.bat` via explorer.exe (keeps settings). Then push to `github` (private `Decka-tan/kanmuri`, branch main; never to `origin`, takowah's fubunotch-v2) and run `tools/release.ps1`: the home laptop installs only what is released (`tools/update.ps1`, task "Kanmuri update", at logon and every 3 hours; set up by notchdeck's `tools/setup-rumah.ps1`).
+
 ## Rules carried over from v1
 
 - Secrets live in the OS credential store, never on disk or in git. One exception, on purpose: the webhook token is a file in `%APPDATA%\Kanmuri\token` so local scripts can read it; it only guards 127.0.0.1.
