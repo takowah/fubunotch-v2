@@ -561,12 +561,163 @@ fn round_cover(rgba: &mut [u8], n: u32) {
 
 /// The screen picked in Settings > General (Windows' name); "" = the main one.
 static SCREEN: Mutex<String> = Mutex::new(String::new());
+/// Settings > General > Move automatically ("off" | "fullscreen" | "unused" | "follow").
+static AUTO_MODE: Mutex<String> = Mutex::new(String::new());
+/// The screen the island moved to on its own; "" = home (SCREEN).
+static AUTO_AT: Mutex<String> = Mutex::new(String::new());
+
+/// Where the island wants to be, the moment it first wanted it, and a fullscreen
+/// window remembered until it is no longer fullscreen (so the island doesn't come
+/// back over a video still playing while the owner works on the other screen).
+struct AutoMove {
+    want: Option<String>,
+    since: std::time::Instant,
+    fullscreen: isize,
+    timer: Timer,
+}
+
+thread_local! {
+    static AUTO: RefCell<AutoMove> = RefCell::new(AutoMove { want: None, since: std::time::Instant::now(), fullscreen: 0, timer: Timer::default() });
+}
+
+/// A window's screen (Windows' name) and that screen's rectangle.
+fn screen_of(hwnd: windows::Win32::Foundation::HWND) -> Option<(String, windows::Win32::Foundation::RECT)> {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTONULL};
+    if hwnd.0.is_null() {
+        return None;
+    }
+    unsafe {
+        let m = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
+        if m.is_invalid() {
+            return None;
+        }
+        let mut info = MONITORINFOEXW::default();
+        info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+        if !GetMonitorInfoW(m, &mut info as *mut _ as *mut MONITORINFO).as_bool() {
+            return None;
+        }
+        let n = info.szDevice.iter().position(|&c| c == 0).unwrap_or(info.szDevice.len());
+        Some((String::from_utf16_lossy(&info.szDevice[..n]), info.monitorInfo.rcMonitor))
+    }
+}
+
+/// A window covering its whole screen (a video, a game), not the desktop or the taskbar.
+fn is_fullscreen(hwnd: windows::Win32::Foundation::HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetWindowRect, IsWindow, IsWindowVisible};
+    unsafe {
+        if hwnd.0.is_null() || !IsWindow(Some(hwnd)).as_bool() || !IsWindowVisible(hwnd).as_bool() {
+            return false;
+        }
+        let mut class = [0u16; 64];
+        let n = GetClassNameW(hwnd, &mut class) as usize;
+        let class = String::from_utf16_lossy(&class[..n]);
+        if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+            return false;
+        }
+        let mut r = windows::Win32::Foundation::RECT::default();
+        if GetWindowRect(hwnd, &mut r).is_err() {
+            return false;
+        }
+        screen_of(hwnd).is_some_and(|(_, m)| r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom)
+    }
+}
+
+/// Mini Island's "Move automatically": decides which screen the island should be
+/// on now and moves it once that has held for 2 s (a quick alt-tab doesn't make it
+/// jump), never while the island is open. Run when another window comes forward,
+/// and every 2 s only while something is pending or a fullscreen window is
+/// remembered. Nothing runs while it is off.
+fn auto_screen_check() {
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    let Some(ui) = ISLAND.with(|i| i.borrow().as_ref().and_then(|w| w.upgrade())) else { return };
+    let mode = AUTO_MODE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let home_pick = SCREEN.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    // The screens: (name, is main), the main one first.
+    let mut screens: Vec<(String, bool)> = Vec::new();
+    ui.window().with_winit_window(|w: &winit::window::Window| {
+        let main = w.primary_monitor().and_then(|m| m.name());
+        for m in w.available_monitors() {
+            if let Some(n) = m.name() {
+                let is_main = main.as_deref() == Some(n.as_str());
+                screens.push((n, is_main));
+            }
+        }
+    });
+    screens.sort_by_key(|(n, main)| (!main, n.clone()));
+    let off = !matches!(mode.as_str(), "fullscreen" | "unused" | "follow") || screens.len() < 2;
+    let at = AUTO_AT.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if off {
+        AUTO.with(|a| {
+            let mut a = a.borrow_mut();
+            a.want = None;
+            a.fullscreen = 0;
+            a.timer.stop();
+        });
+        if !at.is_empty() {
+            AUTO_AT.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            recover_island(&ui);
+        }
+        return;
+    }
+    let home = screens.iter().find(|(n, _)| !home_pick.is_empty() && *n == home_pick).or_else(|| screens.first()).map(|(n, _)| n.clone()).unwrap_or_default();
+    let current = if !at.is_empty() && screens.iter().any(|(n, _)| *n == at) { at.clone() } else { home.clone() };
+    let busy = with_state(|s| s.mode == Mode::Expanded).unwrap_or(false);
+    let fg = unsafe { GetForegroundWindow() };
+    let ours = island_hwnd(&ui) == Some(fg);
+    let fg_screen = if ours { None } else { screen_of(fg).map(|(n, _)| n) };
+    let move_to = AUTO.with(|a| {
+        let mut a = a.borrow_mut();
+        if !ours && is_fullscreen(fg) {
+            a.fullscreen = fg.0 as isize;
+        }
+        let mut blocked: Vec<String> = Vec::new();
+        if a.fullscreen != 0 {
+            let fs = windows::Win32::Foundation::HWND(a.fullscreen as *mut core::ffi::c_void);
+            match is_fullscreen(fs).then(|| screen_of(fs)).flatten() {
+                Some((n, _)) => blocked.push(n),
+                None => a.fullscreen = 0,
+            }
+        }
+        if mode == "unused" {
+            blocked.extend(fg_screen.clone());
+        }
+        let want = match (mode.as_str(), &fg_screen) {
+            ("follow", Some(f)) if !blocked.contains(f) => f.clone(),
+            ("follow", None) => current.clone(),
+            _ if !blocked.contains(&home) => home.clone(),
+            // Every screen in use: stay home.
+            _ => screens.iter().map(|(n, _)| n).find(|n| !blocked.contains(n)).cloned().unwrap_or_else(|| home.clone()),
+        };
+        let mut move_to = None;
+        if want == current {
+            a.want = None;
+        } else if a.want.as_deref() != Some(want.as_str()) {
+            a.want = Some(want);
+            a.since = std::time::Instant::now();
+        } else if a.since.elapsed() >= std::time::Duration::from_millis(1900) && !busy {
+            a.want = None;
+            move_to = Some(want);
+        }
+        if a.want.is_some() || a.fullscreen != 0 {
+            a.timer.start(slint::TimerMode::SingleShot, std::time::Duration::from_millis(2000), auto_screen_check);
+        } else {
+            a.timer.stop();
+        }
+        move_to
+    });
+    if let Some(to) = move_to {
+        store::log(&format!("island: moved on its own to {to} ({mode})"));
+        *AUTO_AT.lock().unwrap_or_else(|e| e.into_inner()) = if to == home { String::new() } else { to };
+        recover_island(&ui);
+    }
+}
 
 /// Puts the (fixed-size) window at the top centre of its monitor: the screen
 /// picked in Settings when it is connected, else the one it is on or the main one.
 fn place(ui: &Island) {
     ui.window().set_size(LogicalSize::new(WINDOW.0, WINDOW.1));
-    let want = SCREEN.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let at = AUTO_AT.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let want = if at.is_empty() { SCREEN.lock().unwrap_or_else(|e| e.into_inner()).clone() } else { at };
     ui.window().with_winit_window(|win: &winit::window::Window| {
         let picked = if want.is_empty() { None } else { win.available_monitors().find(|m| m.name().as_deref() == Some(want.as_str())) };
         let fallback = if want.is_empty() { win.current_monitor().or_else(|| win.primary_monitor()) } else { win.primary_monitor() };
@@ -644,6 +795,7 @@ unsafe extern "system" fn on_foreground(
     _: u32,
 ) {
     keep_on_top();
+    auto_screen_check();
 }
 
 /// Keeps the island on top from now on: each time another app's window comes
@@ -2396,9 +2548,14 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         }
     });
     screens.sort_by_key(|r| !r.id.is_empty());
+    // KANMURI_DEMO_SCREENS=2: two made-up screens (a snapshot sees none).
+    if screens.len() < 2 && std::env::var_os("KANMURI_DEMO_SCREENS").is_some() {
+        screens = vec![ScreenRow { id: "".into(), label: "Screen 1 (main)".into() }, ScreenRow { id: "\\\\.\\DISPLAY2".into(), label: "Screen 2".into() }];
+    }
     win.set_s(SettingsView {
         screens: ModelRc::new(VecModel::from(screens)),
         screen: s.general.screen.as_str().into(),
+        auto_screen: s.general.auto_screen.as_str().into(),
         modules: ModelRc::new(VecModel::from(modules)),
         lyrics: s.music.lyrics,
         lyrics_youtube: s.music.lyrics_youtube,
@@ -2470,6 +2627,7 @@ fn change_settings(ui: &Island, f: impl FnOnce(&mut Settings)) {
     let refill = with_state(|state| {
         f(&mut state.settings);
         *SCREEN.lock().unwrap_or_else(|e| e.into_inner()) = state.settings.general.screen.clone();
+        *AUTO_MODE.lock().unwrap_or_else(|e| e.into_inner()) = state.settings.general.auto_screen.clone();
         glass::TINT.store(match state.settings.look.glass_tint.as_str() { "dark" => 1, "light" => 2, _ => 0 }, std::sync::atomic::Ordering::Relaxed);
         // Water and Focus follow at once (v1: new lengths apply to a phase not yet started).
         state.water_plan = state.settings.water.plan();
@@ -2914,8 +3072,15 @@ fn open_settings(ui: &Island) {
     let island = ui.as_weak();
     win.on_screen_picked(move |id| {
         if let Some(ui) = island.upgrade() {
-            change_settings(&ui, |s| s.general.screen = id.to_string());
+            // "auto:<mode>": Move automatically; else the home screen.
+            match id.strip_prefix("auto:") {
+                Some(m) => change_settings(&ui, |s| s.general.auto_screen = m.to_string()),
+                None => change_settings(&ui, |s| s.general.screen = id.to_string()),
+            }
+            // Back home first; the next check moves it again if it should.
+            AUTO_AT.lock().unwrap_or_else(|e| e.into_inner()).clear();
             recover_island(&ui);
+            auto_screen_check();
         }
     });
     let island = ui.as_weak();
@@ -3158,6 +3323,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let first_tab = std::env::var("KANMURI_TAB").unwrap_or_else(|_| "home".into());
     let mut settings = store::load();
     *SCREEN.lock().unwrap_or_else(|e| e.into_inner()) = settings.general.screen.clone();
+    *AUTO_MODE.lock().unwrap_or_else(|e| e.into_inner()) = settings.general.auto_screen.clone();
     glass::TINT.store(match settings.look.glass_tint.as_str() { "dark" => 1, "light" => 2, _ => 0 }, std::sync::atomic::Ordering::Relaxed);
     // KANMURI_THEME: a theme for this run only (checks of each look).
     if let Ok(t) = std::env::var("KANMURI_THEME") {

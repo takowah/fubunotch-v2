@@ -38,6 +38,7 @@ export struct ScreenRow {
 export struct SettingsView {
     screens: [ScreenRow],
     screen: string,
+    auto-screen: string,
     modules: [ModuleRow],
     lyrics: bool,
     lyrics-youtube: bool,
@@ -862,11 +863,23 @@ export component SettingsWindow inherits Window {
                 if root.page == "general" && root.s.screens.length > 1 : Card {
                     SettingRow {
                         title: "Screen";
-                        hint: "Which screen the island sits on.";
-                        last: true;
+                        hint: "Which screen the island sits on (its home).";
                         Segmented {
                             choices: root.s.screens;
                             value: root.s.screen;
+                            picked(id) => { root.screen-picked(id); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Move automatically";
+                        hint: root.s.auto-screen == "fullscreen" ? "Away from a fullscreen video or game."
+                            : root.s.auto-screen == "unused" ? "Always on a screen you are not using."
+                            : root.s.auto-screen == "follow" ? "Goes to the screen you are using."
+                            : "Stays on its home screen.";
+                        last: true;
+                        Segmented {
+                            choices: [{id: "auto:off", label: "Off"}, {id: "auto:fullscreen", label: "Fullscreen"}, {id: "auto:unused", label: "Free screen"}, {id: "auto:follow", label: "Follow me"}];
+                            value: "auto:" + (root.s.auto-screen == "" ? "off" : root.s.auto-screen);
                             picked(id) => { root.screen-picked(id); }
                         }
                     }

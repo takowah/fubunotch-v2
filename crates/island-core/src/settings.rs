@@ -351,6 +351,10 @@ pub struct GeneralSettings {
     pub popups: bool,
     /// The screen the island sits on, by Windows' name ("\\.\DISPLAY1"); "" = the main one.
     pub screen: String,
+    /// Moving to another screen on its own (Mini Island's "Move automatically"):
+    /// "off", "fullscreen" (away from a fullscreen video or game), "unused" (always
+    /// to a screen not in use), "follow" (to the screen in use). `screen` stays home.
+    pub auto_screen: String,
     /// What the idle island shows left and right of the time:
     /// "" | "date" | "network" | "battery".
     pub idle_left: String,
@@ -359,7 +363,7 @@ pub struct GeneralSettings {
 
 impl Default for GeneralSettings {
     fn default() -> Self {
-        GeneralSettings { hide_after_s: 3, popups: true, screen: String::new(), idle_left: "date".into(), idle_right: "network".into() }
+        GeneralSettings { hide_after_s: 3, popups: true, screen: String::new(), auto_screen: "off".into(), idle_left: "date".into(), idle_right: "network".into() }
     }
 }
 
