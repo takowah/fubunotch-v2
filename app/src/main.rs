@@ -11,7 +11,6 @@ mod watch;
 mod banners;
 mod mascot;
 mod bg;
-mod pet;
 mod claude;
 mod local_time;
 mod music;
@@ -230,9 +229,6 @@ struct State {
     drop_hover: bool,
     timer: Timer,
     settings_window: Option<SettingsWindow>,
-    /// The mascot living in Settings, and its clock (only while Settings is open).
-    pet: Option<pet::Pet>,
-    pet_timer: Option<Timer>,
     /// The island's background picture: for which file, size and look, and the picture.
     bg_key: String,
     bg_image: Option<slint::Image>,
@@ -1807,6 +1803,8 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         .collect();
     let w = &s.water;
     let plan = w.plan();
+    // What the idle island's preview shows (General > Idle island).
+    let now = system::status_now();
     // The screens to pick from: the main one first, then the others by name.
     let mut screens: Vec<ScreenRow> = Vec::new();
     win.window().with_winit_window(|w: &winit::window::Window| {
@@ -1837,6 +1835,11 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         sys_audio: s.system.audio_device,
         autostart: s.autostart,
         mascot: s.look.mascot,
+        clock: local_time::clock_text().into(),
+        date: local_time::date_text().into(),
+        net: now.net.into(),
+        battery: now.battery.map(|(p, _)| format!("{p}%")).unwrap_or_default().into(),
+        battery_level: now.battery.map(|(p, _)| p as f32 / 100.0).unwrap_or(0.0),
         popups: s.general.popups,
         idle_left: s.general.idle_left.as_str().into(),
         idle_right: s.general.idle_right.as_str().into(),
@@ -1881,10 +1884,6 @@ fn change_settings(ui: &Island, f: impl FnOnce(&mut Settings)) {
             eprintln!("settings not saved: {err}");
         }
         sync_banners(state);
-        // The mascot cheers each change.
-        if let Some(p) = state.pet.as_mut() {
-            p.cheer();
-        }
         state.settings_window.as_ref().map(|w| (w.as_weak(), state.settings.clone()))
     })
     .flatten();
@@ -1937,38 +1936,6 @@ fn set_number(s: &mut Settings, key: &str, v: i32) {
         "focus.long_min" => s.focus.long_min = u.clamp(1, 120),
         "focus.rounds" => s.focus.rounds = u.clamp(1, 12),
         _ => {}
-    }
-}
-
-/// The Settings window's room for the mascot, from its height now.
-fn pet_room(win: &SettingsWindow) -> pet::Room {
-    let h = win.window().size().height as f32 / win.window().scale_factor().max(0.5);
-    pet::Room { h: if h > 10.0 { h } else { 600.0 }, wall: 232.0 }
-}
-
-/// Moves the mascot one step and draws it; stops when Settings is gone.
-fn pet_tick() {
-    let win = with_state(|state| state.settings_window.as_ref().map(|w| w.as_weak())).flatten().and_then(|w| w.upgrade());
-    let Some(win) = win else {
-        with_state(|state| state.pet_timer = None);
-        return;
-    };
-    if !win.window().is_visible() {
-        with_state(|state| state.pet_timer = None);
-        return;
-    }
-    let room = pet_room(&win);
-    let shown = with_state(|state| {
-        let p = state.pet.get_or_insert_with(|| pet::Pet::new(room));
-        p.tick(room);
-        (p.x, p.y, p.frame, p.left, p.say.clone())
-    });
-    if let Some((x, y, frame, left, say)) = shown {
-        win.set_pet_x(x);
-        win.set_pet_y(y);
-        win.set_pet_frame(frame.into());
-        win.set_pet_left(left);
-        win.set_pet_say(say.into());
     }
 }
 
@@ -2043,7 +2010,6 @@ fn open_settings(ui: &Island) {
     let existing = with_state(|state| state.settings_window.as_ref().map(|w| w.as_weak())).flatten();
     if let Some(win) = existing.and_then(|w| w.upgrade()) {
         let _ = win.show();
-        start_pet();
         return;
     }
     let Ok(win) = SettingsWindow::new() else { return };
@@ -2122,12 +2088,7 @@ fn open_settings(ui: &Island) {
     win.on_theme_picked(move |theme| {
         if let Some(ui) = island.upgrade() {
             change_settings(&ui, |s| s.look.theme = theme.to_string());
-            with_state(|state| {
-                state.bg_preview = None;
-                if let Some(p) = state.pet.as_mut() {
-                    p.poke(&theme);
-                }
-            });
+            with_state(|state| state.bg_preview = None);
             update_background(&ui);
         }
     });
@@ -2195,14 +2156,6 @@ fn open_settings(ui: &Island) {
             ask_claude_hooks(&ui, install);
         }
     });
-    win.on_pet_clicked(|| {
-        with_state(|state| {
-            let theme = state.settings.look.theme();
-            if let Some(p) = state.pet.as_mut() {
-                p.poke(theme);
-            }
-        });
-    });
     let _ = win.show();
     let weak = win.as_weak();
     Timer::single_shot(std::time::Duration::from_millis(60), move || {
@@ -2217,18 +2170,6 @@ fn open_settings(ui: &Island) {
     });
     with_state(|state| state.settings_window = Some(win));
     update_background(ui);
-    start_pet();
-}
-
-/// The mascot's clock: 10 ticks a second while Settings is open, nothing otherwise.
-fn start_pet() {
-    let running = with_state(|state| state.pet_timer.is_some()).unwrap_or(false);
-    if running {
-        return;
-    }
-    let timer = Timer::default();
-    timer.start(TimerMode::Repeated, std::time::Duration::from_millis(1000 / pet::HZ), pet_tick);
-    with_state(|state| state.pet_timer = Some(timer));
 }
 
 /// Shows what connecting (or disconnecting) Claude Code changes, and does it
@@ -2415,8 +2356,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             drop_hover: false,
             timer: Timer::default(),
             settings_window: None,
-            pet: None,
-            pet_timer: None,
             bg_key: String::new(),
             bg_image: None,
             bg_preview: None,

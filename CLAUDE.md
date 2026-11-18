@@ -14,7 +14,7 @@ A rewrite of FubuNotch from scratch, native Rust. `crates/island-core`: the acti
 
 ## Clean room
 
-- The mascots (`app/assets/sprites/`, written by `scripts/sprites.py` from `pixel-art/holo-tiny/build.py`, which also writes `app/ui/sprites.slint`) are our own pixel art of Shirakami Fubuki, Ookami Mio, Tokoyami Towa, AZKi and Hoshimachi Suisei (Cover / hololive): tiny SD chibis (24 x 26 on a 32 x 32 canvas) drawn with the pixel-art-studio skill after the owner's references, 24 Oct 2026, for personal use. Show them at whole multiples only. Before any team or public release, check hololive's fan-work guidelines with the owner. Settings → Appearance → Mascot turns them off.
+- The mascots (`app/assets/sprites/`, written by `scripts/sprites.py` from `pixel-art/holo-tiny/build.py`, which also writes `app/ui/sprites.slint`) are our own pixel art of Shirakami Fubuki, Ookami Mio, Tokoyami Towa, AZKi and Hoshimachi Suisei (Cover / hololive): tiny SD chibis (24 x 26 on a 32 x 32 canvas) drawn with the pixel-art-studio skill after the owner's references, 24 Oct 2026, for personal use. Show them at whole multiples only. Before any team or public release, check hololive's fan-work guidelines with the owner. Settings no longer shows them (no theme chibis, no walking mascot; 18 Nov 2026), and the island draws none either.
 - FubuNotch v1 (`../fubunotch-v1`) and Coucou are references for behaviour only. Never copy their code, the Mochi character, sounds or icons: those are Coucou's assets and not ours to ship.
 - Read v1 to learn what worked and what bit (click-through, notification mirroring, GSMTC, lyrics), then write it again.
 
