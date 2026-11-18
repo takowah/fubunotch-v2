@@ -26,6 +26,7 @@ mod system;
 mod shelf;
 mod snapshot;
 mod accounts;
+mod pixels;
 mod usage;
 mod store;
 mod theme;
@@ -221,7 +222,9 @@ struct State {
     settings: Settings,
     /// What is playing (the Music module), and its artwork as an image.
     music: music::Snapshot,
-    music_art: Option<slint::Image>,
+    music_art: Option<Art>,
+    /// The Music page's big cover, logical px, as the page measured it (0 = not yet).
+    cover_big: f32,
     /// The cover's colour (accent.rs), the island's while the song plays.
     music_accent: Option<(u8, u8, u8)>,
     /// A browser's song: its cover from YouTube Music (kept over the browser's
@@ -404,7 +407,8 @@ fn kind_name(k: Kind) -> &'static str {
     }
 }
 
-fn item(a: &Activity, logo: Option<slint::Image>) -> Item {
+/// `logo` at LOGO_NOTICE, `logo_small` at LOGO_CAPSULE (each drawn 1:1).
+fn item(a: &Activity, logo: Option<slint::Image>, logo_small: Option<slint::Image>) -> Item {
     let actions: Vec<ActionInfo> = a.actions.iter().map(|x| ActionInfo { id: x.id.as_str().into(), label: x.label.as_str().into() }).collect();
     Item {
         actions: ModelRc::new(VecModel::from(actions)),
@@ -425,6 +429,7 @@ fn item(a: &Activity, logo: Option<slint::Image>) -> Item {
         initial: initial(&a.source).into(),
         has_logo: logo.is_some(),
         logo: logo.unwrap_or_default(),
+        logo_small: logo_small.unwrap_or_default(),
     }
 }
 
@@ -477,36 +482,46 @@ fn notif_view(list: &std::collections::VecDeque<notif::Notif>) -> Vec<usize> {
     rows
 }
 
-/// An app's logo as an image with rounded corners, made once per app on the
-/// UI thread; None (the initial is drawn) while notif has no pixels for it.
-fn logo_image(cache: &mut HashMap<String, slint::Image>, aumid: &str) -> Option<slint::Image> {
+/// An app's logo as an image with rounded corners, `px` physical pixels a
+/// side (exactly as drawn: Slint's software renderer scales jaggedly), made
+/// once per app and size on the UI thread; None (the app glyph is drawn)
+/// while notif has no pixels for it.
+fn logo_image(cache: &mut HashMap<String, slint::Image>, aumid: &str, px: u32) -> Option<slint::Image> {
     if aumid.is_empty() {
         return None;
     }
-    if let Some(img) = cache.get(aumid) {
+    let key = format!("{aumid}@{px}");
+    if let Some(img) = cache.get(&key) {
         return Some(img.clone());
     }
-    let px = notif::logo(aumid)?;
+    let src = notif::logo(aumid)?;
     let n = notif::LOGO_PX;
-    if px.len() != (n * n * 4) as usize {
+    if src.len() != (n * n * 4) as usize {
         return None;
     }
-    let mut rounded = px.to_vec();
     // A square tile gets rounded corners; a logo with its own shape (its
     // corners already transparent) is left as drawn.
-    let corner_alpha = |x: u32, y: u32| px[((y * n + x) * 4 + 3) as usize];
-    if [(0, 0), (n - 1, 0), (0, n - 1), (n - 1, n - 1)].iter().any(|&(x, y)| corner_alpha(x, y) > 128) {
-        round_cover(&mut rounded, n);
+    let corner_alpha = |x: u32, y: u32| src[((y * n + x) * 4 + 3) as usize];
+    let tile = [(0, 0), (n - 1, 0), (0, n - 1), (n - 1, n - 1)].iter().any(|&(x, y)| corner_alpha(x, y) > 128);
+    let mut out = pixels::resize_square(&src, n, px);
+    if tile {
+        round_cover(&mut out, px);
     }
-    let img = slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rounded, n, n));
-    cache.insert(aumid.to_string(), img.clone());
+    let img = pixels::image(&out, px);
+    cache.insert(key, img.clone());
     Some(img)
 }
 
+/// The logo sizes drawn, logical px: rows on the Notifications page (and the
+/// open island's notice), the capsule's.
+const LOGO_ROW: f32 = 30.0;
+const LOGO_NOTICE: f32 = 34.0;
+const LOGO_CAPSULE: f32 = 26.0;
+
 /// Claude Code's open questions (asks still live), newest first, for the
 /// top of the Notifications page.
-fn ask_rows(arbiter: &Arbiter, logos: &mut HashMap<String, slint::Image>) -> Vec<AskRow> {
-    let logo = logo_image(logos, notif::CLAUDE_AUMID);
+fn ask_rows(arbiter: &Arbiter, logos: &mut HashMap<String, slint::Image>, scale: f32) -> Vec<AskRow> {
+    let logo = logo_image(logos, notif::CLAUDE_AUMID, pixels::physical(LOGO_ROW, scale));
     let mut asks: Vec<&Activity> = arbiter.ranked().into_iter().filter(|a| a.kind == Kind::Ask).collect();
     asks.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     asks.iter()
@@ -1126,9 +1141,12 @@ fn refresh(ui: &Island) {
         let front_id = view.front.map(|a| a.id.clone());
         let front_sig = view.front.map(|a| format!("{}|{}|{}|{:?}", a.id, a.title, a.body, a.progress)).unwrap_or_default();
         ui.set_has_front(view.front.is_some());
+        let scale = ui.window().scale_factor();
         if let Some(front) = view.front {
-            let logo = logo_image(&mut state.logos, &activity_aumid(&state.notifications, front));
-            ui.set_front(item(front, logo));
+            let aumid = activity_aumid(&state.notifications, front);
+            let logo = logo_image(&mut state.logos, &aumid, pixels::physical(LOGO_NOTICE, scale));
+            let small = logo_image(&mut state.logos, &aumid, pixels::physical(LOGO_CAPSULE, scale));
+            ui.set_front(item(front, logo, small));
         }
         // A Windows notification with a message shows it (v1's taller chip).
         // So does the music's notice (song, play, pause, stop).
@@ -1141,7 +1159,10 @@ fn refresh(ui: &Island) {
             .into_iter()
             .filter(|a| Some(&a.id) != front_id.as_ref())
             .take(OTHERS_MAX)
-            .map(|a| item(a, logo_image(&mut state.logos, &activity_aumid(&state.notifications, a))))
+            .map(|a| {
+                let aumid = activity_aumid(&state.notifications, a);
+                item(a, logo_image(&mut state.logos, &aumid, pixels::physical(LOGO_NOTICE, scale)), logo_image(&mut state.logos, &aumid, pixels::physical(LOGO_CAPSULE, scale)))
+            })
             .collect();
         ui.set_others(ModelRc::new(VecModel::from(others)));
         // KANMURI_DEMO_PRAYER: the header's clock says the pretend time too.
@@ -1160,7 +1181,7 @@ fn refresh(ui: &Island) {
         // them), Accounts (once accounts are set up).
         let has_lyrics = state.lyrics.as_ref().is_some_and(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty());
         let mut tab_ids: Vec<(&str, &str)> = Vec::new();
-        let asks = ask_rows(&state.arbiter, &mut state.logos);
+        let asks = ask_rows(&state.arbiter, &mut state.logos, scale);
         if !state.notifications.is_empty() || !asks.is_empty() || !state.music.has_session {
             tab_ids.push(("notifications", "Notifications"));
         }
@@ -1193,7 +1214,7 @@ fn refresh(ui: &Island) {
             .iter()
             .filter_map(|&i| state.notifications.get(i).map(|n| (i, n)))
             .map(|(i, n)| {
-                let logo = logo_image(logos, &n.aumid);
+                let logo = logo_image(logos, &n.aumid, pixels::physical(LOGO_ROW, scale));
                 NotifRow {
                     index: i as i32,
                     app: n.app.as_str().into(),
@@ -1284,7 +1305,7 @@ fn refresh(ui: &Island) {
         ui.set_capsule_romaji(capsule_ro.as_str().into());
         let capsule_long = lyric_width(&capsule_line) > LYRIC_ONE_LINE;
         ui.set_capsule_long(capsule_long);
-        ui.set_music(music_view(&state.music, &state.music_art, state.music_accent, &state.lyrics, lines, lyrics_on, state.lyrics_nudge, rating, ytm.as_ref()));
+        ui.set_music(music_view(&state.music, &state.music_art, ui.window().scale_factor(), state.cover_big, state.music_accent, &state.lyrics, lines, lyrics_on, state.lyrics_nudge, rating, ytm.as_ref()));
 
         // Modes: a new notice pops the hidden island up; the compact island
         // goes up hide_after() later unless someone waits for an answer.
@@ -1709,9 +1730,37 @@ fn seek_target(fraction: f64, length: f64, can_seek: bool) -> Option<f64> {
     (can_seek && length > 0.0 && fraction.is_finite()).then(|| fraction.clamp(0.0, 1.0) * length)
 }
 
+/// The song's cover, rounded, ART_PX square, and its images at the sizes it
+/// is drawn (physical px), made once each: the software renderer scales
+/// pictures by the nearest pixel, which left the rounded corners jagged.
+struct Art {
+    px: Vec<u8>,
+    sized: std::cell::RefCell<HashMap<u32, slint::Image>>,
+}
+
+impl Art {
+    fn new(rounded: Vec<u8>) -> Self {
+        Art { px: rounded, sized: Default::default() }
+    }
+
+    fn at(&self, phys: u32) -> slint::Image {
+        let phys = phys.clamp(1, music::ART_PX);
+        self.sized.borrow_mut().entry(phys).or_insert_with(|| pixels::image(&pixels::resize_square(&self.px, music::ART_PX, phys), phys)).clone()
+    }
+}
+
+/// Where the cover is drawn, logical px: the capsule, the music card, the
+/// lyrics page's player; the Music page's big one is measured by the page.
+const COVER_CAPSULE: f32 = 30.0;
+const COVER_CARD: f32 = 40.0;
+const COVER_LYRICS: f32 = 64.0;
+
+#[allow(clippy::too_many_arguments)]
 fn music_view(
     snap: &music::Snapshot,
-    art: &Option<slint::Image>,
+    art: &Option<Art>,
+    scale: f32,
+    big: f32,
     accent: Option<(u8, u8, u8)>,
     lyrics: &Option<island_lyrics::Lyrics>,
     lines: Option<ModelRc<LyricLine>>,
@@ -1750,7 +1799,11 @@ fn music_view(
         // A browser often reports no length (or a wrong one): no "-0:00" then.
         remaining: if length > 0.0 { format!("-{}", local_time::mm_ss((length - position).max(0.0))).into() } else { SharedString::default() },
         has_art: art.is_some(),
-        art: art.clone().unwrap_or_default(),
+        // Before the Music page has said how big its cover is: the full picture.
+        art: art.as_ref().map(|a| a.at(if big > 0.0 { pixels::physical(big, scale) } else { music::ART_PX })).unwrap_or_default(),
+        art_30: art.as_ref().map(|a| a.at(pixels::physical(COVER_CAPSULE, scale))).unwrap_or_default(),
+        art_40: art.as_ref().map(|a| a.at(pixels::physical(COVER_CARD, scale))).unwrap_or_default(),
+        art_64: art.as_ref().map(|a| a.at(pixels::physical(COVER_LYRICS, scale))).unwrap_or_default(),
         has_accent: accent.is_some(),
         accent: accent.map_or_else(slint::Color::default, |(r, g, b)| slint::Color::from_rgb_u8(r, g, b)),
         has_lyrics: lines.is_some(),
@@ -1787,7 +1840,7 @@ fn on_music(ui: &Island, snap: music::Snapshot) {
                 (rgba.len() == (music::ART_PX * music::ART_PX * 4) as usize).then(|| {
                     let mut rounded = rgba.clone();
                     round_cover(&mut rounded, music::ART_PX);
-                    slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rounded, music::ART_PX, music::ART_PX))
+                    Art::new(rounded)
                 })
             });
             state.music_accent = snap.art.as_deref().and_then(accent::of_rgba);
@@ -1891,7 +1944,7 @@ fn fetch_lyrics(ui: &Island) {
                     }
                     let mut rounded = rgba.clone();
                     round_cover(&mut rounded, music::ART_PX);
-                    state.music_art = Some(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rounded, music::ART_PX, music::ART_PX)));
+                    state.music_art = Some(Art::new(rounded));
                     state.music_accent = accent::of_rgba(&rgba);
                     state.cover_for = key;
                 });
@@ -2912,6 +2965,9 @@ fn glass_done(ui: &Island, done: glass::Done) {
                 state.glass_hash = done.hash;
                 state.glass_key = done.key;
                 ui.set_glass(bg::image(&px, w, h));
+                let s = ui.window().scale_factor().max(0.5);
+                ui.set_glass_w(w as f32 / s);
+                ui.set_glass_h(h as f32 / s);
                 ui.set_has_glass(true);
                 if done.light != state.glass_light {
                     state.glass_light = done.light;
@@ -2932,6 +2988,9 @@ fn glass_demo_frame(ui: &Island, state: &mut State) {
     if let Some((px, light)) = glass::demo(win, x, y, w, h, radius, scale, state.glass_light) {
         state.glass_key = key;
         ui.set_glass(bg::image(&px, w, h));
+                let s = ui.window().scale_factor().max(0.5);
+                ui.set_glass_w(w as f32 / s);
+                ui.set_glass_h(h as f32 / s);
         ui.set_has_glass(true);
         if light != state.glass_light {
             state.glass_light = light;
@@ -3436,6 +3495,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings,
             music: music::Snapshot::default(),
             music_art: None,
+            cover_big: 0.0,
             music_accent: None,
             lyrics_key: String::new(),
             cover_for: String::new(),
@@ -3905,6 +3965,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak = ui.as_weak();
+    ui.on_music_cover_size(move |s| {
+        let Some(ui) = weak.upgrade() else { return };
+        let changed = with_state(|state| {
+            let c = (state.cover_big - s).abs() > 0.01;
+            state.cover_big = s;
+            c
+        })
+        .unwrap_or(false);
+        if changed {
+            // Not from inside Slint's own property evaluation: on the next turn.
+            let weak = ui.as_weak();
+            Timer::single_shot(std::time::Duration::ZERO, move || {
+                if let Some(ui) = weak.upgrade() {
+                    refresh(&ui);
+                }
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
     ui.on_notif_clicked(move |index| {
         let Some(ui) = weak.upgrade() else { return };
         with_state(|state| {
@@ -4151,7 +4231,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.music_accent = accent::of_rgba(&art);
             let mut rounded = art.clone();
             round_cover(&mut rounded, n);
-            state.music_art = Some(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rounded, n, n)));
+            state.music_art = Some(Art::new(rounded));
             state.music.art = Some(art);
             // =nolyrics: the song without; KANMURI_LINE: Line on.
             state.line_held = std::env::var_os("KANMURI_LINE").is_some();

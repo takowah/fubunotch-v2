@@ -106,11 +106,11 @@ fn toasts(listener: &UserNotificationListener) -> windows::core::Result<Vec<User
 /// An app's logo as Windows shows it (its tile), LOGO_PX square RGBA, kept
 /// per app (by AUMID) the first time one of its notifications is read, so the
 /// island draws the real icon instead of a letter. None when Windows has none
-/// (some unpackaged apps). Icons are drawn at 26-34 px (up to 51 at 1.5×
-/// scale): 48 came out blocky. Read big (SRC_PX), the empty margin cut off (a
+/// (some unpackaged apps). Read big (SRC_PX), the empty margin cut off (a
 /// tile logo like WhatsApp's sits small in the middle of its square), then
-/// averaged down to LOGO_PX.
-pub const LOGO_PX: u32 = 64;
+/// averaged down to LOGO_PX; main.rs averages it again to the exact size each
+/// place draws it (26-34 px, up to 51 physical at 1.5×).
+pub const LOGO_PX: u32 = 128;
 const SRC_PX: u32 = 256;
 
 /// A square RGBA picture (side `n`): its transparent margin cut off, centred
