@@ -114,18 +114,100 @@ pub struct LookSettings {
     pub background: String,
     /// How much the island's colour covers the picture, 0..1 (text stays readable).
     pub background_dim: f32,
+    /// The island's body (Settings → Appearance → Look): one of LOOK_STYLES.
+    pub style: String,
+    /// The body's colour for the "color" look, "#rrggbb".
+    pub color: String,
+    /// After sunset the island's colours ease warmer, back at sunrise.
+    pub night_warm: bool,
+    /// How warm at night, 0..100 %.
+    pub night_warmth: u32,
+    /// How solid the closed (compact) island is, 20..100 %: solid again while
+    /// hovered, open or showing an alert.
+    pub closed_opacity: u32,
+    /// The idle capsule and the open island, in logical pixels (clamped by `sizes`).
+    pub idle_w: u32,
+    pub idle_h: u32,
+    pub expanded_w: u32,
+    /// The open island with a normal page, and with a tall one (Lyrics).
+    pub expanded_h: u32,
+    pub expanded_tall_h: u32,
 }
 
 impl Default for LookSettings {
     fn default() -> Self {
-        LookSettings { mascot: false, theme: "graphite".into(), background: String::new(), background_dim: 0.55 }
+        LookSettings {
+            mascot: false,
+            theme: "graphite".into(),
+            background: String::new(),
+            background_dim: 0.55,
+            style: "black".into(),
+            color: "#1f2a52".into(),
+            night_warm: false,
+            night_warmth: 50,
+            closed_opacity: 100,
+            idle_w: 180,
+            idle_h: 45,
+            expanded_w: 680,
+            expanded_h: 196,
+            expanded_tall_h: 268,
+        }
     }
 }
+
+/// The island's body: solid black, a colour, the wallpaper's colour, glass
+/// (see-through) or frosted glass (see-through and blurred).
+pub const LOOK_STYLES: &[&str] = &["black", "color", "wallpaper", "glass", "frosted"];
+
+/// The island's sizes, each within what the window and the pages allow.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LookSizes {
+    pub idle_w: f32,
+    pub idle_h: f32,
+    pub expanded_w: f32,
+    pub expanded_h: f32,
+    pub expanded_tall_h: f32,
+}
+
+/// The sliders' ranges (Settings shows the same ones).
+pub const IDLE_W: (u32, u32) = (140, 260);
+pub const IDLE_H: (u32, u32) = (36, 56);
+pub const EXPANDED_W: (u32, u32) = (600, 760);
+pub const EXPANDED_H: (u32, u32) = (170, 260);
+pub const EXPANDED_TALL_H: (u32, u32) = (220, 360);
 
 impl LookSettings {
     /// The theme to draw: unknown names fall back to the first.
     pub fn theme(&self) -> &'static str {
         THEMES.iter().copied().find(|t| *t == self.theme).unwrap_or(THEMES[0])
+    }
+
+    /// The look to draw: unknown names fall back to black.
+    pub fn style(&self) -> &'static str {
+        LOOK_STYLES.iter().copied().find(|t| *t == self.style).unwrap_or(LOOK_STYLES[0])
+    }
+
+    /// The colour look's colour; a broken value takes the default navy.
+    pub fn color_rgb(&self) -> crate::look::Rgb {
+        crate::look::parse_hex(&self.color).unwrap_or((0x1f, 0x2a, 0x52))
+    }
+
+    pub fn sizes(&self) -> LookSizes {
+        let c = |v: u32, r: (u32, u32)| v.clamp(r.0, r.1) as f32;
+        let expanded_h = c(self.expanded_h, EXPANDED_H);
+        LookSizes {
+            idle_w: c(self.idle_w, IDLE_W),
+            idle_h: c(self.idle_h, IDLE_H),
+            expanded_w: c(self.expanded_w, EXPANDED_W),
+            expanded_h,
+            // Never shorter than a normal page.
+            expanded_tall_h: c(self.expanded_tall_h, EXPANDED_TALL_H).max(expanded_h),
+        }
+    }
+
+    /// Closed-island opacity, 0.2..1.
+    pub fn closed_alpha(&self) -> f32 {
+        self.closed_opacity.clamp(20, 100) as f32 / 100.0
     }
 }
 
@@ -405,6 +487,23 @@ mod tests {
         let f = FocusSettings { focus_min: 0, short_min: 999, long_min: 15, rounds: 40 }.plan();
         assert_eq!((f.focus_min, f.short_min, f.rounds), (1, 60, 12));
         assert_eq!(LookSettings { theme: "pekora".into(), ..Default::default() }.theme(), "graphite");
+    }
+
+    #[test]
+    fn an_old_look_keeps_todays_appearance_and_sizes_stay_in_range() {
+        let s = Settings::parse(br#"{"look":{"theme":"towa","background_dim":0.4}}"#);
+        assert_eq!(s.look.theme(), "towa");
+        assert_eq!(s.look.style(), "black");
+        assert_eq!(s.look.closed_alpha(), 1.0);
+        assert!(!s.look.night_warm);
+        let z = s.look.sizes();
+        assert_eq!((z.idle_w, z.idle_h, z.expanded_w, z.expanded_h, z.expanded_tall_h), (180.0, 45.0, 680.0, 196.0, 268.0));
+        let wild = LookSettings { style: "neon".into(), color: "nope".into(), idle_w: 9999, idle_h: 1, expanded_w: 100, expanded_h: 255, expanded_tall_h: 230, closed_opacity: 3, ..Default::default() };
+        assert_eq!(wild.style(), "black");
+        assert_eq!(wild.color_rgb(), (0x1f, 0x2a, 0x52));
+        assert_eq!(wild.closed_alpha(), 0.2);
+        let z = wild.sizes();
+        assert_eq!((z.idle_w, z.idle_h, z.expanded_w, z.expanded_tall_h), (260.0, 36.0, 600.0, 255.0), "tall never under normal");
     }
 
     #[test]

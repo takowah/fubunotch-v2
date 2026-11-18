@@ -14,6 +14,7 @@ mod mascot;
 mod bg;
 mod claude;
 mod local_time;
+mod look;
 mod music;
 mod accent;
 mod notif;
@@ -79,14 +80,11 @@ const LINE_NOTICE_SHORT_H: f32 = 30.0;
 const LYRIC_ONE_LINE: usize = 56;
 /// The open island, laid out like Poni's: a wide panel, one top bar (tabs,
 /// time, quick buttons) and the page under it across the full width, no
-/// footer. Its chrome (edge, margins, the bar) plus the page; a normal page
-/// makes a 196 px panel, a tall one (lyrics) 268 px, and a page with more in
-/// it (notifications, accounts) grows to fit.
-const EXPANDED_W: f32 = 680.0;
+/// footer. Its chrome (edge, margins, the bar) plus the page; by default
+/// (Settings → Appearance → Size, LookSettings::sizes) 680 px wide, a normal
+/// page makes a 196 px panel, a tall one (lyrics) 268 px, and a page with
+/// more in it (notifications, accounts) grows to fit.
 const EXPANDED_CHROME: f32 = 74.0;
-const PAGE_H: f32 = 122.0;
-const PAGE_TALL_H: f32 = 194.0;
-const EXPANDED: (f32, f32) = (EXPANDED_W, EXPANDED_CHROME + PAGE_H);
 /// Notifications: a header and up to six rows in two columns ($ITEM_H + 2 each).
 const NOTIF_HEADER_H: f32 = 28.0;
 const NOTIF_ROW_PITCH: f32 = 50.0;
@@ -143,7 +141,9 @@ fn hide_after(s: &Settings) -> u64 {
 /// region follows once it is done.
 const MORPH_MS: u64 = 450;
 /// The window never changes size: the largest island and its glow.
-const WINDOW: (f32, f32) = (if EXPANDED_W > LYRIC_MAX_W { EXPANDED_W } else { LYRIC_MAX_W } + 2.0 * GLOW + 8.0, TOP + EXPANDED_MAX_H + GLOW + 4.0);
+/// The widest open island Settings allows (Appearance → Size).
+const EXPANDED_W_MAX: f32 = island_core::settings::EXPANDED_W.1 as f32;
+const WINDOW: (f32, f32) = (if EXPANDED_W_MAX > LYRIC_MAX_W { EXPANDED_W_MAX } else { LYRIC_MAX_W } + 2.0 * GLOW + 8.0, TOP + EXPANDED_MAX_H + GLOW + 4.0);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Mode {
@@ -244,7 +244,15 @@ struct State {
     bg_key: String,
     bg_image: Option<slint::Image>,
     bg_preview: Option<slint::Image>,
+    /// The wallpaper's colour, darkened (the Wallpaper color look).
+    wallpaper: Option<island_core::look::Rgb>,
+    /// The Look last put on the island.
+    look_shown: Option<look::Colors>,
 }
+
+/// The Frosted glass look is on: the window region is the island's rounded
+/// shape (Windows blurs the whole region) and the blur is switched on.
+static FROSTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 static ISLAND_MADE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -428,7 +436,9 @@ fn place(ui: &Island) {
 fn clip_window(ui: &Island, size: (f32, f32), hidden: bool) {
     use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
+    use windows::Win32::Graphics::Gdi::CreateRoundRectRgn;
     let scale = ui.window().scale_factor();
+    let frosted = FROSTED.load(std::sync::atomic::Ordering::Relaxed) && !hidden && !snapshot_mode();
     let (w, h) = if hidden { HIDDEN_HOVER } else { (size.0 + 2.0 * GLOW, TOP + size.1 + GLOW) };
     let x0 = ((WINDOW.0 - w) / 2.0 * scale).floor() as i32;
     let x1 = ((WINDOW.0 + w) / 2.0 * scale).ceil() as i32;
@@ -437,8 +447,19 @@ fn clip_window(ui: &Island, size: (f32, f32), hidden: bool) {
         let Ok(handle) = win.window_handle() else { return };
         if let RawWindowHandle::Win32(h) = handle.as_raw() {
             let hwnd = windows::Win32::Foundation::HWND(h.hwnd.get() as *mut core::ffi::c_void);
+            look::set_blur(hwnd, frosted);
             unsafe {
-                let region = CreateRectRgn(x0, 0, x1, y1);
+                // Frosted: just the island, rounded (no glow), so the blur
+                // doesn't show as a square around it. Radius as the island's.
+                let region = if frosted {
+                    let r = if size.1 <= COMPACT_NOTICE.1 { size.1 / 2.0 } else { MEDIA_RADIUS };
+                    let (ix0, ix1) = (((WINDOW.0 - size.0) / 2.0 * scale).round() as i32, ((WINDOW.0 + size.0) / 2.0 * scale).round() as i32);
+                    let (iy0, iy1) = ((TOP * scale).round() as i32, ((TOP + size.1) * scale).round() as i32);
+                    let d = (2.0 * r * scale).round() as i32;
+                    CreateRoundRectRgn(ix0, iy0, ix1 + 1, iy1 + 1, d, d)
+                } else {
+                    CreateRectRgn(x0, 0, x1, y1)
+                };
                 // The window owns the region from here on.
                 SetWindowRgn(hwnd, Some(region), true);
             }
@@ -598,6 +619,11 @@ unsafe extern "system" fn no_caption_paint(
         WM_NCPAINT => LRESULT(0),
         // A monitor came or went, or the PC woke: the island may have been
         // moved off its place or under other windows.
+        // A new wallpaper: the Wallpaper color look reads it again.
+        WM_SETTINGCHANGE if wparam.0 as u32 == SPI_SETDESKWALLPAPER.0 => unsafe {
+            let _ = slint::invoke_from_event_loop(wallpaper_changed);
+            DefSubclassProc(hwnd, msg, wparam, lparam)
+        },
         WM_DISPLAYCHANGE => unsafe {
             let _ = slint::invoke_from_event_loop(recover_soon);
             DefSubclassProc(hwnd, msg, wparam, lparam)
@@ -947,22 +973,26 @@ fn refresh(ui: &Island) {
         if ui.global::<Ice>().get_theme() != theme {
             apply_theme!(ui.global::<Ice>(), theme);
         }
+        apply_look(ui, state);
+        // Settings → Appearance → Size: the idle capsule and the open island.
+        let sizes = state.settings.look.sizes();
+        let page_h = sizes.expanded_h - EXPANDED_CHROME;
         let size = match state.mode {
             // Each page as tall as its content, as Mini Island's list.
             Mode::Expanded => {
                 let page = match state.active_tab.as_str() {
-                    "music" | "prayer" => PAGE_H,
-                    "lyrics" => PAGE_TALL_H,
-                    "accounts" => accounts_h.max(PAGE_H),
-                    _ if state.notifications.is_empty() => PAGE_H,
+                    "music" | "prayer" => page_h,
+                    "lyrics" => sizes.expanded_tall_h - EXPANDED_CHROME,
+                    "accounts" => accounts_h.max(page_h),
+                    _ if state.notifications.is_empty() => page_h,
                     _ => {
                         // Two columns (one for a single notification).
                         let n = state.notifications.len().min(NOTIF_ROWS_MAX);
                         let cols = if n == 1 { 1 } else { 2 };
-                        (NOTIF_HEADER_H + n.div_ceil(cols) as f32 * NOTIF_ROW_PITCH).max(PAGE_H)
+                        (NOTIF_HEADER_H + n.div_ceil(cols) as f32 * NOTIF_ROW_PITCH).max(page_h)
                     }
                 };
-                (EXPANDED.0, (EXPANDED_CHROME + page).min(EXPANDED_MAX_H))
+                (sizes.expanded_w, (EXPANDED_CHROME + page).min(EXPANDED_MAX_H))
             }
             Mode::Hidden => HIDDEN,
             // As wide as the line, a notice a row underneath.
@@ -995,7 +1025,8 @@ fn refresh(ui: &Island) {
                 {
                     let extra = room(&ui.get_idle_left()) + room(&ui.get_idle_right());
                     // The time alone keeps Mini Island's idle width; with sides, just their room.
-                    (if extra > 0.0 { 120.0 + extra } else { COMPACT_IDLE.0 }, COMPACT_IDLE.1)
+                    // (The idle width less the time's 120 px is its margin.)
+                    (if extra > 0.0 { sizes.idle_w - (COMPACT_IDLE.0 - 120.0) + extra } else { sizes.idle_w }, sizes.idle_h)
                 }
             }
         };
@@ -1542,7 +1573,7 @@ fn follow_watch(ui: &Island, state: &mut State, now: u64) {
     let Some(island) = hwnd_of(ui.window()) else { return };
     let r = watch::rect(island);
     let scale = ui.window().scale_factor();
-    let below = if state.mode == Mode::Expanded { state.size_to.1 } else { EXPANDED.1 };
+    let below = if state.mode == Mode::Expanded { state.size_to.1 } else { state.settings.look.sizes().expanded_h };
     let x = (r.left + r.right) / 2;
     let y = r.top + ((TOP + below + 10.0) * scale).round() as i32;
     let shown = state.watch_held || state.mode == Mode::Expanded || state.watch_hover;
@@ -1946,6 +1977,8 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         Err(e) => (false, e),
     };
     let preview = with_state(|state| state.bg_preview.clone()).flatten();
+    let wallpaper = with_state(|state| state.wallpaper).flatten();
+    let sizes = s.look.sizes();
     // The apps for the per-app switches: those seen now and before, by name.
     let known = with_state(|state| {
         let seen = notif::seen_apps();
@@ -2008,6 +2041,18 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         background_name: Path::new(&s.look.background).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default().into(),
         background_preview: preview.unwrap_or_default(),
         background_dim: (s.look.background_dim.clamp(0.0, 0.9) * 100.0).round() as i32,
+        look_style: s.look.style().into(),
+        look_color: look::color(s.look.color_rgb()),
+        look_color_hex: island_core::look::hex(s.look.color_rgb()).into(),
+        wallpaper_color: look::color(wallpaper.unwrap_or((0x0b, 0x0b, 0x0d))),
+        night_warm: s.look.night_warm,
+        night_warmth: s.look.night_warmth.min(100) as i32,
+        closed_opacity: s.look.closed_opacity.clamp(20, 100) as i32,
+        idle_w: sizes.idle_w as i32,
+        idle_h: sizes.idle_h as i32,
+        expanded_w: sizes.expanded_w as i32,
+        expanded_h: sizes.expanded_h as i32,
+        expanded_tall_h: sizes.expanded_tall_h as i32,
         water_reminders: w.reminders,
         water_goal: plan.goal_ml as i32,
         water_glass: plan.glass_ml as i32,
@@ -2071,6 +2116,7 @@ fn set_flag(s: &mut Settings, key: &str, on: bool) {
         "system.network" => s.system.network = on,
         "system.audio_device" => s.system.audio_device = on,
         "look.mascot" => s.look.mascot = on,
+        "look.night_warm" => s.look.night_warm = on,
         "general.popups" => s.general.popups = on,
         "water.reminders" => s.water.reminders = on,
         "prayer.at_time" => s.prayer.at_time = on,
@@ -2090,6 +2136,13 @@ fn set_number(s: &mut Settings, key: &str, v: i32) {
     match key {
         "general.hide_after_s" => s.general.hide_after_s = u.clamp(2, 60),
         "look.background_dim" => s.look.background_dim = (u.min(90) as f32) / 100.0,
+        "look.night_warmth" => s.look.night_warmth = u.min(100),
+        "look.closed_opacity" => s.look.closed_opacity = u.clamp(20, 100),
+        "look.idle_w" => s.look.idle_w = u,
+        "look.idle_h" => s.look.idle_h = u,
+        "look.expanded_w" => s.look.expanded_w = u,
+        "look.expanded_h" => s.look.expanded_h = u,
+        "look.expanded_tall_h" => s.look.expanded_tall_h = u,
         "water.every_min" => s.water.every_min = u.clamp(10, 480),
         "water.goal_ml" => s.water.goal_ml = u.clamp(100, 10_000),
         "water.glass_ml" => s.water.glass_ml = u.clamp(10, 2000),
@@ -2101,6 +2154,83 @@ fn set_number(s: &mut Settings, key: &str, v: i32) {
         "focus.rounds" => s.focus.rounds = u.clamp(1, 12),
         "prayer.remind_before_min" => s.prayer.remind_before_min = u.min(30),
         _ => {}
+    }
+}
+
+/// Puts Settings → Appearance → Look on the island: its colours (set again
+/// only when they changed: the night's warmth moves with refresh's
+/// per-minute wake, never per frame), and Frosted glass' blur and region.
+fn apply_look(ui: &Island, state: &mut State) {
+    let warmth = if state.settings.look.night_warm {
+        // Sunset and sunrise at the Prayer module's place, else 18:00 / 06:00.
+        let (y, m, d, secs) = prayer_now();
+        let (sunset, sunrise) = if state.settings.is_on("prayer") {
+            let day = prayer_day(&mut state.prayer_day, &state.settings, y, m, d);
+            (day.get(prayer::Which::Maghrib), day.get(prayer::Which::Terbit))
+        } else {
+            (18 * 60, 6 * 60)
+        };
+        look::warmth(&state.settings.look, secs as f32 / 60.0, sunset, sunrise)
+    } else {
+        0.0
+    };
+    let c = look::colors(&state.settings.look, state.wallpaper, warmth);
+    if state.look_shown.as_ref() == Some(&c) {
+        return;
+    }
+    let mini = ui.global::<Mini>();
+    mini.set_base(look::color(c.base));
+    mini.set_solid(c.solid);
+    mini.set_closed(c.closed);
+    mini.set_light(c.light);
+    mini.set_ink(look::color(c.ink[0]));
+    mini.set_text_2(look::color(c.ink[1]));
+    mini.set_text_3(look::color(c.ink[2]));
+    mini.set_label(look::color(c.ink[3]));
+    mini.set_faint(look::color(c.ink[4]));
+    mini.set_wash(look::color(c.wash));
+    let was = FROSTED.swap(c.frosted, std::sync::atomic::Ordering::Relaxed);
+    state.look_shown = Some(c.clone());
+    if was != c.frosted {
+        clip_window(ui, state.size_to, state.mode == Mode::Hidden);
+    }
+}
+
+/// Reads the wallpaper's colour (Wallpaper color look) on a thread: at
+/// start and when Windows says the wallpaper changed (WM_SETTINGCHANGE).
+/// Nothing polls it. Read whatever the look, so Settings' Wallpaper card
+/// shows the real colour.
+fn load_wallpaper(ui: &Island) {
+    // A snapshot has no event loop to come back to.
+    if snapshot::requested().is_some() {
+        let c = look::wallpaper_color();
+        with_state(|s| s.wallpaper = c);
+        return;
+    }
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        let c = look::wallpaper_color();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak.upgrade() {
+                let refill = with_state(|s| {
+                    s.wallpaper = c;
+                    s.settings_window.as_ref().map(|w| (w.as_weak(), s.settings.clone()))
+                })
+                .flatten();
+                if let Some((w, settings)) = refill {
+                    if let Some(w) = w.upgrade() {
+                        fill_settings(&w, &settings);
+                    }
+                }
+                refresh(&ui);
+            }
+        });
+    });
+}
+
+fn wallpaper_changed() {
+    if let Some(ui) = ISLAND.with(|i| i.borrow().as_ref().and_then(|w| w.upgrade())) {
+        load_wallpaper(&ui);
     }
 }
 
@@ -2119,9 +2249,9 @@ fn update_background(ui: &Island) {
         let scale = ui.window().scale_factor().max(0.5);
         let (w, h) = state.size_to;
         let r = if state.mode == Mode::Expanded || (w, h) == COMPACT_MEDIA { MEDIA_RADIUS } else if (w, h) == COMPACT_NOTICE { NOTICE_RADIUS } else { h / 2.0 };
-        let p = theme::palette(look.theme());
-        let tint = ((p.body >> 16) as u8, (p.body >> 8) as u8, p.body as u8);
-        let key = format!("{}|{w}x{h}|{scale}|{}|{}", look.background, look.background_dim, look.theme());
+        // The picture is dimmed toward the island's body (the Look's colour).
+        let tint = state.look_shown.as_ref().map_or((0x0b, 0x0b, 0x0d), |c| c.base);
+        let key = format!("{}|{w}x{h}|{scale}|{}|{tint:?}", look.background, look.background_dim);
         if key == state.bg_key || state.mode == Mode::Hidden {
             return None;
         }
@@ -2261,6 +2391,23 @@ fn open_settings(ui: &Island) {
             change_settings(&ui, |s| s.look.theme = theme.to_string());
             with_state(|state| state.bg_preview = None);
             update_background(&ui);
+        }
+    });
+    let island = ui.as_weak();
+    win.on_look_picked(move |style| {
+        if let Some(ui) = island.upgrade() {
+            change_settings(&ui, |s| s.look.style = style.to_string());
+        }
+    });
+    let island = ui.as_weak();
+    win.on_color_picked(move |text| {
+        let Some(ui) = island.upgrade() else { return };
+        // A colour that isn't one ("#12", "blue") changes nothing.
+        if let Some(c) = island_core::look::parse_hex(&text) {
+            change_settings(&ui, |s| {
+                s.look.color = island_core::look::hex(c);
+                s.look.style = "color".into();
+            });
         }
     });
     let island = ui.as_weak();
@@ -2472,6 +2619,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(t) = std::env::var("KANMURI_THEME") {
         settings.look.theme = t;
     }
+    // KANMURI_LOOK=<black|color|wallpaper|glass|frosted>, KANMURI_LOOK_COLOR=rrggbb,
+    // KANMURI_NIGHT=<0..100> (night warmth on, at that strength),
+    // KANMURI_CLOSED_OPACITY=<20..100>: a Look for this run only (checks).
+    if let Ok(v) = std::env::var("KANMURI_LOOK") {
+        settings.look.style = v;
+    }
+    if let Ok(v) = std::env::var("KANMURI_LOOK_COLOR") {
+        settings.look.color = format!("#{}", v.trim_start_matches('#'));
+    }
+    if let Some(v) = std::env::var("KANMURI_NIGHT").ok().and_then(|v| v.parse::<u32>().ok()) {
+        settings.look.night_warm = true;
+        settings.look.night_warmth = v.min(100);
+    }
+    if let Some(v) = std::env::var("KANMURI_CLOSED_OPACITY").ok().and_then(|v| v.parse::<u32>().ok()) {
+        settings.look.closed_opacity = v;
+    }
     // KANMURI_BG: a background picture for this run only.
     if let Ok(b) = std::env::var("KANMURI_BG") {
         settings.look.background = b;
@@ -2536,8 +2699,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             bg_key: String::new(),
             bg_image: None,
             bg_preview: None,
+            wallpaper: None,
+            look_shown: None,
         });
     });
+    load_wallpaper(&ui);
 
     let weak = ui.as_weak();
     ui.on_hover_changed(move |over| {
@@ -3108,6 +3274,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .flatten()
             .filter(|s| s.0 > 10.0)
             .unwrap_or((900.0, 600.0));
+            // KANMURI_SETTINGS_HEIGHT=<px>: a taller window, for a long page.
+            let size = match std::env::var("KANMURI_SETTINGS_HEIGHT").ok().and_then(|v| v.parse::<f32>().ok()) {
+                Some(h) => (size.0, h.clamp(300.0, 3000.0)),
+                None => size,
+            };
             snapshot::write(1, size, &path)?;
         } else {
             snapshot::write(0, WINDOW, &path)?;
