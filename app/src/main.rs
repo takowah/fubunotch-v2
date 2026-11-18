@@ -1123,10 +1123,11 @@ fn refresh(ui: &Island) {
         if front_changed {
             state.line_notice_until = now + NOTIF_HOLD_MS;
         }
-        let line_notice = line
-            // Not the music's own notices ("Playing", a song change): the capsule already shows the song.
-            && front_id.as_deref().is_some_and(|id| !id.starts_with("music:"))
-            && (asking || now < state.line_notice_until);
+        // While a song plays the capsule is the song alone (as Poni's): other news
+        // only counts as "+N", and a question takes the whole capsule. A row of
+        // news under the lyric kept pushing the lyric about (18 Nov 2026).
+        let _ = (asking, state.line_notice_until);
+        let line_notice = false;
         ui.set_line_notice(line_notice);
         if asking && state.mode == Mode::Hidden {
             state.mode = Mode::Compact;
