@@ -796,6 +796,9 @@ component ToggleTile inherits VerticalLayout {
     in property <bool> on;
     in property <bool> enabled: true;
     callback clicked();
+    // One width for every tile, whatever its name: rows of them line up in
+    // columns (a name's width set each one apart: the owner, 19 Nov 2026).
+    width: 84px;
     spacing: 5px;
     alignment: center;
     HorizontalLayout {
