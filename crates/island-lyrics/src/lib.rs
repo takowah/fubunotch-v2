@@ -23,13 +23,16 @@ const DURATION_SLACK: f64 = 3.0;
 
 /// One line of the lyrics, from `time` (seconds into the track). A Japanese
 /// line keeps its own text; `romaji` is its reading in Latin letters (empty
-/// otherwise), shown under it.
+/// otherwise), shown under it; `ruby` the line cut into words, each with its
+/// furigana (empty for one without kanji), shown over it.
 #[derive(Serialize, Clone, Debug, PartialEq, Default)]
 pub struct Line {
     pub time: f64,
     pub text: String,
     #[serde(default)]
     pub romaji: String,
+    #[serde(default)]
+    pub ruby: Vec<romaji::Ruby>,
 }
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq)]
@@ -361,6 +364,12 @@ pub fn resolve(query: &Query, sources: Sources) -> Lyrics {
             if romaji::is_japanese(&line.text) {
                 line.romaji = romaji::line_to_romaji(&line.text);
             }
+        }
+    }
+    // Furigana (the あ switch on the lyrics card): over the kanji of Japanese lines.
+    for line in &mut lyrics.lines {
+        if romaji::has_kanji(&line.text) {
+            line.ruby = romaji::line_to_ruby(&line.text);
         }
     }
     if lyrics.status != Status::Error {

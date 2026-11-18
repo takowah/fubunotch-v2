@@ -248,6 +248,9 @@ struct State {
     /// What is playing (the Music module), and its artwork as an image.
     music: music::Snapshot,
     music_art: Option<Art>,
+    /// The lyrics card's text width (logical px), as the card measured it:
+    /// the furigana rows are wrapped to it.
+    lyric_width: f32,
     /// The Music page's big cover, logical px, as the page measured it (0 = not yet).
     cover_big: f32,
     /// The cover's colour (accent.rs), the island's while the song plays.
@@ -1922,9 +1925,60 @@ fn song_key(snap: &music::Snapshot) -> String {
 }
 
 /// The song's lyric lines as one list for the UI, made only when the lyrics change.
+/// How wide a character of a lyric is, in ems: Japanese (and full-width) one
+/// em, Latin about half, a space less.
+fn char_em(c: char) -> f32 {
+    match c {
+        ' ' => 0.3,
+        c if c.is_ascii_alphanumeric() => 0.58,
+        c if c.is_ascii() => 0.4,
+        _ => 1.0,
+    }
+}
+
+/// A line's words with furigana, in rows that fit `width` px (the lines
+/// are 14.5 px, the readings 8.5 px): a word is as wide as the wider of the
+/// two. A word without furigana wider than a row is broken by character.
+fn ruby_rows(words: &[island_lyrics::romaji::Ruby], width: f32) -> Vec<Vec<RubySeg>> {
+    let w_of = |text: &str, ruby: &str| {
+        let base: f32 = text.chars().map(char_em).sum::<f32>() * 14.5;
+        let over = ruby.chars().count() as f32 * 8.5;
+        base.max(over)
+    };
+    let mut pieces: Vec<(String, String)> = Vec::new();
+    for w in words {
+        if w.ruby.is_empty() && w_of(&w.text, "") > width {
+            pieces.extend(w.text.chars().map(|c| (c.to_string(), String::new())));
+        } else {
+            pieces.push((w.text.clone(), w.ruby.clone()));
+        }
+    }
+    let mut rows: Vec<Vec<RubySeg>> = vec![Vec::new()];
+    let mut used = 0.0f32;
+    for (text, ruby) in pieces {
+        let w = w_of(&text, &ruby);
+        let row_empty = rows.last().is_none_or(|r| r.is_empty());
+        if !row_empty && used + w > width {
+            rows.push(Vec::new());
+            used = 0.0;
+        }
+        // A row doesn't start with a space.
+        if used == 0.0 && text.trim().is_empty() {
+            continue;
+        }
+        used += w;
+        if let Some(r) = rows.last_mut() {
+            r.push(RubySeg { text: text.into(), ruby: ruby.into() });
+        }
+    }
+    rows.retain(|r| !r.is_empty());
+    rows
+}
+
 fn lyric_lines(state: &mut State) -> Option<ModelRc<LyricLine>> {
     let l = state.lyrics.as_ref().filter(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty())?;
-    let key = format!("{}#{}#{}", state.lyrics_key, l.lines.len(), l.lines.iter().map(|x| x.text.len()).sum::<usize>());
+    let width = state.lyric_width;
+    let key = format!("{}#{}#{}#{width}", state.lyrics_key, l.lines.len(), l.lines.iter().map(|x| x.text.len()).sum::<usize>());
     if let Some((k, model)) = &state.lyrics_model {
         if *k == key {
             return Some(model.clone());
@@ -1933,7 +1987,16 @@ fn lyric_lines(state: &mut State) -> Option<ModelRc<LyricLine>> {
     let rows: Vec<LyricLine> = l
         .lines
         .iter()
-        .map(|x| LyricLine { text: if x.text.trim().is_empty() { "♪".into() } else { x.text.as_str().into() }, romaji: x.romaji.as_str().into(), current: false })
+        .map(|x| {
+            let rows = if x.ruby.iter().any(|w| !w.ruby.is_empty()) { ruby_rows(&x.ruby, width) } else { Vec::new() };
+            LyricLine {
+                text: if x.text.trim().is_empty() { "♪".into() } else { x.text.as_str().into() },
+                romaji: x.romaji.as_str().into(),
+                current: false,
+                has_ruby: !rows.is_empty(),
+                rows: ModelRc::new(VecModel::from(rows.into_iter().map(|segs| RubyRow { segs: ModelRc::new(VecModel::from(segs)) }).collect::<Vec<_>>())),
+            }
+        })
         .collect();
     let model = ModelRc::new(VecModel::from(rows));
     state.lyrics_model = Some((key, model.clone()));
@@ -4013,6 +4076,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings,
             music: music::Snapshot::default(),
             music_art: None,
+            lyric_width: 327.0,
             cover_big: 0.0,
             music_accent: None,
             lyrics_key: String::new(),
@@ -4572,6 +4636,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak = ui.as_weak();
+    ui.on_lyric_text_width(move |w| {
+        let Some(ui) = weak.upgrade() else { return };
+        let changed = with_state(|state| {
+            let c = w > 50.0 && (state.lyric_width - w).abs() > 0.5;
+            if c {
+                state.lyric_width = w;
+            }
+            c
+        })
+        .unwrap_or(false);
+        if changed {
+            // The lines are made again for the new width, on the next turn (not inside Slint's evaluation).
+            let weak = ui.as_weak();
+            Timer::single_shot(std::time::Duration::ZERO, move || {
+                if let Some(ui) = weak.upgrade() {
+                    refresh(&ui);
+                }
+            });
+        }
+    });
+
+    let weak = ui.as_weak();
     ui.on_music_cover_size(move |s| {
         let Some(ui) = weak.upgrade() else { return };
         let changed = with_state(|state| {
@@ -4872,7 +4958,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 lines: words
                     .iter()
                     .zip([0.25, 4.78, 10.0, 14.5, 18.0])
-                    .map(|(t, s)| island_lyrics::Line { time: s, text: t.to_string(), romaji: if island_lyrics::romaji::is_japanese(t) { island_lyrics::romaji::line_to_romaji(t) } else { String::new() } })
+                    .map(|(t, s)| island_lyrics::Line {
+                        time: s,
+                        text: t.to_string(),
+                        romaji: if island_lyrics::romaji::is_japanese(t) { island_lyrics::romaji::line_to_romaji(t) } else { String::new() },
+                        ruby: if island_lyrics::romaji::has_kanji(t) { island_lyrics::romaji::line_to_ruby(t) } else { Vec::new() },
+                    })
                     .collect(),
                 duration: 0.0,
             });

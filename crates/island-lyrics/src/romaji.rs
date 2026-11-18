@@ -57,6 +57,82 @@ pub fn line_to_romaji(text: &str) -> String {
     join(&words)
 }
 
+/// A word of a line and its furigana: the hiragana reading over its kanji
+/// ("" for a word without kanji). Okurigana, the kana written after (or
+/// before) the kanji, get none, as in print (走る: はし over 走, る bare).
+#[derive(serde::Serialize, Clone, Debug, PartialEq, Default)]
+pub struct Ruby {
+    pub text: String,
+    pub ruby: String,
+}
+
+fn is_kanji(c: char) -> bool {
+    matches!(c, '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}' | '々' | '〆' | 'ヶ')
+}
+
+/// True when `text` has a kanji: a line that can take furigana.
+pub fn has_kanji(text: &str) -> bool {
+    text.chars().any(is_kanji)
+}
+
+fn to_hiragana(c: char) -> char {
+    match c {
+        'ァ'..='ヶ' => char::from_u32(c as u32 - 0x60).unwrap_or(c),
+        _ => c,
+    }
+}
+
+/// A line cut into words with their furigana (what Mini Island showed, from
+/// the same IPADIC readings as the romaji). The words put back together are
+/// the line as written.
+pub fn line_to_ruby(text: &str) -> Vec<Ruby> {
+    let Some(segmenter) = segmenter() else { return vec![Ruby { text: text.to_string(), ruby: String::new() }] };
+    let Ok(mut tokens) = segmenter.segment(Cow::Borrowed(text)) else { return vec![Ruby { text: text.to_string(), ruby: String::new() }] };
+    let mut out: Vec<Ruby> = Vec::new();
+    for token in tokens.iter_mut() {
+        let surface = token.surface.as_ref().to_string();
+        let details: Vec<String> = token.details().iter().map(|s| s.to_string()).collect();
+        let reading = details.get(7).filter(|r| !r.is_empty() && r.as_str() != "*").cloned();
+        match (has_kanji(&surface), reading) {
+            (true, Some(r)) => out.extend(split_okurigana(&surface, &r.chars().map(to_hiragana).collect::<String>())),
+            _ => out.push(Ruby { text: surface, ruby: String::new() }),
+        }
+    }
+    out
+}
+
+/// A word with kanji and its hiragana reading, its kana prefix and suffix
+/// (the same in both) left bare: 走る/はしる → 走(はし) る; お茶/おちゃ → お 茶(ちゃ).
+/// When the kana inside don't line up, the whole word takes the reading.
+fn split_okurigana(surface: &str, reading: &str) -> Vec<Ruby> {
+    let s: Vec<char> = surface.chars().collect();
+    let r: Vec<char> = reading.chars().collect();
+    let same = |a: char, b: char| to_hiragana(a) == b;
+    let mut pre = 0;
+    while pre < s.len() && pre < r.len() && !is_kanji(s[pre]) && same(s[pre], r[pre]) {
+        pre += 1;
+    }
+    let mut suf = 0;
+    while suf < s.len() - pre && suf < r.len() - pre && !is_kanji(s[s.len() - 1 - suf]) && same(s[s.len() - 1 - suf], r[r.len() - 1 - suf]) {
+        suf += 1;
+    }
+    let core: String = s[pre..s.len() - suf].iter().collect();
+    let core_reading: String = r[pre..r.len() - suf].iter().collect();
+    let mut out = Vec::new();
+    if pre > 0 {
+        out.push(Ruby { text: s[..pre].iter().collect(), ruby: String::new() });
+    }
+    if core_reading.is_empty() || core_reading == core {
+        out.push(Ruby { text: core, ruby: String::new() });
+    } else {
+        out.push(Ruby { text: core, ruby: core_reading });
+    }
+    if suf > 0 {
+        out.push(Ruby { text: s[s.len() - suf..].iter().collect(), ruby: String::new() });
+    }
+    out
+}
+
 /// Drops the kana readings some lyrics put in brackets after a word
 /// (箱の（ばこの）): romanised, they read twice ("hako no (bako no)"). A sung
 /// echo stays: its brackets repeat what came just before
@@ -267,6 +343,25 @@ fn syllable(k: &[char]) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn furigana_sits_over_the_kanji_only() {
+        let r = |t: &str, ruby: &str| Ruby { text: t.into(), ruby: ruby.into() };
+        assert_eq!(split_okurigana("走る", "はしる"), vec![r("走", "はし"), r("る", "")]);
+        assert_eq!(split_okurigana("お茶", "おちゃ"), vec![r("お", ""), r("茶", "ちゃ")]);
+        assert_eq!(split_okurigana("運命", "うんめい"), vec![r("運命", "うんめい")]);
+        assert_eq!(split_okurigana("取り扱い", "とりあつかい"), vec![r("取り扱", "とりあつか"), r("い", "")], "kana inside: the whole core");
+    }
+
+    #[test]
+    fn a_line_cut_into_words_keeps_its_text() {
+        let line = "10月無口な君を忘れる";
+        let words = line_to_ruby(line);
+        assert_eq!(words.iter().map(|w| w.text.as_str()).collect::<String>(), line);
+        assert!(words.iter().any(|w| w.text == "君" && w.ruby == "きみ"), "{words:?}");
+        assert!(words.iter().any(|w| w.text == "忘" && w.ruby == "わす"), "{words:?}");
+        assert!(words.iter().filter(|w| !w.ruby.is_empty()).all(|w| has_kanji(&w.text)), "furigana only over kanji");
+    }
 
     #[test]
     fn kana_becomes_hepburn() {

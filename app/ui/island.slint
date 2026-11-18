@@ -273,11 +273,26 @@ export struct ControlView {
     note: string,
 }
 
+// A word of a lyric line and its furigana ("" for a word without kanji).
+export struct RubySeg {
+    text: string,
+    ruby: string,
+}
+
+// One row of a lyric line with furigana: the words that fit the card's width
+// (Rust wraps them: a layout of words over readings doesn't wrap by itself).
+export struct RubyRow {
+    segs: [RubySeg],
+}
+
 export struct LyricLine {
     text: string,
     // A Japanese line's reading in Latin letters ("" otherwise), shown under it.
     romaji: string,
     current: bool,
+    // The line in rows of words with furigana over their kanji (the あ switch).
+    has-ruby: bool,
+    rows: [RubyRow],
 }
 
 export struct Music {
@@ -1422,6 +1437,7 @@ component LyricsPage inherits Rectangle {
     in-out property <bool> romaji: true;
     in property <bool> live;
     callback command(string);
+    callback text-width(length);
     // The player on the left (cover and title, progress, controls), the lines beside it.
     property <length> side: 280px;
     property <length> pad: 16px;
@@ -1481,6 +1497,10 @@ component LyricsPage inherits Rectangle {
         width: parent.width - root.side - 1px - 36px;
         height: parent.height;
         clip: true;
+        // The text's width (the card less the lines' padding), for Rust to
+        // wrap the furigana rows to it.
+        init => { root.text-width(self.width - 36px); }
+        changed width => { root.text-width(self.width - 36px); }
         list := VerticalLayout {
             property <length> sung-y;
             property <length> sung-h: 24px;
@@ -1501,13 +1521,40 @@ component LyricsPage inherits Rectangle {
                 opacity: self.edge;
                 // Romaji: the line's own reading (empty for a non-Japanese line).
                 property <string> ro: line.romaji;
-                Text {
+                property <color> ink: i == root.music.lyric-index ? Mini.ink : Mini.wash.with-alpha(min(1, 0.361 * Mini.wk));
+                if !(root.furigana && line.has-ruby) : Text {
                     text: line.text;
                     wrap: word-wrap;
                     font-size: 14.5px;
                     font-weight: 600;
-                    color: i == root.music.lyric-index ? Mini.ink : Mini.wash.with-alpha(min(1, 0.361 * Mini.wk));
+                    color: line-row.ink;
                     animate color { duration: 300ms; }
+                }
+                // Furigana: each word with its reading small over its kanji, as Mini Island did.
+                if root.furigana && line.has-ruby : VerticalLayout {
+                    spacing: 1px;
+                    for row in line.rows : HorizontalLayout {
+                        alignment: start;
+                        for s in row.segs : VerticalLayout {
+                            spacing: -1px;
+                            Text {
+                                height: 11px;
+                                text: s.ruby;
+                                font-size: 8.5px;
+                                horizontal-alignment: center;
+                                vertical-alignment: bottom;
+                                color: i == root.music.lyric-index ? Mini.wash.with-alpha(min(1, 0.85 * Mini.wk)) : Mini.wash.with-alpha(min(1, 0.3 * Mini.wk));
+                            }
+                            Text {
+                                text: s.text;
+                                font-size: 14.5px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                color: line-row.ink;
+                                animate color { duration: 300ms; }
+                            }
+                        }
+                    }
                 }
                 if line-row.ro != "" && root.romaji : Text {
                     text: line-row.ro;
@@ -2173,6 +2220,8 @@ export component Island inherits Window {
     callback control-device(string, string);
     // The Music page's big cover measured itself (Rust sizes its picture to it).
     callback music-cover-size(length);
+    // The lyrics card's text width (Rust wraps the furigana rows to it).
+    callback lyric-text-width(length);
     callback notif-clear();
     callback action-clicked(string);
     // A question answered from its row on the Notifications page: its id, "allow" / "deny".
@@ -2695,6 +2744,7 @@ export component Island inherits Window {
                             japanese: root.lyrics-japanese;
                             live: root.expanded && (root.active-tab == "music" || root.active-tab == "lyrics");
                             command(c) => { root.music-command(c); }
+                            text-width(w) => { root.lyric-text-width(w); }
                         }
                         if root.music.lyrics.length == 0 : MusicWide {
                             width: parent.width;
