@@ -1070,6 +1070,11 @@ fn refresh(ui: &Island) {
         let ytm = ytm_live(state, now);
         let capsule_line = if line { capsule_lyric(state) } else { String::new() };
         ui.set_capsule_line(capsule_line.as_str().into());
+        let (sweep_at, sweep_len) = if line { capsule_sweep(state) } else { (0, 0) };
+        ui.set_sweep_len(sweep_len);
+        ui.set_sweep_playing(state.music.playing);
+        // Last: setting it restarts the sweep's clock in the UI.
+        ui.set_sweep_at(sweep_at);
         let capsule_ro = if line { capsule_lyric_line(state).map(|l| l.romaji.clone()).unwrap_or_default() } else { String::new() };
         ui.set_capsule_romaji(capsule_ro.as_str().into());
         let capsule_long = lyric_width(&capsule_line) > LYRIC_ONE_LINE;
@@ -1435,6 +1440,19 @@ fn capsule_lyric(state: &State) -> String {
 }
 
 /// The line being sung now, for the capsule (its text and romaji).
+/// The capsule lyric's karaoke sweep: how far into its line the song is (ms)
+/// and how long the line lasts (ms, until the next line, at most 12 s).
+fn capsule_sweep(state: &State) -> (i32, i32) {
+    let snap = &state.music;
+    let Some(l) = state.lyrics.as_ref().filter(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty()) else { return (0, 0) };
+    let shift = island_lyrics::intro_shift(snap.duration, l.duration) + state.lyrics_nudge;
+    let at = snap.position_now() - shift;
+    let Some(i) = island_lyrics::line_at(&l.lines, at) else { return (0, 0) };
+    let start = l.lines[i].time;
+    let end = l.lines.get(i + 1).map_or(start + 5.0, |n| n.time).min(start + 12.0);
+    (((at - start).max(0.0) * 1000.0) as i32, ((end - start).max(0.3) * 1000.0) as i32)
+}
+
 fn capsule_lyric_line(state: &State) -> Option<&island_lyrics::Line> {
     let snap = &state.music;
     let l = state.lyrics.as_ref().filter(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty())?;
