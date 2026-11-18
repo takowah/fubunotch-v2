@@ -99,6 +99,8 @@ pub struct Hit {
     pub video_id: String,
     pub title: String,
     pub duration: Option<f64>,
+    /// The song's cover (the largest thumbnail), when the hit has one.
+    pub thumb: Option<String>,
 }
 
 /// The song hits of a search answer, in its order.
@@ -110,7 +112,11 @@ pub fn hits(answer: &Value) -> Vec<Hit> {
             let texts: Vec<&str> = all(item.get("flexColumns")?, "text").into_iter().filter_map(Value::as_str).collect();
             let title = texts.first()?.to_string();
             let duration = texts.iter().find_map(|t| clock(t));
-            Some(Hit { video_id, title, duration })
+            let thumb = item
+                .get("thumbnail")
+                .map(|t| all(t, "url").into_iter().filter_map(Value::as_str).last().map(str::to_string))
+                .flatten();
+            Some(Hit { video_id, title, duration, thumb })
         })
         .collect()
 }
@@ -247,6 +253,23 @@ fn lines_of(http: &ureq::Agent, hit: &Hit) -> Option<Vec<Line>> {
 /// song's own version first), then LRCLIB under the title YouTube Music gives
 /// in the song's own script ("10月無口な君を忘れる"), then another version's
 /// lines as a last resort. Found, None, or Error when YouTube could not be asked.
+/// The cover of the best match for a song, at about 300 px (Google's image URLs
+/// take their size after "=": "=w60-h60-..." becomes "=w300-h300-...").
+pub fn cover(http: &ureq::Agent, query: &Query) -> Option<String> {
+    let title = query.title.trim();
+    if title.is_empty() {
+        return None;
+    }
+    let search = format!("{title} {}", query.artist.trim());
+    let answer = call(http, "search", web_client(), json!({ "query": search.trim(), "params": SONGS_FILTER }))?;
+    let found = hits(&answer);
+    let url = candidates(&found, query).first()?.thumb.clone()?;
+    Some(match url.split_once("=w") {
+        Some((base, _)) => format!("{base}=w300-h300-l90-rj"),
+        None => url,
+    })
+}
+
 pub fn fetch(http: &ureq::Agent, query: &Query) -> Lyrics {
     let title = query.title.trim();
     if title.is_empty() {

@@ -207,6 +207,9 @@ struct State {
     music_art: Option<slint::Image>,
     /// The cover's colour (accent.rs), the island's while the song plays.
     music_accent: Option<(u8, u8, u8)>,
+    /// A browser's song: its cover from YouTube Music (kept over the browser's
+    /// own icon, which is all a browser hands over), by the lyrics key.
+    cover_for: String,
     /// The lyrics of `lyrics_key` (a song), or where the search is.
     lyrics_key: String,
     lyrics: Option<island_lyrics::Lyrics>,
@@ -1404,7 +1407,8 @@ fn music_view(
         playing: snap.playing,
         position: fraction,
         elapsed: local_time::mm_ss(position).into(),
-        remaining: format!("-{}", local_time::mm_ss((snap.duration - position).max(0.0))).into(),
+        // A browser often reports no length (or a wrong one): no "-0:00" then.
+        remaining: if snap.duration > position + 0.5 { format!("-{}", local_time::mm_ss(snap.duration - position)).into() } else { SharedString::default() },
         has_art: art.is_some(),
         art: art.clone().unwrap_or_default(),
         has_accent: accent.is_some(),
@@ -1435,7 +1439,8 @@ fn music_view(
 fn on_music(ui: &Island, snap: music::Snapshot) {
     with_state(|state| {
         let now = now_ms(state.started);
-        if state.music.art != snap.art {
+        let ytm_cover = !state.cover_for.is_empty() && state.cover_for == state.lyrics_key;
+        if state.music.art != snap.art && !ytm_cover {
             state.music_art = snap.art.as_ref().and_then(|rgba| {
                 (rgba.len() == (music::ART_PX * music::ART_PX * 4) as usize).then(|| {
                     let mut rounded = rgba.clone();
@@ -1525,10 +1530,33 @@ fn fetch_lyrics(ui: &Island) {
         }
         state.lyrics_key = key.clone();
         state.lyrics = None;
-        Some((key, query, sources))
+        state.cover_for.clear();
+        Some((key, query, sources, browser && sources.youtube))
     })
     .flatten();
-    let Some((key, query, sources)) = job else { return };
+    let Some((key, query, sources, want_cover)) = job else { return };
+    // A browser's song: its real cover from YouTube Music, in its own thread.
+    if want_cover {
+        let weak = ui.as_weak();
+        let (key, query) = (key.clone(), query.clone());
+        std::thread::spawn(move || {
+            let Some(rgba) = island_lyrics::cover(&query).and_then(|b| music::decode_bytes(&b)) else { return };
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                with_state(|state| {
+                    if state.lyrics_key != key || rgba.len() != (music::ART_PX * music::ART_PX * 4) as usize {
+                        return;
+                    }
+                    let mut rounded = rgba.clone();
+                    round_cover(&mut rounded, music::ART_PX);
+                    state.music_art = Some(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rounded, music::ART_PX, music::ART_PX)));
+                    state.music_accent = accent::of_rgba(&rgba);
+                    state.cover_for = key;
+                });
+                refresh(&ui);
+            });
+        });
+    }
     let weak = ui.as_weak();
     std::thread::spawn(move || {
         let lyrics = island_lyrics::resolve(&query, sources);
@@ -2800,6 +2828,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             music_art: None,
             music_accent: None,
             lyrics_key: String::new(),
+            cover_for: String::new(),
             lyrics: None,
             lyrics_model: None,
             ytm: None,

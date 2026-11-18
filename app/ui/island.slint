@@ -989,6 +989,7 @@ component MusicWide inherits Rectangle {
         Text { text: root.music.elapsed; color: Mini.text-2; font-size: 11px; min-width: 34px; vertical-alignment: center; }
         WaveBar {
             horizontal-stretch: 1;
+            visible: root.music.remaining != "";
             y: 26px / 2 + 2px - self.height;
             value: root.music.position;
             playing: root.music.playing;
@@ -1168,6 +1169,7 @@ component LyricsPage inherits Rectangle {
         Text { text: root.music.elapsed; color: Mini.text-2; font-size: 11px; min-width: 34px; vertical-alignment: center; }
         WaveBar {
             horizontal-stretch: 1;
+            visible: root.music.remaining != "";
             y: 22px / 2 + 2px - self.height;
             value: root.music.position;
             playing: root.music.playing;
@@ -1685,7 +1687,8 @@ export component Island inherits Window {
             height: parent.height - 2px;
             source: root.bg;
             image-fit: fill;
-            opacity: !root.hidden && abs(root.island-w - root.target-w) < 1px && abs(root.island-h - root.target-h) < 1px ? 1 : 0;
+            // Stays while the island springs (stretched for that moment), gone only when hidden.
+            opacity: !root.hidden ? 1 : 0;
             animate opacity { duration: 240ms; }
         }
 
