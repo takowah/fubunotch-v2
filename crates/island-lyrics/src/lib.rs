@@ -328,6 +328,16 @@ pub fn worth_looking_up(query: &Query) -> bool {
 
 /// LRCLIB, then YouTube Music when allowed (also when LRCLIB is down), then
 /// romaji for Japanese lines. Blocking.
+/// The song's cover from YouTube Music, as image bytes (JPEG/PNG), for a player
+/// that gives none of its own (a browser hands over its own icon instead).
+pub fn cover(query: &Query) -> Option<Vec<u8>> {
+    let http = agent();
+    let url = ytm::cover(&http, query)?;
+    let mut res = http.get(&url).call().ok()?;
+    let bytes = res.body_mut().with_config().limit(4 * 1024 * 1024).read_to_vec().ok()?;
+    (!bytes.is_empty()).then_some(bytes)
+}
+
 pub fn resolve(query: &Query, sources: Sources) -> Lyrics {
     if (!sources.lrclib && !sources.youtube) || !worth_looking_up(query) {
         return Lyrics::of(Status::None);

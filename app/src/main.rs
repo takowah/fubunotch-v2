@@ -69,8 +69,8 @@ const MEDIA_RADIUS: f32 = 24.0;
 const MUSIC_EVENTS_AFTER: u64 = 4_000;
 /// Line's capsule: as wide as its line (plus the cover and the bars, $MINI_PAD),
 /// between the small pill and $MINI_MAX_W; a longer line is drawn smaller.
-const COMPACT_LYRIC: (f32, f32) = (222.0, 42.0);
-const LYRIC_PAD: f32 = 82.0;
+const COMPACT_LYRIC: (f32, f32) = (240.0, 56.0);
+const LYRIC_PAD: f32 = 106.0;
 const LYRIC_MAX_W: f32 = 570.0;
 /// A lyric's width per Latin character at 17.25 px (kana and kanji count twice).
 const LYRIC_CHAR_W: f32 = 8.6;
@@ -215,6 +215,9 @@ struct State {
     music_art: Option<slint::Image>,
     /// The cover's colour (accent.rs), the island's while the song plays.
     music_accent: Option<(u8, u8, u8)>,
+    /// A browser's song: its cover from YouTube Music (kept over the browser's
+    /// own icon, which is all a browser hands over), by the lyrics key.
+    cover_for: String,
     /// The lyrics of `lyrics_key` (a song), or where the search is.
     lyrics_key: String,
     lyrics: Option<island_lyrics::Lyrics>,
@@ -937,10 +940,8 @@ fn refresh(ui: &Island) {
             tab_ids.push(("notifications", "Notifications"));
         }
         if state.music.has_session {
+            // One tab: the player, with the lyrics beside it when the song has some.
             tab_ids.push(("music", "Music"));
-            if has_lyrics {
-                tab_ids.push(("lyrics", "Lyrics"));
-            }
         }
         if state.settings.is_on("prayer") {
             tab_ids.push(("prayer", "Prayer"));
@@ -1023,13 +1024,17 @@ fn refresh(ui: &Island) {
         *NOTIF_APPS.lock().unwrap_or_else(|e| e.into_inner()) = state.settings.notifications.filter();
         let rating = state.data.ratings.get(&song_key(&state.music)).copied().unwrap_or(0);
         // The pin lives on the Lyrics page: leaving it lets the list close again.
-        if state.active_tab != "lyrics" {
+        if state.active_tab == "lyrics" {
+            state.active_tab = "music".into();
+        }
+        if state.active_tab != "music" {
             state.held = false;
         }
         ui.set_held(state.held);
         // Line stays switched on, but shows only while there is music (a
         // browser's session drops out for a moment between songs).
-        let line = state.line_held && state.music.has_session;
+        // Like Mini Island: while a song plays the lyric shows by itself; Line keeps it when paused too.
+        let line = (state.line_held || state.music.playing) && state.music.has_session;
         ui.set_line_held(line);
         let ytm = ytm_live(state, now);
         let capsule_line = if line { capsule_lyric(state) } else { String::new() };
@@ -1043,6 +1048,12 @@ fn refresh(ui: &Island) {
         // Modes: a new notice pops the hidden island up; the compact island
         // goes up hide_after() later unless someone waits for an answer.
         let front_kind = view.front.map(|a| a.kind);
+        // Claude Code busy running a tool doesn't hide the song: the lyric stays,
+        // its count shows as "+N". Questions and "finished" notices still come first.
+        let song_over = state.music.has_session
+            && state.music.playing
+            && view.front.is_some_and(|a| matches!(a.kind, Kind::Status | Kind::Progress) && a.source.starts_with("claude"));
+        ui.set_song_over(song_over);
         // Do not disturb comes on with a Focus round and goes with its pause or stop.
         let focus_running = state.focus.running();
         if focus_running != state.last_focus_running {
@@ -1142,8 +1153,8 @@ fn refresh(ui: &Island) {
             // Each page as tall as its content, as Mini Island's list.
             Mode::Expanded => {
                 let page = match state.active_tab.as_str() {
+                    "music" if has_lyrics => sizes.expanded_tall_h - EXPANDED_CHROME,
                     "music" | "prayer" => page_h,
-                    "lyrics" => sizes.expanded_tall_h - EXPANDED_CHROME,
                     "accounts" => accounts_h.max(page_h),
                     _ if state.notifications.is_empty() && ask_count == 0 => page_h,
                     _ => {
@@ -1163,7 +1174,12 @@ fn refresh(ui: &Island) {
                 let w = if capsule_line.is_empty() {
                     COMPACT_SONG.0
                 } else {
-                    (lyric_width(&capsule_line) as f32 * LYRIC_CHAR_W + LYRIC_PAD).clamp(COMPACT_LYRIC.0, LYRIC_MAX_W)
+                    {
+                        // The romaji under it is often the longer of the two.
+                        let ro = capsule_lyric_line(state).map(|l| l.romaji.chars().count()).unwrap_or(0) as f32 * 6.6;
+                        (lyric_width(&capsule_line) as f32 * LYRIC_CHAR_W).max(ro) + LYRIC_PAD
+                    }
+                    .clamp(COMPACT_LYRIC.0, LYRIC_MAX_W)
                 };
                 let under = match state.arbiter.view().front.filter(|_| line_notice) {
                     Some(a) if !a.body.trim().is_empty() => LINE_NOTICE_H,
@@ -1175,7 +1191,7 @@ fn refresh(ui: &Island) {
             Mode::Compact if notice && front_id.as_deref().is_some_and(|id| id.starts_with("music:event")) => COMPACT_MEDIA,
             Mode::Compact if notice => COMPACT_NOTICE,
             Mode::Compact if front_kind == Some(Kind::Ask) => COMPACT_NOTICE,
-            Mode::Compact if front_kind == Some(Kind::Ambient) && state.music.has_session => COMPACT_SONG,
+            Mode::Compact if (front_kind == Some(Kind::Ambient) || song_over) && state.music.has_session => COMPACT_SONG,
             Mode::Compact if front_id.is_some() => COMPACT_BUSY,
             Mode::Compact => {
                 // Room for what the idle island shows next to the time.
@@ -1439,7 +1455,8 @@ fn music_view(
         playing: snap.playing,
         position: fraction,
         elapsed: local_time::mm_ss(position).into(),
-        remaining: format!("-{}", local_time::mm_ss((snap.duration - position).max(0.0))).into(),
+        // A browser often reports no length (or a wrong one): no "-0:00" then.
+        remaining: if snap.duration > position + 0.5 { format!("-{}", local_time::mm_ss(snap.duration - position)).into() } else { SharedString::default() },
         has_art: art.is_some(),
         art: art.clone().unwrap_or_default(),
         has_accent: accent.is_some(),
@@ -1470,7 +1487,8 @@ fn music_view(
 fn on_music(ui: &Island, snap: music::Snapshot) {
     with_state(|state| {
         let now = now_ms(state.started);
-        if state.music.art != snap.art {
+        let ytm_cover = !state.cover_for.is_empty() && state.cover_for == state.lyrics_key;
+        if state.music.art != snap.art && !ytm_cover {
             state.music_art = snap.art.as_ref().and_then(|rgba| {
                 (rgba.len() == (music::ART_PX * music::ART_PX * 4) as usize).then(|| {
                     let mut rounded = rgba.clone();
@@ -1560,10 +1578,33 @@ fn fetch_lyrics(ui: &Island) {
         }
         state.lyrics_key = key.clone();
         state.lyrics = None;
-        Some((key, query, sources))
+        state.cover_for.clear();
+        Some((key, query, sources, browser && sources.youtube))
     })
     .flatten();
-    let Some((key, query, sources)) = job else { return };
+    let Some((key, query, sources, want_cover)) = job else { return };
+    // A browser's song: its real cover from YouTube Music, in its own thread.
+    if want_cover {
+        let weak = ui.as_weak();
+        let (key, query) = (key.clone(), query.clone());
+        std::thread::spawn(move || {
+            let Some(rgba) = island_lyrics::cover(&query).and_then(|b| music::decode_bytes(&b)) else { return };
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                with_state(|state| {
+                    if state.lyrics_key != key || rgba.len() != (music::ART_PX * music::ART_PX * 4) as usize {
+                        return;
+                    }
+                    let mut rounded = rgba.clone();
+                    round_cover(&mut rounded, music::ART_PX);
+                    state.music_art = Some(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rounded, music::ART_PX, music::ART_PX)));
+                    state.music_accent = accent::of_rgba(&rgba);
+                    state.cover_for = key;
+                });
+                refresh(&ui);
+            });
+        });
+    }
     let weak = ui.as_weak();
     std::thread::spawn(move || {
         let lyrics = island_lyrics::resolve(&query, sources);
@@ -2836,6 +2877,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             music_art: None,
             music_accent: None,
             lyrics_key: String::new(),
+            cover_for: String::new(),
             lyrics: None,
             lyrics_model: None,
             ytm: None,

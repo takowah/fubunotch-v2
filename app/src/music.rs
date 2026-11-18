@@ -77,6 +77,9 @@ struct Watch {
     /// The artwork of the song it was read for, so it is decoded once a song.
     art_for: String,
     art: Option<Vec<u8>>,
+    /// The art of the song before: a browser still hands it over for a moment
+    /// after the next song's title arrives.
+    before: Option<Vec<u8>>,
 }
 
 static WATCH: Mutex<Option<Watch>> = Mutex::new(None);
@@ -184,7 +187,7 @@ pub fn start(sink: impl Fn(Snapshot) + Send + Sync + 'static) {
             Ok(())
         });
         let _ = manager.CurrentSessionChanged(&changed);
-        *WATCH.lock().unwrap_or_else(|e| e.into_inner()) = Some(Watch { manager, session: None, art_for: String::new(), art: None });
+        *WATCH.lock().unwrap_or_else(|e| e.into_inner()) = Some(Watch { manager, session: None, art_for: String::new(), art: None, before: None });
         follow_current_session();
     });
 }
@@ -288,14 +291,56 @@ fn publish() {
         Some(art) => art,
         None => {
             let art = props.ok().and_then(|p| p.Thumbnail().ok()).and_then(|t| decode_art(&t).ok());
-            if let Some(w) = WATCH.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
-                w.art_for = key;
-                w.art = art.clone();
+            let mut guard = WATCH.lock().unwrap_or_else(|e| e.into_inner());
+            match guard.as_mut() {
+                // Still the last song's picture: not this song's yet. Kept out of the
+                // cache, so the next change (the new picture arriving) reads it again.
+                Some(w) if art.is_some() && (art == w.art || art == w.before) && !w.art_for.is_empty() && w.art_for != key => {
+                    w.before = w.art.take();
+                    w.art_for.clear();
+                    None
+                }
+                Some(w) if art.is_some() && art == w.before => None,
+                Some(w) => {
+                    if w.art_for != key && w.art.is_some() {
+                        w.before = w.art.take();
+                    }
+                    w.art_for = key;
+                    w.art = art.clone();
+                    art
+                }
+                None => art,
             }
-            art
         }
     };
     send(snap);
+}
+
+/// Image bytes (a downloaded cover) to ART_PX square RGBA.
+pub fn decode_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
+    let stream = InMemoryRandomAccessStream::new().ok()?;
+    let writer = DataWriter::CreateDataWriter(&stream).ok()?;
+    writer.WriteBytes(bytes).ok()?;
+    writer.StoreAsync().ok()?.get().ok()?;
+    writer.DetachStream().ok()?;
+    stream.Seek(0).ok()?;
+    let decoder = BitmapDecoder::CreateAsync(&stream).ok()?.get().ok()?;
+    let transform = BitmapTransform::new().ok()?;
+    transform.SetScaledWidth(ART_PX).ok()?;
+    transform.SetScaledHeight(ART_PX).ok()?;
+    let pixels = decoder
+        .GetPixelDataTransformedAsync(
+            BitmapPixelFormat::Rgba8,
+            BitmapAlphaMode::Straight,
+            &transform,
+            ExifOrientationMode::IgnoreExifOrientation,
+            ColorManagementMode::DoNotColorManage,
+        )
+        .ok()?
+        .get()
+        .ok()?;
+    Some(pixels.DetachPixelData().ok()?.to_vec())
 }
 
 fn decode_art(thumbnail: &windows::Storage::Streams::IRandomAccessStreamReference) -> windows::core::Result<Vec<u8>> {
