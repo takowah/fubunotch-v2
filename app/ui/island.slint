@@ -238,7 +238,16 @@ export global Mini {
     in-out property <color> wash: #ffffff;
     // The body is light (white, yellow, pink): app colours get darker to read.
     in-out property <bool> light;
-    out property <color> edge: self.wash.with-alpha(0.16);
+    // Fills over a light body need more ink than over a dark one to show as much.
+    out property <float> wk: self.light ? 1.9 : 1;
+    out property <color> edge: self.wash.with-alpha(0.16 * self.wk);
+    // Status colours (next prayer, charging, Caps Lock, counts): Apple's on a
+    // dark body, deeper ones on a light body so they still read there.
+    out property <color> good: self.light ? #1a8f3c : #30d158;
+    out property <color> warn: self.light ? #b86a00 : #ff9f0a;
+    out property <color> bad: self.light ? #d1291f : #ff453a;
+    // Marks that are neither (a later prayer's dot): a grey for the body.
+    out property <color> mute: self.light ? #8a8a90 : #8e8e93;
     // The open list's colour (notifications, accounts).
     out property <color> neutral: #6e6e76;
     // The hidden island's handle.
@@ -383,7 +392,7 @@ component Tinted inherits Rectangle {
     in property <color> tint;
     in property <bool> lit;
     border-radius: 14px;
-    background: root.lit ? Mini.wash.with-alpha(0.02) : transparent;
+    background: root.lit ? Mini.wash.with-alpha(min(1, 0.02 * Mini.wk)) : transparent;
     Fade {
         width: parent.width;
         height: parent.height;
@@ -522,7 +531,7 @@ component WaveBar inherits Rectangle {
         width: parent.width;
         height: root.small ? 1px : 2px;
         border-radius: self.height / 2;
-        background: Mini.wash.with-alpha(0.22);
+        background: Mini.wash.with-alpha(min(1, 0.22 * Mini.wk));
     }
     if !root.small : Rectangle {
         width: parent.width;
@@ -569,7 +578,7 @@ component VolumeSlider inherits Rectangle {
     in property <float> value;
     in property <color> tint;
     height: 18px;
-    Rectangle { y: (parent.height - self.height) / 2; height: 4px; border-radius: 2px; background: Mini.wash.with-alpha(0.2); }
+    Rectangle { y: (parent.height - self.height) / 2; height: 4px; border-radius: 2px; background: Mini.wash.with-alpha(min(1, 0.2 * Mini.wk)); }
     Rectangle {
         x: 0;
         y: (parent.height - self.height) / 2;
@@ -597,7 +606,7 @@ component MediaButton inherits Rectangle {
     width: 28px;
     height: 28px;
     border-radius: 14px;
-    background: area.has-hover || root.ring ? Mini.wash.with-alpha(0.18) : transparent;
+    background: area.has-hover || root.ring ? Mini.wash.with-alpha(min(1, 0.18 * Mini.wk)) : transparent;
     animate background { duration: 120ms; }
     Glyph { text: root.glyph; font-size: root.glyph-size; color: Mini.ink; }
     area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
@@ -612,16 +621,16 @@ component PageToggle inherits Rectangle {
     width: 24px;
     height: 24px;
     border-radius: 12px;
-    background: area.has-hover ? Mini.wash.with-alpha(0.4) : root.on ? Mini.wash.with-alpha(0.333) : Mini.wash.with-alpha(0.149);
+    background: area.has-hover ? Mini.wash.with-alpha(min(1, 0.4 * Mini.wk)) : root.on ? (Mini.light ? #ffffff : Mini.wash.with-alpha(0.333)) : Mini.wash.with-alpha(min(1, 0.149 * Mini.wk));
     animate background { duration: 120ms; }
-    if root.glyph : Glyph { text: root.label; font-size: 11px; color: root.on ? Mini.ink : Mini.wash.with-alpha(0.6); }
+    if root.glyph : Glyph { text: root.label; font-size: 11px; color: root.on ? Mini.ink : Mini.wash.with-alpha(min(1, 0.6 * Mini.wk)); }
     if !root.glyph : Text {
         width: 100%;
         height: 100%;
         text: root.label;
         font-size: 10.5px;
         font-weight: 600;
-        color: root.on ? Mini.ink : Mini.wash.with-alpha(0.6);
+        color: root.on ? Mini.ink : Mini.wash.with-alpha(min(1, 0.6 * Mini.wk));
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -640,7 +649,7 @@ component QuickButton inherits Rectangle {
     width: 30px;
     height: 30px;
     border-radius: 15px;
-    background: root.on ? Mini.wash.with-alpha(0.251) : area.has-hover ? Mini.wash.with-alpha(0.18) : Mini.wash.with-alpha(0.078);
+    background: root.on ? (Mini.light ? #ffffff : Mini.wash.with-alpha(0.251)) : area.has-hover ? Mini.wash.with-alpha(min(1, 0.18 * Mini.wk)) : Mini.wash.with-alpha(min(1, 0.078 * Mini.wk));
     animate background { duration: 180ms; }
     Glyph { text: root.glyph; font-size: 13px; color: area.has-hover || root.on ? Mini.ink : Mini.text-3; animate color { duration: 180ms; } }
     if root.badge > 0 : Rectangle {
@@ -683,7 +692,7 @@ component SysIcon inherits Path {
     viewbox-width: 24;
     viewbox-height: 24;
     stroke-width: 1.8px;
-    stroke: name == "bolt" || name == "prayer" ? #30d158 : name == "caps-on" ? #ff9f0a
+    stroke: name == "bolt" || name == "prayer" ? Mini.good : name == "caps-on" ? Mini.warn
         : (name == "headphones-off" || name == "wifi-off" || name == "volume-off" || name == "caps-off") ? Mini.label : Mini.ink;
     commands: name == "prayer" ? Glyphs.mosque
         : name == "headphones" ? "M 4 15 V 12 A 8 8 0 0 1 20 12 V 15 M 4 15 H 7 V 20 H 4 Z M 20 15 H 17 V 20 H 20 Z"
@@ -715,7 +724,7 @@ component BatteryIcon inherits Rectangle {
             x: 2px; y: 2px; height: parent.height - 4px;
             width: max(1px, (parent.width - 4px) * clamp(root.level, 0, 1));
             border-radius: 1.5px;
-            background: root.charging ? #30d158 : root.level <= 0.2 ? #ff453a : Mini.ink;
+            background: root.charging ? Mini.good : root.level <= 0.2 ? Mini.bad : Mini.ink;
         }
     }
     Rectangle { x: 20.5px; y: 4px; width: 1.5px; height: 4px; background: Mini.text-2; }
@@ -743,7 +752,7 @@ component ActionPill inherits Rectangle {
     width: t.preferred-width + 20px;
     height: 24px;
     border-radius: 12px;
-    background: area.has-hover ? Mini.wash.with-alpha(0.333) : Mini.wash.with-alpha(0.2);
+    background: area.has-hover ? Mini.wash.with-alpha(min(1, 0.333 * Mini.wk)) : Mini.wash.with-alpha(min(1, 0.2 * Mini.wk));
     animate background { duration: 120ms; }
     t := Text { x: 10px; width: self.preferred-width; height: 100%; vertical-alignment: center; text: root.label; color: Mini.ink; font-size: 11.5px; font-weight: 600; }
     area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
@@ -754,7 +763,7 @@ component Bar inherits Rectangle {
     in property <color> tint: Mini.ink;
     height: 4px;
     border-radius: 2px;
-    background: Mini.wash.with-alpha(0.2);
+    background: Mini.wash.with-alpha(min(1, 0.2 * Mini.wk));
     Rectangle {
         x: 0;
         width: max(parent.height, parent.width * clamp(root.value, 0, 1));
@@ -810,7 +819,7 @@ component Marquee inherits Rectangle {
             y: 0;
             height: parent.height;
             text: root.line;
-            color: Mini.wash.with-alpha(0.851);
+            color: Mini.wash.with-alpha(min(1, 0.851 * Mini.wk));
             font-size: 11px;
             font-weight: 600;
             vertical-alignment: center;
@@ -876,7 +885,7 @@ component MusicCard inherits Rectangle {
         height: 24px;
         Rectangle {
             width: 24px;
-            Glyph { text: Glyphs.volume; font-size: 12px; color: Mini.wash.with-alpha(0.902); }
+            Glyph { text: Glyphs.volume; font-size: 12px; color: Mini.wash.with-alpha(min(1, 0.902 * Mini.wk)); }
         }
         VolumeSlider { horizontal-stretch: 1; value: root.volume; tint: Paint.lift(root.accent, 0.35); y: (parent.height - self.height) / 2; }
         Rectangle { width: 2px; }
@@ -908,8 +917,8 @@ component MusicCard inherits Rectangle {
                 width: 22px;
                 height: 22px;
                 border-radius: 11px;
-                background: line-area.has-hover ? Mini.wash.with-alpha(0.2) : root.line-held ? Mini.wash.with-alpha(0.251) : transparent;
-                Glyph { text: Glyphs.line; font-size: 11px; color: root.line-held ? Mini.ink : Mini.wash.with-alpha(0.702); }
+                background: line-area.has-hover ? Mini.wash.with-alpha(min(1, 0.2 * Mini.wk)) : root.line-held ? Mini.wash.with-alpha(min(1, 0.251 * Mini.wk)) : transparent;
+                Glyph { text: Glyphs.line; font-size: 11px; color: root.line-held ? Mini.ink : Mini.wash.with-alpha(min(1, 0.702 * Mini.wk)); }
                 line-area := TouchArea { mouse-cursor: pointer; clicked => { root.command("line-hold"); } }
             }
         }
@@ -957,7 +966,7 @@ component MusicWide inherits Rectangle {
         width: root.volume-w;
         height: 24px;
         spacing: 4px;
-        Rectangle { width: 18px; Glyph { text: Glyphs.volume; font-size: 12px; color: Mini.wash.with-alpha(0.902); } }
+        Rectangle { width: 18px; Glyph { text: Glyphs.volume; font-size: 12px; color: Mini.wash.with-alpha(min(1, 0.902 * Mini.wk)); } }
         VolumeSlider { horizontal-stretch: 1; value: root.volume; tint: Paint.lift(root.accent, 0.35); y: (parent.height - self.height) / 2; }
         Text { text: round(root.volume * 100) + "%"; color: Mini.text-2; font-size: 10.5px; min-width: 32px; horizontal-alignment: right; vertical-alignment: center; }
     }
@@ -997,8 +1006,8 @@ component MusicWide inherits Rectangle {
                 width: 26px;
                 height: 26px;
                 border-radius: 13px;
-                background: line-area.has-hover ? Mini.wash.with-alpha(0.2) : root.line-held ? Mini.wash.with-alpha(0.251) : transparent;
-                Glyph { text: Glyphs.line; font-size: 12px; color: root.line-held ? Mini.ink : Mini.wash.with-alpha(0.702); }
+                background: line-area.has-hover ? Mini.wash.with-alpha(min(1, 0.2 * Mini.wk)) : root.line-held ? Mini.wash.with-alpha(min(1, 0.251 * Mini.wk)) : transparent;
+                Glyph { text: Glyphs.line; font-size: 12px; color: root.line-held ? Mini.ink : Mini.wash.with-alpha(min(1, 0.702 * Mini.wk)); }
                 line-area := TouchArea { mouse-cursor: pointer; clicked => { root.command("line-hold"); } }
             }
         }
@@ -1143,7 +1152,7 @@ component LyricsPage inherits Rectangle {
         Text { text: root.music.artist; color: Mini.text-3; font-size: 12px; overflow: elide; }
         if root.music.lyrics-shift != "" : Text { text: root.music.lyrics-shift; color: Mini.label; font-size: 10.5px; overflow: elide; }
     }
-    Rectangle { x: root.side; y: 16px; width: 1px; height: root.height - 32px; background: Mini.wash.with-alpha(0.078); }
+    Rectangle { x: root.side; y: 16px; width: 1px; height: root.height - 32px; background: Mini.wash.with-alpha(min(1, 0.078 * Mini.wk)); }
     view := Rectangle {
         x: root.side + 1px;
         width: parent.width - root.side - 1px - 36px;
@@ -1174,14 +1183,14 @@ component LyricsPage inherits Rectangle {
                     wrap: word-wrap;
                     font-size: 14.5px;
                     font-weight: 600;
-                    color: i == root.music.lyric-index ? Mini.ink : Mini.wash.with-alpha(0.361);
+                    color: i == root.music.lyric-index ? Mini.ink : Mini.wash.with-alpha(min(1, 0.361 * Mini.wk));
                     animate color { duration: 300ms; }
                 }
                 if line-row.ro != "" && root.romaji : Text {
                     text: line-row.ro;
                     wrap: word-wrap;
                     font-size: 10.5px;
-                    color: i == root.music.lyric-index ? Mini.wash.with-alpha(0.8) : Mini.wash.with-alpha(0.29);
+                    color: i == root.music.lyric-index ? Mini.wash.with-alpha(min(1, 0.8 * Mini.wk)) : Mini.wash.with-alpha(min(1, 0.29 * Mini.wk));
                 }
                 init => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
                 changed now => { if self.now { list.sung-y = self.y; list.sung-h = self.height; } }
@@ -1211,7 +1220,7 @@ component AccountChip inherits Rectangle {
     callback clicked();
     height: 34px;
     border-radius: 17px;
-    background: root.account.active ? Mini.wash.with-alpha(0.949) : area.has-hover ? Mini.wash.with-alpha(0.227) : root.pending ? Mini.wash.with-alpha(0.271) : Mini.wash.with-alpha(0.122);
+    background: root.account.active ? Mini.wash.with-alpha(min(1, 0.949 * Mini.wk)) : area.has-hover ? Mini.wash.with-alpha(min(1, 0.227 * Mini.wk)) : root.pending ? Mini.wash.with-alpha(min(1, 0.271 * Mini.wk)) : Mini.wash.with-alpha(min(1, 0.122 * Mini.wk));
     animate background { duration: 150ms; }
     HorizontalLayout {
         x: 5px;
@@ -1222,7 +1231,7 @@ component AccountChip inherits Rectangle {
             height: 24px;
             y: (parent.height - self.height) / 2;
             border-radius: 12px;
-            background: root.account.active ? Mini.base : Mini.wash.with-alpha(0.2);
+            background: root.account.active ? Mini.base : Mini.wash.with-alpha(min(1, 0.2 * Mini.wk));
             Text { width: 100%; height: 100%; horizontal-alignment: center; vertical-alignment: center; text: root.account.initial; color: Mini.ink; font-size: 11.5px; font-weight: 700; }
         }
         Text {
@@ -1260,7 +1269,7 @@ component AccountsPage inherits Rectangle {
         width: root.col-w;
         height: parent.height;
         border-radius: 14px;
-        background: Mini.wash.with-alpha(0.039);
+        background: Mini.wash.with-alpha(min(1, 0.039 * Mini.wk));
         VerticalLayout {
             padding: 8px;
             spacing: 6px;
@@ -1285,7 +1294,7 @@ component AccountsPage inherits Rectangle {
 // the part already gone filled, now marked above it, the next one a green ring.
 component PrayerPage inherits Rectangle {
     in property <PrayerView> p;
-    out property <color> green: #30d158;
+    out property <color> green: Mini.good;
     // The timeline's width is PRAYER_TRACK_W in main.rs (the dots' x come from there).
     property <length> col-x: 232px;
     property <length> col-w: 420px;
@@ -1297,7 +1306,7 @@ component PrayerPage inherits Rectangle {
         width: root.col-x - 16px;
         height: root.height;
         border-radius: 14px;
-        background: Mini.wash.with-alpha(0.039);
+        background: Mini.wash.with-alpha(min(1, 0.039 * Mini.wk));
     }
 
     VerticalLayout {
@@ -1352,7 +1361,7 @@ component PrayerPage inherits Rectangle {
             width: root.p.track-to - root.p.track-from;
             height: 3px;
             border-radius: 1.5px;
-            background: Mini.wash.with-alpha(0.149);
+            background: Mini.wash.with-alpha(min(1, 0.149 * Mini.wk));
         }
         Rectangle {
             x: root.p.track-from;
@@ -1374,7 +1383,7 @@ component PrayerPage inherits Rectangle {
                 width: self.size;
                 height: self.size;
                 border-radius: self.size / 2;
-                background: m.next ? Mini.base : m.past ? root.green : #8e8e93;
+                background: m.next ? Mini.base : m.past ? root.green : Mini.mute;
                 border-width: m.next ? 2px : 0px;
                 border-color: root.green;
             }
@@ -1547,7 +1556,7 @@ export component Island inherits Window {
     property <length> body-y: root.hidden ? 2px : Ice.top;
 
     // The song's colour: the cover's, a light grey for a grey cover, green without one.
-    property <color> song-accent: root.music.has-accent ? root.music.accent : root.music.has-art ? #c8c8d2 : #30d158;
+    property <color> song-accent: root.music.has-accent ? root.music.accent : root.music.has-art ? (Mini.light ? #5a5a62 : #c8c8d2) : Mini.good;
     property <bool> song-lit: root.music.has-session && (
         (root.expanded && (root.active-tab == "music" || root.active-tab == "lyrics"))
         || root.show-line || root.show-song || root.show-media);
@@ -1781,7 +1790,7 @@ export component Island inherits Window {
                 if root.show-line && root.line-notice : Rectangle {
                     y: parent.pill-h;
                     height: parent.height - parent.pill-h;
-                    Rectangle { x: 14px; width: parent.width - 28px; y: 0; height: 1px; background: Mini.wash.with-alpha(0.122); }
+                    Rectangle { x: 14px; width: parent.width - 28px; y: 0; height: 1px; background: Mini.wash.with-alpha(min(1, 0.122 * Mini.wk)); }
                     HorizontalLayout {
                         padding-left: 14px;
                         padding-right: 16px;
@@ -1845,7 +1854,7 @@ export component Island inherits Window {
                     width: tab-row.preferred-width + 6px;
                     height: 36px;
                     border-radius: 13px;
-                    background: Mini.wash.with-alpha(0.118);
+                    background: Mini.wash.with-alpha(min(1, 0.118 * Mini.wk));
                     tab-row := HorizontalLayout {
                         x: 3px;
                         width: self.preferred-width;
@@ -1856,7 +1865,7 @@ export component Island inherits Window {
                             width: self.on ? tab-label.preferred-width + 10px + 14px + 7px + 12px : 34px;
                             height: 30px;
                             border-radius: 10px;
-                            background: self.on ? Mini.wash.with-alpha(0.227) : tab-area.has-hover ? Mini.wash.with-alpha(0.102) : transparent;
+                            background: self.on ? (Mini.light ? #ffffff : Mini.wash.with-alpha(0.227)) : tab-area.has-hover ? Mini.wash.with-alpha(min(1, 0.102 * Mini.wk)) : transparent;
                             animate background { duration: 150ms; }
                             if t.id == "prayer" : Path {
                                 x: parent.on ? 10px : (parent.width - self.width) / 2;
