@@ -1093,7 +1093,8 @@ fn refresh(ui: &Island) {
             state.line_notice_until = now + NOTIF_HOLD_MS;
         }
         let line_notice = line
-            && front_id.as_deref().is_some_and(|id| id != "music:now")
+            // Not the music's own notices ("Playing", a song change): the capsule already shows the song.
+            && front_id.as_deref().is_some_and(|id| !id.starts_with("music:"))
             && (asking || now < state.line_notice_until);
         ui.set_line_notice(line_notice);
         if asking && state.mode == Mode::Hidden {
