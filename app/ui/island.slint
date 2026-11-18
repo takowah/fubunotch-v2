@@ -1045,6 +1045,10 @@ component Page inherits Rectangle {
     in property <bool> shown;
     opacity: shown ? 1 : 0;
     animate opacity { duration: Ice.fade; easing: ease-out; }
+    // A page rises into place as it fades in (sinks as it fades out): a
+    // switch of tabs reads as a move, not a blink (the owner, 19 Nov 2026).
+    y: shown ? 0 : 10px;
+    animate y { duration: 300ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
     visible: self.opacity > 0.01;
 }
 
@@ -2646,12 +2650,16 @@ export component Island inherits Window {
                         for t in root.tabs : Rectangle {
                             property <bool> on: root.active-tab == t.id;
                             width: self.on ? tab-label.preferred-width + 10px + 14px + 7px + 12px : 34px;
+                            // The chosen tab widens to its name and the last one narrows, smoothly.
+                            animate width { duration: 280ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+                            clip: true;
                             height: 30px;
                             border-radius: 10px;
                             background: self.on ? (Mini.light ? #ffffff : Mini.wash.with-alpha(0.227)) : tab-area.has-hover ? Mini.wash.with-alpha(min(1, 0.102 * Mini.wk)) : transparent;
-                            animate background { duration: 150ms; }
+                            animate background { duration: 180ms; }
                             if t.id == "prayer" : Path {
-                                x: parent.on ? 10px : (parent.width - self.width) / 2;
+                                x: parent.on ? 10px : (34px - self.width) / 2;
+                                animate x { duration: 280ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
                                 y: (parent.height - self.height) / 2;
                                 width: 15px;
                                 height: 15px;
@@ -2662,7 +2670,8 @@ export component Island inherits Window {
                                 commands: Glyphs.mosque;
                             }
                             if t.id != "prayer" : Glyph {
-                                x: parent.on ? 10px : (parent.width - self.width) / 2;
+                                x: parent.on ? 10px : (34px - self.width) / 2;
+                                animate x { duration: 280ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
                                 width: 14px;
                                 text: Glyphs.tab(t.id);
                                 font-size: 14px;
@@ -2672,7 +2681,10 @@ export component Island inherits Window {
                                 x: 10px + 14px + 7px;
                                 width: self.preferred-width;
                                 height: 100%;
-                                visible: parent.on;
+                                // Fades in after the tab has started to widen, out as it narrows.
+                                opacity: parent.on ? 1 : 0;
+                                animate opacity { duration: 220ms; delay: parent.on ? 80ms : 0ms; easing: ease-out; }
+                                visible: self.opacity > 0.01;
                                 text: t.label;
                                 color: Mini.ink;
                                 font-size: 13px;
