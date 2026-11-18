@@ -155,9 +155,10 @@ impl Default for LookSettings {
     }
 }
 
-/// The island's body: solid black, a colour, the wallpaper's colour, glass
-/// (see-through) or frosted glass (see-through and blurred).
-pub const LOOK_STYLES: &[&str] = &["black", "color", "wallpaper", "glass", "frosted"];
+/// The island's body: solid black, a colour, the wallpaper's colour or
+/// Liquid Glass (what is behind it, blurred, with a lens edge). The old
+/// "glass" and "frosted" looks are read as Liquid Glass.
+pub const LOOK_STYLES: &[&str] = &["black", "color", "wallpaper", "liquid"];
 
 /// The island's sizes, each within what the window and the pages allow.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -184,6 +185,9 @@ impl LookSettings {
 
     /// The look to draw: unknown names fall back to black.
     pub fn style(&self) -> &'static str {
+        if self.style == "glass" || self.style == "frosted" {
+            return "liquid";
+        }
         LOOK_STYLES.iter().copied().find(|t| *t == self.style).unwrap_or(LOOK_STYLES[0])
     }
 
@@ -500,6 +504,9 @@ mod tests {
         assert_eq!((z.idle_w, z.idle_h, z.expanded_w, z.expanded_h, z.expanded_tall_h), (180.0, 45.0, 680.0, 196.0, 268.0));
         let wild = LookSettings { style: "neon".into(), color: "nope".into(), idle_w: 9999, idle_h: 1, expanded_w: 100, expanded_h: 255, expanded_tall_h: 230, closed_opacity: 3, ..Default::default() };
         assert_eq!(wild.style(), "black");
+        for old in ["glass", "frosted", "liquid"] {
+            assert_eq!(LookSettings { style: old.into(), ..Default::default() }.style(), "liquid");
+        }
         assert_eq!(wild.color_rgb(), (0x1f, 0x2a, 0x52));
         assert_eq!(wild.closed_alpha(), 0.2);
         let z = wild.sizes();

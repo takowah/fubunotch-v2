@@ -6,6 +6,7 @@ pub mod arbiter;
 pub mod settings;
 pub mod daily;
 pub mod look;
+pub mod glass;
 
 pub use activity::{Action, Activity, Incoming, Invalid, Kind, Priority};
 pub use arbiter::{Arbiter, View, MIN_SHOW_MS};

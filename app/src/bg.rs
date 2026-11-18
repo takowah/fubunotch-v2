@@ -55,7 +55,7 @@ pub fn import(from: &Path, dir: &Path) -> std::io::Result<PathBuf> {
 }
 
 /// The picture at `w` x `h` pixels, cropped to cover: RGBA.
-fn cover(path: &Path, w: u32, h: u32) -> windows::core::Result<Vec<u8>> {
+pub fn cover(path: &Path, w: u32, h: u32) -> windows::core::Result<Vec<u8>> {
     let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path.as_os_str()))?.get()?;
     let stream = file.OpenAsync(FileAccessMode::Read)?.get()?;
     let decoder = BitmapDecoder::CreateAsync(&stream)?.get()?;

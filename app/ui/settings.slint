@@ -70,7 +70,7 @@ export struct SettingsView {
     background-name: string,
     background-preview: image,
     background-dim: int,
-    // Look: "black" | "color" | "wallpaper" | "glass" | "frosted".
+    // Look: "black" | "color" | "wallpaper" | "liquid".
     look-style: string,
     look-color: color,
     // "#1f2a52", for the custom colour's field.
@@ -628,8 +628,8 @@ component LookCard inherits Rectangle {
     // The island's body in the preview, and its ink.
     in property <color> body;
     in property <color> ink: #ffffff;
-    // Frosted: the desk's colours show through softened.
-    in property <bool> frosted;
+    // Liquid Glass: the desk shows through, softened, with a bright rim and sheen.
+    in property <bool> liquid;
     callback picked();
     min-width: 100px;
     height: 108px;
@@ -657,10 +657,12 @@ component LookCard inherits Rectangle {
             x: 14px;
             height: 24px;
             border-radius: 12px;
-            background: root.frosted ? #8a8a96.with-alpha(0.55) : root.body;
+            background: root.liquid ? #6a6474.with-alpha(0.42) : root.body;
             border-width: 1px;
-            border-color: root.ink.with-alpha(0.18);
-            if root.frosted : Rectangle { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; border-radius: 11px; background: #1c1c22.with-alpha(0.55); }
+            border-color: root.liquid ? #ffffff8c : root.ink.with-alpha(0.18);
+            // The sheen near the top and the lens' lighter band at the bottom.
+            if root.liquid : Rectangle { x: 6px; y: 2px; width: parent.width - 12px; height: 7px; border-radius: 3.5px; background: #ffffff2e; }
+            if root.liquid : Rectangle { x: 10px; y: parent.height - 4px; width: parent.width - 20px; height: 2px; border-radius: 1px; background: #ffffff24; }
             Text { text: "9:41"; color: root.ink; font-size: 11.5px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
         }
     }
@@ -971,8 +973,7 @@ export component SettingsWindow inherits Window {
                         picked => { root.look-picked(self.id); }
                     }
                     LookCard { id: "wallpaper"; name: "Wallpaper"; body: root.s.wallpaper-color; chosen: root.s.look-style == self.id; picked => { root.look-picked(self.id); } }
-                    LookCard { id: "glass"; name: "Glass"; body: #0b0b0d8c; chosen: root.s.look-style == self.id; picked => { root.look-picked(self.id); } }
-                    LookCard { id: "frosted"; name: "Frosted"; frosted: true; chosen: root.s.look-style == self.id; picked => { root.look-picked(self.id); } }
+                    LookCard { id: "liquid"; name: "Liquid Glass"; liquid: true; chosen: root.s.look-style == self.id; picked => { root.look-picked(self.id); } }
                 }
                 if root.page == "look" : Rectangle {
                     height: 30px;
@@ -985,8 +986,7 @@ export component SettingsWindow inherits Window {
                         wrap: word-wrap;
                         text: root.s.look-style == "color" ? "The island in the colour picked below. Light colours get dark text."
                             : root.s.look-style == "wallpaper" ? "The island takes your wallpaper's colour, darkened so text stays readable."
-                            : root.s.look-style == "glass" ? "See-through: the desktop shows behind the island."
-                            : root.s.look-style == "frosted" ? "See-through, with Windows blurring what is behind the island."
+                            : root.s.look-style == "liquid" ? "Glass over what is behind the island. Not seen in screenshots or recordings while on."
                             : "A solid black island.";
                     }
                 }

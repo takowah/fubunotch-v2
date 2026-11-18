@@ -1,22 +1,24 @@
 // Settings → Appearance → Look, on the island: the body's colour and how
 // solid it is, the ink that reads on it, the night's warmth, the wallpaper's
 // colour (read at start and when Windows says the wallpaper changed, never
-// polled) and, for Frosted glass, Windows' blur behind the island.
+// polled). Liquid Glass' pixels are made in glass.rs; here it only picks the
+// ink and the fallback body (while the glass is not drawn yet).
 
 use island_core::look::{self, Rgb};
 use island_core::settings::LookSettings;
 use slint::Color;
 
-/// Mini Island's body: the Black look, and Glass' tint.
+/// Mini Island's body: the Black look, and dark Liquid Glass.
 const BLACK: Rgb = (0x0b, 0x0b, 0x0d);
+/// Light Liquid Glass (over a light backdrop).
+const PALE: Rgb = (0xf2, 0xf2, 0xf5);
 /// How solid each look's body is.
 const SOLID: f32 = 0.949;
-const GLASS: f32 = 0.55;
-/// Frosted: a frosted grey, more solid than Glass. Windows' blur behind the
-/// window is not used: it ignores the window region and blurred the whole
-/// (much bigger) window as a square around the island (seen live 18 Nov 2026).
-const FROSTED: f32 = 0.78;
-const FROST: Rgb = (0x3a, 0x3a, 0x40);
+/// Liquid Glass while its picture isn't drawn (springing to a new size).
+/// Windows' own blur (ACCENT_ENABLE_BLURBEHIND) is not used: it ignores the
+/// window region and blurred the whole (much bigger) window as a square
+/// around the island (seen live 18 Nov 2026).
+const LIQUID: f32 = 0.82;
 
 /// What the island draws with: set on its Mini global.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,8 +29,8 @@ pub struct Colors {
     pub light: bool,
     pub ink: [Rgb; 5],
     pub wash: Rgb,
-    /// Windows blurs what is behind the island (Frosted glass).
-    pub frosted: bool,
+    /// Liquid Glass: the island draws the blurred backdrop (glass.rs).
+    pub glass: bool,
 }
 
 /// The ink and its four greys, on a dark body and on a light one.
@@ -36,14 +38,14 @@ const INK_DARK_BODY: [Rgb; 5] = [(0xff, 0xff, 0xff), (0xd2, 0xd2, 0xd7), (0xc2, 
 const INK_LIGHT_BODY: [Rgb; 5] = [(0x14, 0x14, 0x16), (0x2e, 0x2e, 0x33), (0x3a, 0x3a, 0x40), (0x48, 0x48, 0x4e), (0x5c, 0x5c, 0x63)];
 
 /// The island's colours for `look`, the wallpaper's colour (if known) and
-/// the night's warmth now (0..1, already times the user's strength).
-pub fn colors(look: &LookSettings, wallpaper: Option<Rgb>, warmth: f32) -> Colors {
+/// the night's warmth now (0..1, already times the user's strength);
+/// `backdrop_light`: Liquid Glass sits over something light (dark ink).
+pub fn colors(look: &LookSettings, wallpaper: Option<Rgb>, warmth: f32, backdrop_light: bool) -> Colors {
     let style = look.style();
     let (body, solid) = match style {
         "color" => (look.color_rgb(), SOLID),
         "wallpaper" => (wallpaper.unwrap_or(BLACK), SOLID),
-        "glass" => (BLACK, GLASS),
-        "frosted" => (FROST, FROSTED),
+        "liquid" => (if backdrop_light { PALE } else { BLACK }, LIQUID),
         _ => (BLACK, SOLID),
     };
     let light = look::wants_dark_ink(body);
@@ -55,7 +57,7 @@ pub fn colors(look: &LookSettings, wallpaper: Option<Rgb>, warmth: f32) -> Color
         light,
         ink: ink.map(|c| look::warm(c, warmth * 0.8)),
         wash: if light { (0, 0, 0) } else { (255, 255, 255) },
-        frosted: false,
+        glass: style == "liquid",
     }
 }
 
@@ -130,40 +132,4 @@ fn small_pixels(path: &std::path::Path) -> windows::core::Result<Vec<u8>> {
         )?
         .get()?;
     Ok(pixels.DetachPixelData()?.to_vec())
-}
-
-// ── Frosted glass ────────────────────────────────────────────────────────────
-
-/// Windows' blur behind the window (on) or none (off), through the
-/// undocumented SetWindowCompositionAttribute that Windows' own shell uses:
-/// DWMWA_SYSTEMBACKDROP_TYPE only paints a backdrop under a frame, and the
-/// island has none. The blur fills the window region, so the region is the
-/// island's rounded shape while frosted (see clip_window).
-pub fn set_blur(hwnd: windows::Win32::Foundation::HWND, on: bool) {
-    #[repr(C)]
-    struct AccentPolicy {
-        state: u32,
-        flags: u32,
-        gradient: u32,
-        animation: u32,
-    }
-    #[repr(C)]
-    struct CompositionData {
-        attribute: u32,
-        data: *mut core::ffi::c_void,
-        size: usize,
-    }
-    type SetWca = unsafe extern "system" fn(windows::Win32::Foundation::HWND, *mut CompositionData) -> i32;
-    use windows::core::s;
-    use windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
-    unsafe {
-        let Ok(user32) = GetModuleHandleA(s!("user32.dll")) else { return };
-        let Some(f) = GetProcAddress(user32, s!("SetWindowCompositionAttribute")) else { return };
-        let f: SetWca = std::mem::transmute(f);
-        // ACCENT_ENABLE_BLURBEHIND (3) or ACCENT_DISABLED (0).
-        let mut accent = AccentPolicy { state: if on { 3 } else { 0 }, flags: 0, gradient: 0, animation: 0 };
-        // WCA_ACCENT_POLICY = 19.
-        let mut data = CompositionData { attribute: 19, data: (&mut accent as *mut AccentPolicy).cast(), size: std::mem::size_of::<AccentPolicy>() };
-        f(hwnd, &mut data);
-    }
 }
