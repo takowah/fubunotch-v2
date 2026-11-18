@@ -232,7 +232,7 @@ export struct AskRow {
     actions: [ActionInfo],
 }
 
-// The Dashboard's weather and its own switches (the radios and the
+// The Control page's weather and its switches that aren't the radios' (the radios and the
 // microphone come from ControlView).
 export struct DashView {
     // "off" (the Weather module is off), "loading", "ok", "error".
@@ -435,7 +435,7 @@ global Glyphs {
     // Not in Segoe Fluent: a mosque, drawn (a dome, its spire, a door).
     out property <string> mosque: "M 3 20.5 H 21 M 6 20.5 V 13.5 A 6 6 0 0 1 18 13.5 V 20.5 M 12 7.5 V 4 M 10.5 20.5 V 17.5 A 1.5 1.5 0 0 1 13.5 17.5 V 20.5";
     public pure function tab(id: string) -> string {
-        return id == "day" ? "\u{EB05}" : id == "notifications" ? "\u{EA8F}" : id == "music" ? "\u{EC4F}" : id == "lyrics" ? "\u{E8E4}" : id == "accounts" ? "\u{E716}" : id == "control" ? "\u{E9E9}" : id == "dashboard" ? "\u{E80F}" : "\u{E8D6}";
+        return id == "day" ? "\u{EB05}" : id == "notifications" ? "\u{EA8F}" : id == "music" ? "\u{EC4F}" : id == "lyrics" ? "\u{E8E4}" : id == "accounts" ? "\u{E716}" : id == "control" ? "\u{E9E9}" : "\u{E8D6}";
     }
     public pure function service(title: string) -> string {
         return title == "Claude Desktop" ? "\u{E7F4}" : title == "Claude Code" ? "\u{E756}" : "\u{E943}";
@@ -1624,114 +1624,22 @@ component AccountBlock inherits VerticalLayout {
     }
 }
 
-// The Dashboard (as Poni's): the weather, today (how much of the day has
-// gone, the next prayer), and quick switches.
-component DashboardPage inherits Rectangle {
-    in property <DashView> d;
-    in property <ControlView> c;
-    in property <DayView> day;
-    callback toggle(string);
-    callback weather-on();
-    property <length> gap: 10px;
-    property <length> card-w: 190px;
-    // The weather.
-    Rectangle {
-        x: 0;
-        width: root.card-w;
-        height: parent.height;
-        border-radius: 14px;
-        background: Mini.wash.with-alpha(min(1, 0.039 * Mini.wk));
-        if root.d.weather == "ok" : VerticalLayout {
-            padding: 14px;
-            spacing: 2px;
-            alignment: center;
-            HorizontalLayout {
-                spacing: 10px;
-                alignment: start;
-                Glyph { width: 30px; text: root.d.glyph; font-size: 26px; color: Mini.ink; }
-                Text { text: root.d.temp; color: Mini.ink; font-size: 30px; font-weight: 700; vertical-alignment: center; }
-            }
-            Text { text: root.d.desc; color: Mini.text-2; font-size: 13px; font-weight: 600; overflow: elide; }
-            Text { text: root.d.high-low; color: Mini.text-3; font-size: 12px; }
-            Text { text: root.d.place; color: Mini.label; font-size: 11px; overflow: elide; }
-        }
-        if root.d.weather != "ok" : VerticalLayout {
-            padding: 14px;
-            spacing: 8px;
-            alignment: center;
-            Glyph { height: 28px; text: "\u{E753}"; font-size: 22px; color: Mini.text-3; }
-            Text {
-                text: root.d.weather == "off" ? "Weather is off" : root.d.weather == "loading" ? "Getting the weather…" : "Weather unavailable";
-                color: Mini.text-2;
-                font-size: 12px;
-                horizontal-alignment: center;
-            }
-            if root.d.weather == "off" : HorizontalLayout {
-                alignment: center;
-                ActionPill { label: "Turn on"; clicked => { root.weather-on(); } }
-            }
-        }
-    }
-    // Today.
-    Rectangle {
-        x: root.card-w + root.gap;
-        width: root.card-w;
-        height: parent.height;
-        border-radius: 14px;
-        background: Mini.wash.with-alpha(min(1, 0.039 * Mini.wk));
-        VerticalLayout {
-            padding: 14px;
-            spacing: 4px;
-            alignment: center;
-            Text { text: "TODAY"; color: Mini.label; font-size: 10px; font-weight: 700; }
-            Text { text: root.day.percent; color: Mini.ink; font-size: 28px; font-weight: 700; }
-            Rectangle {
-                height: 6px;
-                border-radius: 3px;
-                background: Mini.wash.with-alpha(min(1, 0.14 * Mini.wk));
-                Rectangle { x: 0; width: parent.width * clamp(root.day.fraction, 0, 1); height: 6px; border-radius: 3px; background: Mini.accent; }
-            }
-            Text { text: root.day.left != "" ? root.day.left + " until bedtime" : root.day.detail; color: Mini.text-3; font-size: 11px; overflow: elide; }
-            if root.day.has-next : Text { text: root.day.next-name + " " + root.day.next-when; color: Mini.text-2; font-size: 12px; font-weight: 600; overflow: elide; }
-        }
-    }
-    // Quick switches, three by two.
-    Rectangle {
-        x: 2 * (root.card-w + root.gap);
-        width: parent.width - self.x;
-        height: parent.height;
-        border-radius: 14px;
-        background: Mini.wash.with-alpha(min(1, 0.039 * Mini.wk));
-        VerticalLayout {
-            padding: 10px;
-            spacing: 8px;
-            alignment: center;
-            HorizontalLayout {
-                alignment: space-around;
-                ToggleTile { glyph: "\u{E701}"; label: "Wi-Fi"; on: root.c.wifi; enabled: root.c.has-wifi; clicked => { root.toggle("wifi"); } }
-                ToggleTile { glyph: "\u{E702}"; label: "Bluetooth"; on: root.c.bluetooth; enabled: root.c.has-bluetooth; clicked => { root.toggle("bluetooth"); } }
-                ToggleTile { glyph: root.c.mic-muted ? "\u{EC54}" : "\u{E720}"; label: root.c.mic-muted ? "Mic off" : "Mic on"; on: !root.c.mic-muted; enabled: root.c.has-mic; clicked => { root.toggle("mic"); } }
-            }
-            HorizontalLayout {
-                alignment: space-around;
-                ToggleTile { glyph: "\u{E7E8}"; label: "Keep awake"; on: root.d.keep-awake; clicked => { root.toggle("keepawake"); } }
-                ToggleTile { glyph: "\u{E793}"; label: "Dark mode"; on: root.d.dark; enabled: root.d.has-dark; clicked => { root.toggle("dark"); } }
-                ToggleTile { glyph: "\u{E72E}"; label: "Lock"; on: false; clicked => { root.toggle("lock"); } }
-            }
-        }
-    }
-}
-
-// Control: sound and brightness sliders and the radios on the left, the
-// outputs and microphones on the right (heights in main.rs CONTROL_*).
+// Control, every widget on one page (the owner, 19 Nov 2026: "control itu
+// widget semua, jadi dashboard itu hapus"): the sound and brightness
+// sliders and six switches (Wi-Fi, Bluetooth, microphone, keep awake, dark
+// mode, lock) on the left; the weather, then the outputs and microphones on
+// the right (heights in main.rs control_height).
 component ControlPage inherits Rectangle {
     in property <ControlView> c;
+    // The weather and the switches that aren't the radios'.
+    in property <DashView> d;
     // The song's colour for the sliders (the island's accent otherwise).
     in property <color> tint;
     callback volume(float);
     callback brightness(float);
     callback toggle(string);
     callback device(string, string);
+    callback weather-on();
     property <length> gap: 10px;
     property <length> left-w: 300px;
     // Left: sliders, then the radios.
@@ -1790,6 +1698,13 @@ component ControlPage inherits Rectangle {
                 ToggleTile { glyph: "\u{E702}"; label: "Bluetooth"; on: root.c.bluetooth; enabled: root.c.has-bluetooth; clicked => { root.toggle("bluetooth"); } }
                 ToggleTile { glyph: root.c.mic-muted ? "\u{EC54}" : "\u{E720}"; label: root.c.mic-muted ? "Mic off" : "Mic on"; on: !root.c.mic-muted; enabled: root.c.has-mic; clicked => { root.toggle("mic"); } }
             }
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: space-around;
+                ToggleTile { glyph: "\u{E7E8}"; label: "Keep awake"; on: root.d.keep-awake; clicked => { root.toggle("keepawake"); } }
+                ToggleTile { glyph: "\u{E793}"; label: "Dark mode"; on: root.d.dark; enabled: root.d.has-dark; clicked => { root.toggle("dark"); } }
+                ToggleTile { glyph: "\u{E72E}"; label: "Lock"; on: false; clicked => { root.toggle("lock"); } }
+            }
         }
     }
     // Right: where the sound goes and which microphone listens.
@@ -1803,11 +1718,29 @@ component ControlPage inherits Rectangle {
             padding: 10px;
             spacing: 3px;
             alignment: start;
+            // The weather (the Weather module), or a way to turn it on.
+            HorizontalLayout {
+                height: 34px;
+                padding-left: 6px;
+                spacing: 8px;
+                if root.d.weather == "ok" : Glyph { width: 20px; text: root.d.glyph; font-size: 16px; color: Mini.ink; }
+                if root.d.weather == "ok" : Text { text: root.d.temp; color: Mini.ink; font-size: 18px; font-weight: 700; vertical-alignment: center; }
+                if root.d.weather == "ok" : Text { horizontal-stretch: 1; text: root.d.desc + " · " + root.d.high-low + " · " + root.d.place; color: Mini.text-3; font-size: 11.5px; vertical-alignment: center; overflow: elide; }
+                if root.d.weather != "ok" : Glyph { width: 20px; text: "\u{E753}"; font-size: 15px; color: Mini.text-3; }
+                if root.d.weather != "ok" : Text {
+                    horizontal-stretch: 1;
+                    text: root.d.weather == "off" ? "Weather is off" : root.d.weather == "loading" ? "Getting the weather…" : "Weather unavailable";
+                    color: Mini.text-3;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+                if root.d.weather == "off" : VerticalLayout { alignment: center; ActionPill { label: "Turn on"; clicked => { root.weather-on(); } } }
+            }
             Text { height: 18px; x: 4px; text: "Output"; color: Mini.label; font-size: 11px; font-weight: 600; vertical-alignment: center; }
-            for d in root.c.outputs : DeviceRow { name: d.name; on: d.on; clicked => { root.device("output", d.id); } }
+            for dev in root.c.outputs : DeviceRow { name: dev.name; on: dev.on; clicked => { root.device("output", dev.id); } }
             Rectangle { height: 6px; }
             Text { height: 18px; x: 4px; text: "Microphone"; color: Mini.label; font-size: 11px; font-weight: 600; vertical-alignment: center; }
-            for d in root.c.mics : DeviceRow { name: d.name; on: d.on; clicked => { root.device("mic", d.id); } }
+            for dev in root.c.mics : DeviceRow { name: dev.name; on: dev.on; clicked => { root.device("mic", dev.id); } }
             if root.c.note != "" : Text { text: root.c.note; color: Mini.warn; font-size: 11px; overflow: elide; }
         }
     }
@@ -2225,10 +2158,10 @@ export component Island inherits Window {
     callback hover-changed(bool);
     callback front-clicked();
     callback notif-clicked(int);
-    // The Dashboard page.
+    // The Control page's weather and other switches.
+    // The Control page's weather and its switches that aren't the radios'.
     in property <DashView> dash;
-    callback dash-toggle(string);
-    callback dash-weather-on();
+    callback control-weather-on();
     // The Control page.
     in property <ControlView> control;
     callback control-volume(float);
@@ -2781,28 +2714,18 @@ export component Island inherits Window {
                         DayPage { width: parent.width; height: parent.height; d: root.day; }
                     }
                     Page {
-                        shown: root.active-tab == "dashboard";
-                        DashboardPage {
-                            width: parent.width;
-                            height: parent.height;
-                            d: root.dash;
-                            c: root.control;
-                            day: root.day;
-                            toggle(t) => { root.dash-toggle(t); }
-                            weather-on => { root.dash-weather-on(); }
-                        }
-                    }
-                    Page {
                         shown: root.active-tab == "control";
                         ControlPage {
                             width: parent.width;
                             height: parent.height;
                             c: root.control;
+                            d: root.dash;
                             tint: root.song-accent;
                             volume(v) => { root.control-volume(v); }
                             brightness(v) => { root.control-brightness(v); }
                             toggle(t) => { root.control-toggle(t); }
                             device(kind, id) => { root.control-device(kind, id); }
+                            weather-on => { root.control-weather-on(); }
                         }
                     }
                     Page {

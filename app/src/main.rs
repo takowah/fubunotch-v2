@@ -232,7 +232,7 @@ struct State {
     control_note: String,
     control_open: bool,
     control_tx: Option<std::sync::mpsc::Sender<ControlJob>>,
-    /// The Dashboard: the last weather and when it came (ms since start), a
+    /// The Control page: the last weather and when it came (ms since start), a
     /// reading on its way, the last one failed; keep awake on.
     weather: Option<(weather::Weather, u64)>,
     weather_busy: bool,
@@ -1266,7 +1266,7 @@ fn weather_due(ui: &Island, state: &mut State, now: u64) {
     });
 }
 
-/// The Dashboard's own data for Slint.
+/// The Control page's weather and its switches that aren't the radios', for Slint.
 fn dash_view(state: &State) -> DashView {
     let (place, _, _) = prayer_place(&state.settings);
     let (weather, glyph, temp, desc, high_low) = match (&state.weather, state.settings.is_on("weather")) {
@@ -1320,9 +1320,6 @@ fn control_view(c: &control::Snapshot, note: &str) -> ControlView {
     }
 }
 
-/// The Dashboard page's height: two rows of switches with their names.
-const DASH_H: f32 = 176.0;
-
 /// The most outputs / microphones listed.
 const CONTROL_LIST_MAX: usize = 4;
 
@@ -1330,7 +1327,11 @@ const CONTROL_LIST_MAX: usize = 4;
 /// shorter): padding, two headings, a row each, the gap, a note.
 fn control_height(c: &control::Snapshot) -> f32 {
     let rows = c.outputs.len().min(CONTROL_LIST_MAX) + c.mics.len().min(CONTROL_LIST_MAX);
-    20.0 + 2.0 * 21.0 + rows as f32 * 29.0 + 9.0 + 14.0
+    // Right: padding, the weather row, two headings, a row each, the gap, a note.
+    let right = 20.0 + 37.0 + 2.0 * 21.0 + rows as f32 * 29.0 + 9.0 + 14.0;
+    // Left: padding, two sliders, two rows of switches (a 40 px disc and its name).
+    let left = 24.0 + 2.0 * 28.0 + 3.0 * 10.0 + 4.0 + 2.0 * 59.0;
+    right.max(left)
 }
 
 /// The Accounts tab just opened: read the plans and usage again (a snapshot
@@ -1354,8 +1355,8 @@ fn refresh(ui: &Island) {
     with_state(|state| {
         let now = now_ms(state.started);
         daily_tick(state, now);
-        // The Dashboard's weather: asked for when it is open and the reading is old.
-        if state.mode == Mode::Expanded && state.active_tab == "dashboard" {
+        // The weather on the Control page: asked for when it is open and the reading is old.
+        if state.mode == Mode::Expanded && state.active_tab == "control" {
             weather_due(ui, state, now);
         }
         // Before anything borrows the state: the lyric list is made (once a song) here.
@@ -1420,9 +1421,6 @@ fn refresh(ui: &Island) {
         }
         if state.settings.is_on("day") {
             tab_ids.push(("day", "Day Progress"));
-        }
-        if state.settings.is_on("dashboard") {
-            tab_ids.push(("dashboard", "Dashboard"));
         }
         if state.settings.is_on("control") {
             tab_ids.push(("control", "Control"));
@@ -1492,9 +1490,8 @@ fn refresh(ui: &Island) {
         if state.active_tab == "prayer" {
             ui.set_prayer(prayer_view(&mut state.prayer_day, &state.settings));
         }
-        // Day Progress moves with the clock's per-minute wake (no timer of its own);
-        // the Dashboard's Today card shows it too.
-        if state.active_tab == "day" || state.active_tab == "dashboard" {
+        // Day Progress moves with the clock's per-minute wake (no timer of its own).
+        if state.active_tab == "day" {
             ui.set_day(day_view(&mut state.prayer_day, &state.settings));
         }
         let tasks: Vec<TaskRow> = state.data.todo.ordered().into_iter().map(|t| TaskRow { id: t.id as i32, text: t.text.as_str().into(), done: t.done }).collect();
@@ -1510,10 +1507,9 @@ fn refresh(ui: &Island) {
         state.accounts_open = accounts_open;
         let accounts_h = if state.active_tab == "accounts" { set_accounts(ui, &state.account_pending, &state.account_hint) } else { 0.0 };
         // Control: read again each time the page opens (and after each change).
-        // The Dashboard shows its switches too (the brightness it doesn't need).
-        let control_open = state.mode == Mode::Expanded && (state.active_tab == "control" || state.active_tab == "dashboard");
+        let control_open = state.mode == Mode::Expanded && state.active_tab == "control";
         if control_open && !state.control_open {
-            control_send(&state.control_tx, &mut state.control, ControlJob::Read(state.active_tab == "control"));
+            control_send(&state.control_tx, &mut state.control, ControlJob::Read(true));
         }
         state.control_open = control_open;
         ui.set_dash(dash_view(state));
@@ -1669,7 +1665,6 @@ fn refresh(ui: &Island) {
                     "music" | "prayer" | "day" => page_h,
                     "accounts" => accounts_h.max(page_h),
                     "control" => control_h.max(page_h),
-                    "dashboard" => DASH_H.max(page_h),
                     _ if state.notifications.is_empty() && ask_count == 0 => page_h,
                     _ => {
                         // Claude Code's questions first, one a row; then the
@@ -4152,6 +4147,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let weak = ui.as_weak();
     ui.on_control_toggle(move |what| {
         let Some(ui) = weak.upgrade() else { return };
+        if what == "keepawake" {
+            let on = with_state(|state| {
+                state.keep_awake = !state.keep_awake;
+                state.keep_awake
+            })
+            .unwrap_or(false);
+            set_keep_awake(on);
+            refresh(&ui);
+            return;
+        }
         with_state(|state| {
             let c = &state.control;
             let cmd = match what.as_str() {
@@ -4159,8 +4164,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "mic" => c.mic_muted.map(|m| control::Command::MicMute(!m)),
                 "wifi" => c.wifi.map(|w| control::Command::Wifi(!w)),
                 "bluetooth" => c.bluetooth.map(|b| control::Command::Bluetooth(!b)),
+                "dark" => c.dark.map(|d| control::Command::DarkMode(!d)),
+                "lock" => Some(control::Command::Lock),
                 _ => None,
             };
+            // Dark mode shows at once; the worker sets it and reads back.
+            if let Some(control::Command::DarkMode(d)) = &cmd {
+                state.control.dark = Some(*d);
+            }
             if let Some(cmd) = cmd {
                 control_send(&state.control_tx, &mut state.control, ControlJob::Do(cmd));
             }
@@ -4168,35 +4179,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         refresh(&ui);
     });
     let weak = ui.as_weak();
-    ui.on_dash_toggle(move |what| {
-        let Some(ui) = weak.upgrade() else { return };
-        match what.as_str() {
-            "keepawake" => {
-                let on = with_state(|state| {
-                    state.keep_awake = !state.keep_awake;
-                    state.keep_awake
-                })
-                .unwrap_or(false);
-                set_keep_awake(on);
-            }
-            "dark" => {
-                with_state(|state| {
-                    if let Some(d) = state.control.dark {
-                        state.control.dark = Some(!d);
-                        control_send(&state.control_tx, &mut state.control, ControlJob::Do(control::Command::DarkMode(!d)));
-                    }
-                });
-            }
-            "lock" => {
-                with_state(|state| control_send(&state.control_tx, &mut state.control, ControlJob::Do(control::Command::Lock)));
-            }
-            // The radios and the microphone: as on the Control page.
-            other => ui.invoke_control_toggle(other.into()),
-        }
-        refresh(&ui);
-    });
-    let weak = ui.as_weak();
-    ui.on_dash_weather_on(move || {
+    ui.on_control_weather_on(move || {
         let Some(ui) = weak.upgrade() else { return };
         change_settings(&ui, |s| {
             if let Some(m) = s.modules.iter_mut().find(|m| m.id == "weather") {
@@ -4785,7 +4768,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         on_flash(&ui, flash::Flash { app: "WeChat".into(), exe });
     }
-    // KANMURI_DEMO_WEATHER=1: the Dashboard with a made-up reading (no network).
+    // KANMURI_DEMO_WEATHER=1: the Control page's weather, made up (no network).
     if std::env::var_os("KANMURI_DEMO_WEATHER").is_some() {
         with_state(|state| {
             if let Some(m) = state.settings.modules.iter_mut().find(|m| m.id == "weather") {

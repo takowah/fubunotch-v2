@@ -34,8 +34,7 @@ The open island has one bar on top: the tabs, the time, and round buttons for a 
 | ![Accounts](docs/screens/accounts.png) | **Accounts**: your Claude Desktop, Claude Code and Codex accounts, each with its plan and how much of its limits is used. A click switches: Claude Code and Codex through their config folder (new terminals use it), Claude Desktop by swapping its saved login (it restarts, so it asks for a second click first). Accounts set up with AccountDeck / NotchDeck (`%USERPROFILE%\.accountdeck`) are picked up as they are. |
 
 Also:
-- **Dashboard**: the weather (Open-Meteo, off until you turn it on), how much of your day has gone and the next prayer, and switches for Wi-Fi, Bluetooth, the microphone, keep awake, dark mode and lock.
-- **Control**: like Windows' Quick Settings: volume and brightness sliders, which output and microphone are in use, Wi-Fi, Bluetooth and microphone switches.
+- **Control**: every widget on one page, like Windows' Quick Settings: volume and brightness sliders; switches for Wi-Fi, Bluetooth, the microphone, keep awake, dark mode and lock; the weather (Open-Meteo, off until you turn it on); which output and microphone are in use.
 - **Idle island sides**: next to the time, pick the date, network, battery, the next prayer, CPU, RAM or disk (Settings → General).
 - **Prayer**: today's prayer times (Kemenag method), worked out on your PC, with a reminder before each.
 - **Day Progress**: how much of your waking day, week, month and year has gone, and what comes next.
