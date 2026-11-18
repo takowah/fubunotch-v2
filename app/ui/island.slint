@@ -49,11 +49,24 @@ export struct TabInfo {
 }
 
 // One account NotchDeck manages (Accounts tab).
+// One limit window under an account (Accounts tab): "5-hour", 0.32, "32% used", "resets 22:00".
+export struct UsageRow {
+    label: string,
+    used: float,
+    used-text: string,
+    resets: string,
+}
+
 export struct AccountRow {
     id: string,
     name: string,
     initial: string,
     active: bool,
+    // Its plan ("Max 20x"), its limits and a note ("Updated 18 min ago", one line per row).
+    plan: string,
+    windows: [UsageRow],
+    note: string,
+    note-lines: int,
 }
 
 // One app's accounts on the Accounts tab: a title and a line of chips. A
@@ -1234,8 +1247,61 @@ component AccountChip inherits Rectangle {
             vertical-alignment: center;
             overflow: elide;
         }
+        if root.account.plan != "" : Rectangle {
+            y: (parent.height - self.height) / 2;
+            height: 18px;
+            width: badge.preferred-width + 14px;
+            border-radius: 9px;
+            background: root.account.active ? Mini.base.with-alpha(0.12) : Mini.wash.with-alpha(0.16);
+            badge := Text { text: root.account.plan; color: root.account.active ? Mini.base : Mini.ink; font-size: 10.5px; font-weight: 700; vertical-alignment: center; horizontal-alignment: center; }
+        }
     }
     area := TouchArea { enabled: !root.account.active; mouse-cursor: root.account.active ? default : pointer; clicked => { root.clicked(); } }
+}
+
+// A limit under a chip (USAGE_ROW_H in main.rs): its name and when it
+// resets, then a thin bar and how much is used. Amber past 75 %, red past 90 %.
+component UsageLine inherits Rectangle {
+    in property <UsageRow> usage;
+    height: 28px;
+    property <color> fill: root.usage.used >= 0.9 ? #ff453a : root.usage.used >= 0.75 ? #ff9f0a : Mini.ink;
+    Text { x: 4px; y: 0; width: parent.width - 4px - 2px - resets.preferred-width - 6px; height: 13px; text: root.usage.label; color: Mini.text-3; font-size: 11px; font-weight: 600; overflow: elide; vertical-alignment: center; }
+    resets := Text { x: parent.width - self.width - 2px; y: 0; height: 13px; text: root.usage.resets; color: Mini.faint; font-size: 10.5px; vertical-alignment: center; }
+    Rectangle {
+        x: 4px;
+        y: 19px;
+        width: parent.width - 4px - 6px - used.width - 2px;
+        height: 4px;
+        border-radius: 2px;
+        background: Mini.wash.with-alpha(0.14);
+        Rectangle {
+            x: 0;
+            width: root.usage.used <= 0 ? 0 : max(4px, parent.width * min(1, root.usage.used));
+            height: 4px;
+            border-radius: 2px;
+            background: root.fill;
+        }
+    }
+    used := Text { x: parent.width - self.width - 2px; y: 15px; width: 60px; horizontal-alignment: right; height: 13px; text: root.usage.used-text; color: Mini.text-2; font-size: 10.5px; font-weight: 600; vertical-alignment: center; }
+}
+
+// An account: its chip, then its limits and a note (heights in main.rs).
+component AccountBlock inherits VerticalLayout {
+    in property <AccountRow> account;
+    in property <bool> pending;
+    callback clicked();
+    spacing: 5px;
+    AccountChip { account: root.account; pending: root.pending; clicked => { root.clicked(); } }
+    for w in root.account.windows : UsageLine { usage: w; }
+    if root.account.note != "" : Text {
+        height: root.account.note-lines * 13px;
+        x: 4px;
+        text: root.account.note;
+        color: Mini.faint;
+        font-size: 10.5px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
 }
 
 component AccountsPage inherits Rectangle {
@@ -1263,7 +1329,7 @@ component AccountsPage inherits Rectangle {
         background: Mini.wash.with-alpha(0.039);
         VerticalLayout {
             padding: 8px;
-            spacing: 6px;
+            spacing: 8px;
             alignment: start;
             HorizontalLayout {
                 height: 20px;
@@ -1273,7 +1339,7 @@ component AccountsPage inherits Rectangle {
                 Glyph { width: 13px; text: Glyphs.service(g.title); font-size: 12px; color: Mini.label; horizontal-alignment: left; }
                 Text { text: g.title; color: Mini.label; font-size: 12px; font-weight: 600; vertical-alignment: center; overflow: elide; }
             }
-            for a in g.accounts : AccountChip { account: a; pending: root.pending == a.id; clicked => { root.clicked(a.id); } }
+            for a in g.accounts : AccountBlock { account: a; pending: root.pending == a.id; clicked => { root.clicked(a.id); } }
         }
     }
 }

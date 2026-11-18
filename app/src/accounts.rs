@@ -12,6 +12,8 @@ pub struct Account {
     pub service: String,
     pub name: String,
     pub active: bool,
+    /// Its config dir (CLAUDE_CONFIG_DIR, CODEX_HOME, Claude Desktop's saved login); empty: the default.
+    pub dir: String,
 }
 
 /// The services shown, in order, with their titles.
@@ -71,7 +73,8 @@ pub fn parse(bytes: &[u8]) -> Vec<Account> {
             }
             let name = a.get("name").and_then(|x| x.as_str()).unwrap_or(&id).to_string();
             let is_active = active.and_then(|m| m.get(&service)).and_then(|x| x.as_str()) == Some(id.as_str());
-            Some(Account { id, service, name, active: is_active })
+            let dir = a.get("dir").and_then(|x| x.as_str()).unwrap_or("").to_string();
+            Some(Account { id, service, name, active: is_active, dir })
         })
         .collect()
 }

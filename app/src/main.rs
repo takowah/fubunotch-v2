@@ -22,6 +22,7 @@ mod system;
 mod shelf;
 mod snapshot;
 mod accounts;
+mod usage;
 mod store;
 mod theme;
 
@@ -95,7 +96,12 @@ const ASK_ROWS_MAX: usize = 3;
 const ACCOUNT_PAD: f32 = 8.0;
 const ACCOUNT_TITLE_H: f32 = 20.0;
 const ACCOUNT_CHIP_H: f32 = 34.0;
-const ACCOUNT_SPACING: f32 = 6.0;
+const ACCOUNT_SPACING: f32 = 8.0;
+/// Under a chip: its usage rows (label and resets, then the bar and "32% used")
+/// and a note line ("Updated 18 min ago"), $USAGE_GAP apart (AccountBlock).
+const USAGE_ROW_H: f32 = 28.0;
+const USAGE_NOTE_LINE_H: f32 = 13.0;
+const USAGE_GAP: f32 = 5.0;
 /// Prayer: the timeline's width (the right column) and the room at its
 /// ends: half a label (wide enough for "Maghrib" at 11.5 px), so the end
 /// labels sit right under their dots too.
@@ -201,6 +207,8 @@ struct State {
     active_tab: String,
     /// The account NotchDeck was just asked to switch to (shown as busy).
     account_pending: String,
+    /// The Accounts page was open at the last refresh (its usage is read when it opens).
+    accounts_open: bool,
     settings: Settings,
     /// What is playing (the Music module), and its artwork as an image.
     music: music::Snapshot,
@@ -821,23 +829,41 @@ fn morph_to(ui: &Island, state: &mut State, target: (f32, f32)) {
 fn set_accounts(ui: &Island, pending: &str) -> f32 {
     let list = accounts::load();
     let mut groups: Vec<AccountGroup> = Vec::new();
-    let mut most = 0usize;
+    let mut tallest = 0.0f32;
     for (service, title) in accounts::SERVICES.iter() {
+        let mut h = ACCOUNT_TITLE_H;
         let rows: Vec<AccountRow> = list
             .iter()
             .filter(|a| a.service == *service)
-            .map(|a| AccountRow {
-                id: a.id.as_str().into(),
-                name: a.name.as_str().into(),
-                initial: a.name.trim().chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
-                // Once NotchDeck has switched, the pending one is the active one.
-                active: a.active,
+            .map(|a| {
+                let v = usage::view(a);
+                let note_lines = if v.note.is_empty() { 0 } else { v.note.lines().count() };
+                h += ACCOUNT_SPACING
+                    + ACCOUNT_CHIP_H
+                    + v.rows.len() as f32 * (USAGE_GAP + USAGE_ROW_H)
+                    + if note_lines > 0 { USAGE_GAP + note_lines as f32 * USAGE_NOTE_LINE_H } else { 0.0 };
+                let windows: Vec<UsageRow> = v
+                    .rows
+                    .iter()
+                    .map(|r| UsageRow { label: r.label.as_str().into(), used: r.used, used_text: r.used_text.as_str().into(), resets: r.resets.as_str().into() })
+                    .collect();
+                AccountRow {
+                    id: a.id.as_str().into(),
+                    name: a.name.as_str().into(),
+                    initial: a.name.trim().chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
+                    // Once NotchDeck has switched, the pending one is the active one.
+                    active: a.active,
+                    plan: v.plan.as_str().into(),
+                    windows: ModelRc::new(VecModel::from(windows)),
+                    note: v.note.as_str().into(),
+                    note_lines: note_lines as i32,
+                }
             })
             .collect();
         if rows.is_empty() {
             continue;
         }
-        most = most.max(rows.len());
+        tallest = tallest.max(h);
         groups.push(AccountGroup { title: (*title).into(), accounts: ModelRc::new(VecModel::from(rows)) });
     }
     let pending = if list.iter().any(|a| a.id == pending && a.active) { "" } else { pending };
@@ -846,7 +872,24 @@ fn set_accounts(ui: &Island, pending: &str) -> f32 {
         ui.set_account_note(if accounts::installed() { "No accounts in NotchDeck yet" } else { "Install NotchDeck to switch Claude and Codex accounts here" }.into());
     }
     ui.set_account_groups(ModelRc::new(VecModel::from(groups)));
-    2.0 * ACCOUNT_PAD + ACCOUNT_TITLE_H + most as f32 * (ACCOUNT_SPACING + ACCOUNT_CHIP_H)
+    2.0 * ACCOUNT_PAD + tallest
+}
+
+/// The Accounts tab just opened: read the plans and usage again (a snapshot
+/// inline and offline; otherwise on a thread, then refresh).
+fn accounts_opened(ui: &Island) {
+    if snapshot_mode() {
+        usage::sweep(&accounts::load(), false);
+        return;
+    }
+    let weak = ui.as_weak();
+    usage::sweep_in_background(move || {
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak.upgrade() {
+                refresh(&ui);
+            }
+        });
+    });
 }
 
 fn refresh(ui: &Island) {
@@ -970,6 +1013,11 @@ fn refresh(ui: &Island) {
         ui.set_todo_open(state.data.todo.open_count() as i32);
         let shelf_rows: Vec<ShelfRow> = state.data.shelf.iter().map(|f| ShelfRow { name: f.name().into(), detail: f.detail().into() }).collect();
         ui.set_shelf(ModelRc::new(VecModel::from(shelf_rows)));
+        let accounts_open = state.mode == Mode::Expanded && state.active_tab == "accounts";
+        if accounts_open && !state.accounts_open {
+            accounts_opened(ui);
+        }
+        state.accounts_open = accounts_open;
         let accounts_h = if state.active_tab == "accounts" { set_accounts(ui, &state.account_pending) } else { 0.0 };
         ui.set_drop_hover(state.drop_hover);
         *NOTIF_APPS.lock().unwrap_or_else(|e| e.into_inner()) = state.settings.notifications.filter();
@@ -2782,6 +2830,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             region_timer: Timer::default(),
             active_tab: first_tab,
             account_pending: String::new(),
+            accounts_open: false,
             settings,
             music: music::Snapshot::default(),
             music_art: None,
