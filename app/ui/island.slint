@@ -1299,7 +1299,7 @@ component AccountChip inherits Rectangle {
             height: 18px;
             width: badge.preferred-width + 14px;
             border-radius: 9px;
-            background: root.account.active ? Mini.base.with-alpha(0.12) : Mini.wash.with-alpha(0.16);
+            background: root.account.active ? Mini.base.with-alpha(0.12) : Mini.wash.with-alpha(min(1, 0.16 * Mini.wk));
             badge := Text { text: root.account.plan; color: root.account.active ? Mini.base : Mini.ink; font-size: 10.5px; font-weight: 700; vertical-alignment: center; horizontal-alignment: center; }
         }
     }
@@ -1311,7 +1311,7 @@ component AccountChip inherits Rectangle {
 component UsageLine inherits Rectangle {
     in property <UsageRow> usage;
     height: 28px;
-    property <color> fill: root.usage.used >= 0.9 ? #ff453a : root.usage.used >= 0.75 ? #ff9f0a : Mini.ink;
+    property <color> fill: root.usage.used >= 0.9 ? Mini.bad : root.usage.used >= 0.75 ? Mini.warn : Mini.ink;
     Text { x: 4px; y: 0; width: parent.width - 4px - 2px - resets.preferred-width - 6px; height: 13px; text: root.usage.label; color: Mini.text-3; font-size: 11px; font-weight: 600; overflow: elide; vertical-alignment: center; }
     resets := Text { x: parent.width - self.width - 2px; y: 0; height: 13px; text: root.usage.resets; color: Mini.faint; font-size: 10.5px; vertical-alignment: center; }
     Rectangle {
@@ -1320,7 +1320,7 @@ component UsageLine inherits Rectangle {
         width: parent.width - 4px - 6px - used.width - 2px;
         height: 4px;
         border-radius: 2px;
-        background: Mini.wash.with-alpha(0.14);
+        background: Mini.wash.with-alpha(min(1, 0.14 * Mini.wk));
         Rectangle {
             x: 0;
             width: root.usage.used <= 0 ? 0 : max(4px, parent.width * min(1, root.usage.used));
