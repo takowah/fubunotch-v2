@@ -20,7 +20,7 @@ A rewrite of FubuNotch from scratch, native Rust. `crates/island-core`: the acti
 
 ## Identity
 
-- Product "FubuNotch v2", data in `%APPDATA%\FubuNotch v2`, webhook port 47821. Never touch v1's identifier, data folders, pipe (`\\.\pipe\fubunotch-<sid>`) or the `fubunotch-hook` marker in `~/.claude/settings.json`: v1 runs on the same PC.
+- Product "Kanmuri" (renamed from FubuNotch v2 on 18 Nov 2026; crate and exe names stay fubunotch-v2), data in `%APPDATA%\Kanmuri` (copied once from `%APPDATA%\FubuNotch v2`), webhook port 47821. Never touch v1's identifier, data folders, pipe (`\\.\pipe\fubunotch-<sid>`) or the `fubunotch-hook` marker in `~/.claude/settings.json`: v1 runs on the same PC.
 
 ## Rules carried over from v1
 
