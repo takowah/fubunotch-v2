@@ -3678,11 +3678,26 @@ fn fill_setup(win: &SettingsWindow) {
     })
     .unwrap_or_default();
     let have = accounts::claude_slot(&from).map(|slot| setup::summary(&slot)).unwrap_or_default();
+    // What "To" still lacks, part by part: 0 = synced, not sent again.
+    let missing = match (accounts::claude_slot(&from), accounts::claude_slot(&to)) {
+        (Some(f), Some(t)) if from != to => setup::missing(&f, &t),
+        _ => Vec::new(),
+    };
+    let lacks = |id: &str| missing.iter().find(|m| m.0 == id).map(|m| m.1);
     let chips: Vec<SetupPart> = setup::PARTS
         .iter()
         .enumerate()
-        .map(|(i, (id, label))| SetupPart { id: (*id).into(), label: (*label).into(), on: parts.iter().any(|p| p == id), have: have.get(i).map(|h| h.1.as_str()).unwrap_or("").into() })
+        .map(|(i, (id, label))| {
+            let base = have.get(i).map(|h| h.1.clone()).unwrap_or_default();
+            let (synced, line) = match lacks(id) {
+                Some(0) => (true, format!("{base} · synced")),
+                Some(n) => (false, format!("{base} · {n} to send")),
+                None => (false, base),
+            };
+            SetupPart { id: (*id).into(), label: (*label).into(), on: parts.iter().any(|p| p == id), have: line.into(), synced }
+        })
         .collect();
+    win.set_setup_anything(chips.iter().any(|c| c.on && !c.synced));
     win.set_setup_accounts(ModelRc::new(VecModel::from(claude.iter().map(|m| ScreenRow { id: m.id.as_str().into(), label: m.name.as_str().into() }).collect::<Vec<_>>())));
     win.set_setup_from(from.into());
     win.set_setup_to(to.into());
@@ -3695,8 +3710,16 @@ fn fill_setup(win: &SettingsWindow) {
 
 /// Settings > Accounts > MCP servers: the Send setup "From" account's servers.
 fn fill_mcp(win: &SettingsWindow) {
-    let (from, picked, report) = with_state(|s| (s.setup_from.clone(), s.mcp_picked.clone(), s.mcp_report.clone())).unwrap_or_default();
+    let (from, to, picked, report) = with_state(|s| (s.setup_from.clone(), s.setup_to.clone(), s.mcp_picked.clone(), s.mcp_report.clone())).unwrap_or_default();
     let entries = accounts::claude_slot(&from).map(|slot| setup::mcp_entries(&slot)).unwrap_or_default();
+    // Servers "To" already has are left out: the list is what isn't synced yet.
+    let to_slot = if to != from { accounts::claude_slot(&to) } else { None };
+    let total = entries.len();
+    let entries: Vec<setup::McpEntry> = entries.into_iter().filter(|e| to_slot.as_ref().is_none_or(|t| !setup::mcp_there(e, t))).collect();
+    let to_name = accounts::managed().into_iter().find(|m| m.id == to).map(|m| m.name).unwrap_or_default();
+    win.set_mcp_empty(
+        if total == 0 { "This account has no MCP servers.".into() } else { format!("Already synced: {to_name} has all {total} servers.").into() },
+    );
     let rows: Vec<McpItem> = entries
         .iter()
         .map(|e| {
@@ -3759,20 +3782,37 @@ fn fill_chats(win: &SettingsWindow) {
     let mut note = report;
     match list {
         Some((who, folders)) if who == from => {
+            // Chats "To" already has are left out: what is listed is what hasn't been synced.
+            let synced = chats_synced(&from, &to, &folders);
+            let to_name = all.iter().find(|m| m.id == to).map(|m| m.name.clone()).unwrap_or_default();
+            let mut hidden = 0;
             for f in &folders {
-                let n = f.chats.iter().filter(|c| picked.contains(&c.id)).count();
+                let left: Vec<&chats::Chat> = f.chats.iter().filter(|c| !synced.contains(&c.id)).collect();
+                let there = f.chats.len() - left.len();
+                hidden += there;
+                if left.is_empty() {
+                    continue;
+                }
+                let n = left.iter().filter(|c| picked.contains(&c.id)).count();
                 let is_open = open.contains(&f.path);
                 rows.push(ChatItem {
                     id: f.path.as_str().into(),
                     header: true,
                     title: f.name.as_str().into(),
-                    meta: format!("{} chat{}{}", f.chats.len(), if f.chats.len() == 1 { "" } else { "s" }, if n > 0 { format!(" · {n} picked") } else { String::new() }).into(),
-                    on: n > 0 && n == f.chats.len(),
+                    meta: format!(
+                        "{} chat{}{}{}",
+                        left.len(),
+                        if left.len() == 1 { "" } else { "s" },
+                        if there > 0 { format!(" · {there} already in {to_name}") } else { String::new() },
+                        if n > 0 { format!(" · {n} picked") } else { String::new() }
+                    )
+                    .into(),
+                    on: n > 0 && n == left.len(),
                     open: is_open,
                     can_resume: false,
                 });
                 if is_open {
-                    for c in f.chats.iter().take(200) {
+                    for c in left.iter().take(200) {
                         rows.push(ChatItem {
                             id: c.id.as_str().into(),
                             header: false,
@@ -3784,6 +3824,9 @@ fn fill_chats(win: &SettingsWindow) {
                         });
                     }
                 }
+            }
+            if rows.is_empty() && hidden > 0 && note.is_empty() {
+                note = format!("All {hidden} chats are already in {to_name}.");
             }
             if folders.is_empty() && note.is_empty() {
                 note = if service == "desktop" { "No Code-tab chats for this account yet (it needs to have signed in once).".into() } else { "No chats in this account yet.".into() };
@@ -3807,6 +3850,17 @@ fn fill_chats(win: &SettingsWindow) {
     win.set_chats_picked(picked.len() as i32);
     win.set_chats_rows(ModelRc::new(VecModel::from(rows)));
     win.set_chats_report(note.into());
+}
+
+/// The chats of `folders` (account `from`) that account `to` already has.
+fn chats_synced(from: &str, to: &str, folders: &[chats::Folder]) -> std::collections::HashSet<String> {
+    match (accounts::chat_home(from), accounts::chat_home(to)) {
+        (Some(f), Some(t)) => {
+            let ids: Vec<&str> = folders.iter().flat_map(|f| f.chats.iter().map(|c| c.id.as_str())).collect();
+            chats::already_there(&ids, &f, &t)
+        }
+        _ => Default::default(),
+    }
 }
 
 /// Reads an account's chats off the UI thread (hundreds of files), then fills again.
@@ -4142,6 +4196,7 @@ fn open_settings(ui: &Island) {
             "to" => {
                 with_state(|s| {
                     s.chats_to = id.to_string();
+                    s.chats_picked.clear();
                     s.chats_report.clear();
                 });
             }
@@ -4165,9 +4220,10 @@ fn open_settings(ui: &Island) {
                 });
             }
             "pick-folder" => {
+                let synced = with_state(|s| s.chats_list.as_ref().map(|(_, f)| chats_synced(&s.chats_from, &s.chats_to, f))).flatten().unwrap_or_default();
                 with_state(|s| {
                     s.chats_report.clear();
-                    let ids: Vec<String> = s.chats_list.as_ref().and_then(|(_, f)| f.iter().find(|f| f.path == id.as_str())).map(|f| f.chats.iter().map(|c| c.id.clone()).collect()).unwrap_or_default();
+                    let ids: Vec<String> = s.chats_list.as_ref().and_then(|(_, f)| f.iter().find(|f| f.path == id.as_str())).map(|f| f.chats.iter().map(|c| c.id.clone()).filter(|c| !synced.contains(c)).collect()).unwrap_or_default();
                     let all_on = ids.iter().all(|c| s.chats_picked.contains(c));
                     s.chats_picked.retain(|c| !ids.contains(c));
                     if !all_on {
@@ -4239,9 +4295,10 @@ fn open_settings(ui: &Island) {
                 let (from, to, parts) = with_state(|s| (s.setup_from.clone(), s.setup_to.clone(), s.setup_parts.clone().unwrap_or_default())).unwrap_or_default();
                 let report = match (accounts::claude_slot(&from), accounts::claude_slot(&to)) {
                     (Some(f), Some(t)) => {
-                        let picked: Vec<&str> = parts.iter().map(|p| p.as_str()).collect();
+                        let missing = setup::missing(&f, &t);
+                        let picked: Vec<&str> = parts.iter().map(|p| p.as_str()).filter(|p| missing.iter().any(|m| m.0 == *p && m.1 > 0)).collect();
                         match setup::send(&picked, &f, &t) {
-                            Ok(lines) if lines.is_empty() => "Nothing picked to send.".to_string(),
+                            Ok(lines) if lines.is_empty() => "Already synced: nothing sent.".to_string(),
                             Ok(lines) => format!("Sent: {}.", lines.join(", ")),
                             Err(e) => format!("Couldn't send: {e}"),
                         }

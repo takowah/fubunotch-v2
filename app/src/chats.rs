@@ -336,3 +336,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 }
+
+/// The chats of `ids` the other account already has (the same file at the
+/// same place, as a copy would put it): hidden from the list, so what is
+/// left is what has not been synced yet.
+pub fn already_there(ids: &[&str], from: &ChatHome, to: &ChatHome) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    match (from, to) {
+        (ChatHome::Code(a), ChatHome::Code(b)) if a != b => {
+            for id in ids {
+                if let Ok(rel) = Path::new(id).strip_prefix(a) {
+                    if b.join(rel).exists() {
+                        out.insert(id.to_string());
+                    }
+                }
+            }
+        }
+        (ChatHome::Desktop { sessions, uuid: fu }, ChatHome::Desktop { uuid: tu, .. }) if fu != tu => {
+            let orgs: Vec<PathBuf> = ls(&sessions.join(tu)).into_iter().filter(|p| p.is_dir()).collect();
+            for id in ids {
+                if let Some(name) = Path::new(id).file_name() {
+                    if orgs.iter().any(|o| o.join(name).exists()) {
+                        out.insert(id.to_string());
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}

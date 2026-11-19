@@ -48,6 +48,8 @@ export struct SetupPart {
     label: string,
     on: bool,
     have: string,
+    // "To" already has all of it: nothing to send.
+    synced: bool,
 }
 
 // A row of Settings > Accounts > Chats: a folder (header) or one of its chats.
@@ -511,6 +513,8 @@ component SendSetupCard inherits Card {
     in property <[SetupPart]> parts-a;
     in property <[SetupPart]> parts-b;
     in property <string> report;
+    // Something picked that "To" doesn't have yet.
+    in property <bool> anything-to-send;
     callback pick(string, string);
     callback toggle(string);
     callback send();
@@ -547,18 +551,20 @@ component SendSetupCard inherits Card {
                     padding-right: 8px;
                     alignment: center;
                     spacing: 2px;
-                    Text { text: (p.on ? "✓ " : "") + p.label; color: p.on ? K.ink : K.label; font-size: 12.5px; font-weight: 600; }
-                    Text { text: p.have; color: K.hint; font-size: 11px; overflow: elide; }
+                    Text { text: (p.on ? "✓ " : "") + p.label; color: p.on && !p.synced ? K.ink : K.label; font-size: 12.5px; font-weight: 600; }
+                    Text { text: p.have; color: p.synced ? #30d158 : K.hint; font-size: 11px; overflow: elide; }
                 }
                 pa := TouchArea { mouse-cursor: pointer; clicked => { root.toggle(p.id); } }
             }
         }
         HorizontalLayout {
             spacing: 10px;
-            SmallButton { label: "Send"; primary: true; enabled: root.from != root.to; clicked => { root.send(); } }
+            SmallButton { label: "Send"; primary: true; enabled: root.from != root.to && root.anything-to-send; clicked => { root.send(); } }
             Text {
                 horizontal-stretch: 1;
-                text: root.report != "" ? root.report : root.from == root.to ? "Pick two different accounts." : "Adds what the other account lacks; keeps what it has. A backup of each file is made first.";
+                text: root.report != "" ? root.report : root.from == root.to ? "Pick two different accounts."
+                    : !root.anything-to-send ? "Already synced: the other account has everything picked."
+                    : "Adds what the other account lacks; keeps what it has. A backup of each file is made first.";
                 color: K.hint;
                 font-size: 12px;
                 vertical-alignment: center;
@@ -661,6 +667,7 @@ component ChatsCard inherits Card {
 component McpCard inherits Card {
     in property <[McpItem]> rows;
     in property <string> report;
+    in property <string> empty;
     in property <int> picked;
     in property <bool> can-send;
     callback act(string, string);
@@ -670,7 +677,7 @@ component McpCard inherits Card {
         padding-top: 10px;
         padding-bottom: 14px;
         spacing: 4px;
-        if root.rows.length == 0 : Text { text: "This account has no MCP servers."; color: K.hint; font-size: 12px; }
+        if root.rows.length == 0 : Text { text: root.empty; color: K.hint; font-size: 12px; }
         for r in root.rows : Rectangle {
             height: 30px;
             border-radius: 6px;
@@ -1099,6 +1106,7 @@ export component SettingsWindow inherits Window {
     in property <[SetupPart]> setup-parts-a;
     in property <[SetupPart]> setup-parts-b;
     in property <string> setup-report;
+    in property <bool> setup-anything;
     callback setup-act(string, string);
     // Settings > Accounts > Chats and MCP servers.
     in property <string> chats-app;
@@ -1112,6 +1120,7 @@ export component SettingsWindow inherits Window {
     callback chats-act(string, string);
     in property <[McpItem]> mcp-rows;
     in property <string> mcp-report;
+    in property <string> mcp-empty;
     in property <int> mcp-picked;
     callback mcp-act(string, string);
     // A byte as two hex digits: the swatches' "#rrggbb".
@@ -1733,6 +1742,7 @@ export component SettingsWindow inherits Window {
                     parts-a: root.setup-parts-a;
                     parts-b: root.setup-parts-b;
                     report: root.setup-report;
+                    anything-to-send: root.setup-anything;
                     pick(which, id) => { root.setup-act("pick-" + which, id); }
                     toggle(id) => { root.setup-act("toggle", id); }
                     send => { root.setup-act("send", ""); }
@@ -1741,6 +1751,7 @@ export component SettingsWindow inherits Window {
                 if root.page == "accounts" : McpCard {
                     rows: root.mcp-rows;
                     report: root.mcp-report;
+                    empty: root.mcp-empty;
                     picked: root.mcp-picked;
                     can-send: root.setup-from != root.setup-to;
                     act(a, id) => { root.mcp-act(a, id); }

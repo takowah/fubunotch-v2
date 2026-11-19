@@ -460,3 +460,83 @@ mod mcp_tests {
         let _ = std::fs::remove_dir_all(root);
     }
 }
+
+/// How much of each part `send` would still add to `to` (0 = synced), by the
+/// same rules as `send`: the model differs, rules/plugins/hooks/variables/
+/// servers/skills it lacks, a CLAUDE.md where it has none.
+pub fn missing(from: &Slot, to: &Slot) -> Vec<(String, usize)> {
+    let src = read(&from.dir.join("settings.json")).unwrap_or(Value::Null);
+    let dst = read(&to.dir.join("settings.json")).unwrap_or(Value::Null);
+    let keys_missing = |a: Map<String, Value>, b: Map<String, Value>| a.keys().filter(|k| !b.contains_key(*k)).count();
+    PARTS
+        .iter()
+        .map(|(part, _)| {
+            let n = match *part {
+                "model" => usize::from(src.get("model").is_some_and(|m| !m.is_null() && dst.get("model") != Some(m))),
+                "permissions" => {
+                    let (sp, dp) = (obj(src.get("permissions")), obj(dst.get("permissions")));
+                    let mut n = 0;
+                    for key in ["allow", "deny", "ask", "additionalDirectories"] {
+                        let have: Vec<Value> = dp.get(key).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+                        n += sp.get(key).and_then(|v| v.as_array()).map_or(0, |a| a.iter().filter(|x| !have.contains(x)).count());
+                    }
+                    n + usize::from(sp.contains_key("defaultMode") && !dp.contains_key("defaultMode"))
+                }
+                "plugins" => keys_missing(obj(src.get("enabledPlugins")), obj(dst.get("enabledPlugins"))) + keys_missing(obj(src.get("extraKnownMarketplaces")), obj(dst.get("extraKnownMarketplaces"))),
+                "hooks" => {
+                    let dh = obj(dst.get("hooks"));
+                    obj(src.get("hooks"))
+                        .iter()
+                        .map(|(event, list)| {
+                            let seen: Vec<Value> = dh.get(event).and_then(|v| v.as_array()).map(|a| a.iter().map(sort_deep).collect()).unwrap_or_default();
+                            list.as_array().map_or(0, |l| l.iter().filter(|e| !seen.contains(&sort_deep(e))).count())
+                        })
+                        .sum()
+                }
+                "env" => keys_missing(obj(src.get("env")), obj(dst.get("env"))),
+                "mcp" => keys_missing(obj(read(&from.state).as_ref().and_then(|v| v.get("mcpServers"))), obj(read(&to.state).as_ref().and_then(|v| v.get("mcpServers")))),
+                "skills" => listed(&from.dir.join("skills")).iter().filter(|n| !to.dir.join("skills").join(n).exists()).count(),
+                "memory" => usize::from(from.dir.join("CLAUDE.md").exists() && !to.dir.join("CLAUDE.md").exists()),
+                _ => 0,
+            };
+            (part.to_string(), n)
+        })
+        .collect()
+}
+
+/// Whether `to` already has the MCP entry (by its name, where a send puts it).
+pub fn mcp_there(e: &McpEntry, to: &Slot) -> bool {
+    let st = read(&to.state).unwrap_or(Value::Null);
+    if e.scope == "project" {
+        st.get("projects").and_then(|p| p.get(&e.project)).and_then(|p| p.get("mcpServers")).and_then(|m| m.get(&e.name)).is_some()
+    } else {
+        st.get("mcpServers").and_then(|m| m.get(&e.name)).is_some()
+    }
+}
+
+#[cfg(test)]
+mod missing_tests {
+    use super::*;
+
+    #[test]
+    fn nothing_missing_after_a_send() {
+        let base = std::env::temp_dir().join(format!("kanmuri-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let mk = |n: &str| {
+            let dir = base.join(n);
+            std::fs::create_dir_all(&dir).unwrap();
+            Slot { state: dir.join(".claude.json"), dir }
+        };
+        let (a, b) = (mk("a"), mk("b"));
+        std::fs::write(a.dir.join("settings.json"), r#"{"model":"opus","permissions":{"allow":["Read","Bash(ls)"]},"env":{"X":"1"},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"a"}]}]},"enabledPlugins":{"p@m":true}}"#).unwrap();
+        std::fs::write(&a.state, r#"{"mcpServers":{"one":{"command":"x"}}}"#).unwrap();
+        std::fs::create_dir_all(a.dir.join("skills/s1")).unwrap();
+        std::fs::write(a.dir.join("CLAUDE.md"), "m").unwrap();
+        let before: usize = missing(&a, &b).iter().map(|x| x.1).sum();
+        assert_eq!(before, 1 + 2 + 1 + 1 + 1 + 1 + 1 + 1);
+        let all: Vec<&str> = PARTS.iter().map(|p| p.0).collect();
+        send(&all, &a, &b).unwrap();
+        assert!(missing(&a, &b).iter().all(|x| x.1 == 0), "{:?}", missing(&a, &b));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}
