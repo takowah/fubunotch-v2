@@ -33,9 +33,9 @@ The open island has one bar on top: the tabs, the time, the mascot, and round bu
 | ![Notifications](docs/screens/notifications.png) | **Notifications**: Windows notifications, mirrored on the island, with each app's own icon. One app shows two at most, so a busy chat can't fill the page. A click opens the app. A switch per app in Settings. While the module is on, Windows' own pop-up banners stay off for those apps (they still reach Windows' notification centre); turning the module off, or quitting FubuNotch, puts every app back as it was. **Do not disturb** keeps the island down for notifications, calls excepted; it comes on by itself while a Focus round runs. |
 | ![Focus](docs/screens/focus.png) | **Focus** and **Water**: Pomodoro rounds and breaks with a log of how long each round really was; a glass at a time toward a daily goal, reminders after a while without one, only inside your active hours. |
 | ![To-do](docs/screens/todo.png) | **To-do** and **Shelf**: tick to strike through (done ones sink to the bottom), drag the dots to reorder, a log of what you cleared; drop files on the island to keep them handy (only their place is remembered). |
-| ![Control](docs/screens/control.png) | **Control**: volume and brightness sliders; switches for Wi-Fi, Bluetooth, the microphone, keep awake, dark mode and lock; the weather (Open-Meteo, off until you turn it on); which output and which microphone are in use. |
 
 Also:
+- **Control**: volume and brightness sliders; switches for Wi-Fi, Bluetooth, the microphone, keep awake, dark mode and lock; the weather (Open-Meteo, off until you turn it on); which output and which microphone are in use.
 - **Idle island sides**: next to the time, pick the date, network, battery, the next prayer, CPU, RAM or disk (Settings → General).
 - **Prayer**: today's prayer times (Kemenag method), worked out on your PC, with a reminder before each.
 - **Day Progress**: how much of your waking day, week, month and year has gone, and what comes next.
