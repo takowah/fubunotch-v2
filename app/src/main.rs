@@ -3112,7 +3112,17 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
     let now = system::status_now();
     // The screens to pick from: the main one first, then the others by name.
     let mut screens: Vec<ScreenRow> = Vec::new();
-    win.window().with_winit_window(|w: &winit::window::Window| {
+    // Asked of the island's window: a Settings window just made has no native
+    // window yet, so it saw no screens and General hid Screen and Move
+    // automatically (19 Nov 2026).
+    let island = ISLAND.with(|i| i.borrow().as_ref().and_then(|w| w.upgrade()));
+    let any = |f: &mut dyn FnMut(&winit::window::Window)| {
+        let done = island.as_ref().and_then(|ui| ui.window().with_winit_window(|w: &winit::window::Window| f(w)));
+        if done.is_none() {
+            win.window().with_winit_window(|w: &winit::window::Window| f(w));
+        }
+    };
+    any(&mut |w: &winit::window::Window| {
         let main = w.primary_monitor().and_then(|m| m.name());
         let mut all: Vec<String> = w.available_monitors().filter_map(|m| m.name()).collect();
         all.sort();
