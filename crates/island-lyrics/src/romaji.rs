@@ -383,7 +383,7 @@ mod tests {
         assert!(words.iter().any(|w| w.text == "君" && w.ruby == "きみ"), "{words:?}");
         assert!(words.iter().any(|w| w.text == "忘" && w.ruby == "わす"), "{words:?}");
         assert!(words.iter().filter(|w| !w.ruby.is_empty()).all(|w| has_kanji(&w.text)), "furigana only over kanji");
-        // The owner's line (平行線, 19 Nov 2026).
+        // A line that went wrong (平行線, 19 Nov 2026).
         let line = "太陽系を抜け出して平行線で交わろう";
         let words = line_to_ruby(line);
         assert_eq!(words.iter().map(|w| w.text.as_str()).collect::<String>(), line);

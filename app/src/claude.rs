@@ -82,7 +82,7 @@ pub enum Plan {
 const OPTION_LABEL: usize = 22;
 
 /// Claude Code's AskUserQuestion is a multiple-choice question, not a tool to
-/// allow (the owner, 18 Nov 2026: "tadi kan multiple choice"). One question
+/// allow (18 Nov 2026: "tadi kan multiple choice"). One question
 /// with one answer to pick: its options are the buttons, and a click answers
 /// it (main.rs `answer_question`). Anything else (several questions, several
 /// answers): a notice, answered in Claude Code.

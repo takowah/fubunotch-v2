@@ -1,14 +1,15 @@
-// The island, drawn after Mini Island for Windows (its look and sizes, read
-// from its own code and from pictures of it on the owner's screen): a near
-// solid dark body whose left side takes the colour of what it shows (the
-// app's, the song's), one shape that morphs between a hidden handle, a
-// capsule (a notification, the song, the line being sung) and an open list
-// with tabs (Notifications, Music, Lyrics, Accounts). Its size and radius
+// The island. Its look started from Kanmuri's (a fork of FubuNotch v2 by a
+// colleague, which adapted Mini Island for Windows and the Poni notch app):
+// a near solid dark body whose left side takes the colour of what it shows
+// (the app's, the song's), one shape that morphs between a hidden handle, a
+// capsule (the time and the mascot, a notification, the song, the line being
+// sung) and an open panel with tabs (Notifications, Music, Focus, Water,
+// To-do, Shelf, Control, Accounts, Prayer, Day Progress). Its size and radius
 // spring between modes; pages fade. The window itself never changes size:
 // Rust clips it to the island with a window region.
 //
 // The capsule is drawn at Mini Island's "Extra large" size (Mini.k = 1.5);
-// the notification card and the open list at its normal size.
+// the notification card and the open panel at its normal size.
 
 // Allo (Josh Puckett, SIL OFL 1.1, assets/fonts/OFL-Allo.txt), built into
 // the app: the island's and Settings' text. Icons stay Segoe Fluent Icons.
@@ -568,7 +569,7 @@ component AppIcon inherits Rectangle {
     border-radius: root.has-logo ? root.size / 2 : root.size * 0.28;
     background: root.has-logo ? transparent : Mini.wash.with-alpha(min(1, 0.12 * Mini.wk));
     if root.has-logo : Image { width: parent.width; height: parent.height; source: root.logo; image-fit: contain; }
-    // No logo: the app glyph, never the app's initial (the owner, 18 Nov 2026).
+    // No logo: the app glyph, never the app's initial (18 Nov 2026).
     if !root.has-logo : Glyph { text: "\u{ECAA}"; font-size: root.size * 0.5; color: Mini.text-2; }
 }
 
@@ -814,7 +815,7 @@ component ToggleTile inherits VerticalLayout {
     in property <bool> enabled: true;
     callback clicked();
     // One width for every tile, whatever its name: rows of them line up in
-    // columns (a name's width set each one apart: the owner, 19 Nov 2026).
+    // columns (a name's width set each one apart: 19 Nov 2026).
     width: 84px;
     spacing: 5px;
     alignment: center;
@@ -1076,7 +1077,7 @@ component Page inherits Rectangle {
     opacity: shown ? 1 : 0;
     animate opacity { duration: Ice.fade; easing: ease-out; }
     // A page rises into place as it fades in (sinks as it fades out): a
-    // switch of tabs reads as a move, not a blink (the owner, 19 Nov 2026).
+    // switch of tabs reads as a move, not a blink (19 Nov 2026).
     y: shown ? 0 : 10px;
     animate y { duration: 300ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
     visible: self.opacity > 0.01;
@@ -1689,7 +1690,7 @@ component AccountBlock inherits VerticalLayout {
     }
 }
 
-// Control, every widget on one page (the owner, 19 Nov 2026: "control itu
+// Control, every widget on one page (19 Nov 2026: "control itu
 // widget semua, jadi dashboard itu hapus"): the sound and brightness
 // sliders and six switches (Wi-Fi, Bluetooth, microphone, keep awake, dark
 // mode, lock) on the left; the weather, then the outputs and microphones on
@@ -2855,7 +2856,7 @@ export component Island inherits Window {
     property <float> body-alpha: Mini.solid * (root.compact && !root.pointer-on && !root.alerting ? Mini.closed : 1);
     animate body-alpha { duration: 260ms; easing: ease-in-out; }
     // Liquid Glass' picture: on from the first frame and through the spring
-    // (stretched for that moment), never a plain body in between (the owner: no lag).
+    // (stretched for that moment), never a plain body in between (no lag).
     property <float> glass-in: Mini.glass && root.has-glass && !root.hidden ? 1 : 0;
 
     // Hidden: a wider strip than the handle, so it is easy to point at.

@@ -471,7 +471,7 @@ fn item(a: &Activity, logo: Option<slint::Image>, logo_small: Option<slint::Imag
         source: if a.source.starts_with("icon:") { "system".into() } else { a.source.as_str().into() },
         icon: match a.source.strip_prefix("icon:") {
             Some(name) => name.into(),
-            // The island's own modules: a drawn icon (the owner: never a letter in a circle).
+            // The island's own modules: a drawn icon (never a letter in a circle).
             None if logo.is_none() => module_icon(&a.source).into(),
             None => "".into(),
         },
@@ -511,7 +511,7 @@ fn notif_key(n: &notif::Notif) -> &str {
 }
 
 /// The most rows one app gets on the Notifications page, so a chatty app
-/// can't fill it (the owner, 18 Nov 2026).
+/// can't fill it (18 Nov 2026).
 const NOTIF_PER_APP: usize = 2;
 
 /// The Notifications page's rows (indexes in the list, newest first): as
@@ -689,7 +689,7 @@ static AUTO_AT: Mutex<String> = Mutex::new(String::new());
 
 /// Where the island wants to be, the moment it first wanted it, and a fullscreen
 /// window remembered until it is no longer fullscreen (so the island doesn't come
-/// back over a video still playing while the owner works on the other screen).
+/// back over a video still playing while one works on the other screen).
 struct AutoMove {
     want: Option<String>,
     since: std::time::Instant,

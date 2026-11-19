@@ -1,4 +1,4 @@
-// Settings > Accounts > Chats (NotchDeck's Chats tab, the owner 19 Nov 2026:
+// Settings > Accounts > Chats (NotchDeck's Chats tab, 19 Nov 2026:
 // "fitur notchdeck jangan ada yg kena nerf"): an account's chats, grouped by
 // folder, newest first, copied into another account of the same app. Claude
 // Code chats (<config>\projects\<project>\<id>.jsonl, plus the chat's side

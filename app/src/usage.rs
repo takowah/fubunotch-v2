@@ -1,5 +1,5 @@
 // Usage: each account's plan and how much of its limits is used,
-// shown under its chip on the Accounts tab (the owner, 18 Nov 2026: "account
+// shown under its chip on the Accounts tab (18 Nov 2026: "account
 // ama AI usage itu harusnya 1 tab").
 //
 // - Claude Code: the plan from the account's `.credentials.json`; the usage
@@ -54,7 +54,7 @@ pub struct Usage {
     pub updated: i64,
     /// The account these numbers are of (Claude Code's accountUuid). A slot
     /// signed in again as someone else drops them: never one account's usage
-    /// under another's name (the owner, 19 Nov 2026: "misleading").
+    /// under another's name (19 Nov 2026: "misleading").
     pub account: String,
 }
 

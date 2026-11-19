@@ -1,5 +1,5 @@
 // "Send setup to another account" (what NotchDeck / AccountDeck's Tools did,
-// the owner, 19 Nov 2026: "kek sync sync skill gitu"): parts of one Claude
+// 19 Nov 2026: "kek sync sync skill gitu"): parts of one Claude
 // Code account's setup copied into another. The same rules as NotchDeck's
 // data.js envCopy: merge, never remove; what the destination already has
 // stays (the model is the one exception: it is replaced); every file changed

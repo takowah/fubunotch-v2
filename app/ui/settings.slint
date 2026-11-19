@@ -241,8 +241,8 @@ component Field inherits Rectangle {
         font-size: 12.5px;
         single-line: true;
         accepted => { root.accepted(self.text); }
-        // Clicking away saves too: there is no Save button (the owner,
-        // 19 Nov 2026: "ntah dimana tombol save nya").
+        // Clicking away saves too: there is no Save button (19 Nov 2026:
+        // "ntah dimana tombol save nya").
         changed has-focus => {
             if (!self.has-focus && self.text != root.text && root.save-on-leave) { root.accepted(self.text); }
         }
