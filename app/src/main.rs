@@ -1549,11 +1549,13 @@ fn refresh(ui: &Island) {
             state.held = false;
         }
         ui.set_held(state.held);
-        // Line stays switched on, but shows only while there is music (a
-        // browser's session drops out for a moment between songs).
-        // Like Mini Island: while a song plays the lyric shows by itself; Line keeps it when paused too.
-        // A question from Claude Code takes the capsule (with its Allow / Deny) over the lyric.
-        let line = (state.line_held || state.music.playing) && state.music.has_session && !view.front.is_some_and(|a| a.kind == Kind::Ask);
+        // Line shows the lyric on the capsule only when switched on (the owner,
+        // 19 Nov 2026: not by itself while a song plays, as Kanmuri / Mini Island
+        // did; untouched, the capsule goes back to quiet). It stays switched on,
+        // but shows only while there is music (a browser's session drops out for
+        // a moment between songs). A question from Claude Code takes the capsule
+        // (with its Allow / Deny) over the lyric.
+        let line = state.line_held && state.music.has_session && !view.front.is_some_and(|a| a.kind == Kind::Ask);
         ui.set_line_held(line);
         let ytm = ytm_live(state, now);
         let capsule_line = if line { capsule_lyric(state) } else { String::new() };
