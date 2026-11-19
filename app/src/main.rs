@@ -819,17 +819,20 @@ fn auto_screen_check() {
         if want == current {
             a.want = None;
         } else if a.want.as_deref() != Some(want.as_str()) {
+            store::log(&format!("island: wants {want} (on {current}, in use {})", fg_screen.as_deref().unwrap_or("-")));
             a.want = Some(want);
             a.since = std::time::Instant::now();
         } else if a.since.elapsed() >= std::time::Duration::from_millis(1900) && !busy {
             a.want = None;
             move_to = Some(want);
+        } else if busy {
+            store::log("island: move waits, the island is open");
         }
-        if a.want.is_some() || a.fullscreen != 0 {
-            a.timer.start(slint::TimerMode::SingleShot, std::time::Duration::from_millis(2000), auto_screen_check);
-        } else {
-            a.timer.stop();
-        }
+        // Checked again every second while Move automatically is on, as Mini
+        // Island does (its Update-Position runs on a timer): Windows' foreground
+        // event alone missed switches (Chrome on the other screen for 20 s,
+        // 19 Nov 2026). A check is two Win32 calls; nothing runs while it is off.
+        a.timer.start(slint::TimerMode::SingleShot, std::time::Duration::from_millis(1000), auto_screen_check);
         move_to
     });
     if let Some(to) = move_to {
@@ -847,7 +850,9 @@ fn place(ui: &Island) {
     let want = if at.is_empty() { SCREEN.lock().unwrap_or_else(|e| e.into_inner()).clone() } else { at };
     ui.window().with_winit_window(|win: &winit::window::Window| {
         let picked = if want.is_empty() { None } else { win.available_monitors().find(|m| m.name().as_deref() == Some(want.as_str())) };
-        let fallback = if want.is_empty() { win.current_monitor().or_else(|| win.primary_monitor()) } else { win.primary_monitor() };
+        // "" is the main screen (Mini Island's Get-HomeScreen): not the one it
+        // happens to be on, which left a pick of "Screen 2 (main)" doing nothing.
+        let fallback = win.primary_monitor().or_else(|| win.current_monitor());
         if let Some(monitor) = picked.or(fallback) {
             let scale = monitor.scale_factor();
             let mw = monitor.size().width as f64;
@@ -3913,6 +3918,7 @@ fn open_settings(ui: &Island) {
     });
     let island = ui.as_weak();
     win.on_screen_picked(move |id| {
+        store::log(&format!("settings: screen picked {id}"));
         if let Some(ui) = island.upgrade() {
             // "auto:<mode>": Move automatically; else the home screen.
             match id.strip_prefix("auto:") {
@@ -5490,6 +5496,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 popup_style(hwnd);
                 guard_on_top(hwnd);
             }
+            // Move automatically starts checking (when it is on).
+            auto_screen_check();
             refresh(&ui);
             if settings_at_start {
                 open_settings(&ui);
