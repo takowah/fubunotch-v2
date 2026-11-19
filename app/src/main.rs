@@ -11,6 +11,7 @@ mod prayer;
 mod day;
 mod banners;
 mod mascot;
+mod pet;
 mod bg;
 mod claude;
 mod local_time;
@@ -128,8 +129,14 @@ const PRAYER_TRACK_INSET: f32 = 28.0;
 const PRAYER_LATE_MIN: u32 = 5;
 /// Mini Island's $MAX_ISLAND_H.
 const EXPANDED_MAX_H: f32 = 440.0;
+/// Settings' sidebar (SettingsWindow in settings.slint): the mascot's wall.
+const SETTINGS_SIDEBAR_W: f32 = 220.0;
 /// Finished tasks shown in the log (more are kept).
 const TODO_LOG_SHOWN: usize = 100;
+/// The to-do page: its input row, then a task (or a log line) a row.
+const TODO_INPUT_H: f32 = 38.0;
+const TODO_PITCH: f32 = 28.0;
+const TODO_LOG_PITCH: f32 = 24.0;
 /// How long a Windows notification floats on the capsule, at least.
 const NOTIF_HOLD_MS: u64 = 5_000;
 
@@ -207,6 +214,9 @@ struct State {
     /// The mascot's life and its clock (running only while the island shows).
     life: mascot::Life,
     life_timer: Timer,
+    /// The mascot walking about Settings, and its clock (only while Settings is open).
+    pet: Option<pet::Pet>,
+    pet_timer: Option<Timer>,
     /// The island's size for its mode, and the timer that narrows the window
     /// region to it once the spring has finished.
     size_to: (f32, f32),
@@ -1422,31 +1432,25 @@ fn refresh(ui: &Island) {
         };
         ui.set_clock(SharedString::from(clock));
 
-        // Tabs, as Mini Island's list: Notifications (when there are some, or
-        // no song), Music and Lyrics (while a song plays, Lyrics when it has
-        // them), Accounts (once accounts are set up).
+        // Tabs in Settings → Modules' order, each while its module is on:
+        // Notifications when there are some (or no song), Music while a song
+        // plays (the lyrics beside it when it has some), Accounts once
+        // accounts are set up, the rest always.
         let has_lyrics = state.lyrics.as_ref().is_some_and(|l| l.status == island_lyrics::Status::Found && !l.lines.is_empty());
-        let mut tab_ids: Vec<(&str, &str)> = Vec::new();
         let asks = ask_rows(&state.arbiter, &mut state.logos, scale);
-        if !state.notifications.is_empty() || !asks.is_empty() || !state.music.has_session {
-            tab_ids.push(("notifications", "Notifications"));
-        }
-        if state.music.has_session {
-            // One tab: the player, with the lyrics beside it when the song has some.
-            tab_ids.push(("music", "Music"));
-        }
-        if state.settings.is_on("prayer") {
-            tab_ids.push(("prayer", "Prayer"));
-        }
-        if state.settings.is_on("day") {
-            tab_ids.push(("day", "Day Progress"));
-        }
-        if state.settings.is_on("control") {
-            tab_ids.push(("control", "Control"));
-        }
-        if accounts::installed() {
-            tab_ids.push(("accounts", "Accounts"));
-        }
+        let show_notifications = !state.notifications.is_empty() || !asks.is_empty() || !state.music.has_session;
+        let tab_ids: Vec<(&str, &str)> = state
+            .settings
+            .tabs()
+            .into_iter()
+            .filter(|m| match m.id {
+                "notifications" => show_notifications,
+                "music" => state.music.has_session,
+                "accounts" => accounts::installed(),
+                _ => true,
+            })
+            .map(|m| (m.id, m.name))
+            .collect();
         let tabs: Vec<TabInfo> = tab_ids.iter().map(|(id, name)| TabInfo { id: (*id).into(), label: (*name).into() }).collect();
         if !tabs.iter().any(|t| t.id == state.active_tab.as_str()) {
             state.active_tab = tab_ids.first().map_or("notifications", |t| t.0).into();
@@ -1677,7 +1681,10 @@ fn refresh(ui: &Island) {
             Mode::Expanded => {
                 let page = match state.active_tab.as_str() {
                     "music" if has_lyrics => sizes.expanded_tall_h - EXPANDED_CHROME,
-                    "music" | "prayer" | "day" => page_h,
+                    "music" | "prayer" | "day" | "focus" | "water" | "shelf" => page_h,
+                    // The to-do grows a row a task, up to the island's cap.
+                    "todo" if !ui.get_todo_show_log() => (TODO_INPUT_H + state.data.todo.tasks.len().max(1) as f32 * TODO_PITCH).max(page_h),
+                    "todo" => (TODO_INPUT_H + todo_log_rows(&state.data.todo.log, &local_time::today()).len().max(1) as f32 * TODO_LOG_PITCH).max(page_h),
                     "accounts" => accounts_h.max(page_h),
                     "control" => control_h.max(page_h),
                     _ if state.notifications.is_empty() && ask_count == 0 => page_h,
@@ -1719,11 +1726,11 @@ fn refresh(ui: &Island) {
             Mode::Compact if front_question => COMPACT_QUESTION,
             Mode::Compact if front_kind == Some(Kind::Ask) => COMPACT_NOTICE,
             Mode::Compact if (front_kind == Some(Kind::Ambient) || song_over) && state.music.has_session => COMPACT_SONG,
-            Mode::Compact if front_id.is_some() => COMPACT_BUSY,
+            Mode::Compact if front_id.is_some() => (COMPACT_BUSY.0 + mascot_room(state, ui.window().scale_factor()), COMPACT_BUSY.1),
             Mode::Compact => {
                 {
                     // Room for what the idle island shows next to the time.
-                    let extra = slot_room(&ui.get_idle_left()) + slot_room(&ui.get_idle_right());
+                    let extra = slot_room(&ui.get_idle_left()) + slot_room(&ui.get_idle_right()) + mascot_room(state, ui.window().scale_factor());
                     // The time alone keeps Mini Island's idle width; with sides, just their room.
                     // (The idle width less the time's 120 px is its margin.)
                     (if extra > 0.0 { sizes.idle_w - (COMPACT_IDLE.0 - 120.0) + extra } else { sizes.idle_w }, sizes.idle_h)
@@ -1732,8 +1739,10 @@ fn refresh(ui: &Island) {
         };
         morph_to(ui, state, size);
         glass_sync(ui, state);
-        // The mascot lives only while it can be seen: no ticks when hidden.
-        if state.mode != Mode::Hidden && state.settings.look.mascot {
+        // The mascot lives only while it is drawn: the open island's top bar,
+        // the capsule's idle or one-line state. No ticks otherwise.
+        let one_line = !line && !notice && front_kind != Some(Kind::Ask) && !((front_kind == Some(Kind::Ambient) || song_over) && state.music.has_session);
+        if state.settings.look.mascot && (state.mode == Mode::Expanded || (state.mode == Mode::Compact && one_line)) {
             if !state.life_timer.running() {
                 let weak = ui.as_weak();
                 state.life_timer.start(TimerMode::Repeated, std::time::Duration::from_millis(mascot::TICK_MS), move || {
@@ -1812,7 +1821,8 @@ fn refresh(ui: &Island) {
 /// One tick of the mascot's life: the frame, and where it stands.
 fn mascot_tick(ui: &Island) {
     let pose = with_state(|state| {
-        let roam = state.mode == Mode::Expanded && state.active_tab == "home";
+        // Room to wander in the open island's top bar; none in the capsule.
+        let roam = state.mode == Mode::Expanded;
         state.life.tick(roam)
     });
     if let Some(p) = pose {
@@ -2432,6 +2442,17 @@ fn on_flash(ui: &Island, f: flash::Flash) {
 
 /// The room a side of the idle island takes, px: fixed per kind (the widest
 /// it gets), so the capsule doesn't twitch as a number changes.
+/// The capsule's mascot (Mascot in island.slint): the sprite at a whole
+/// multiple of its 32 pixels, the nearest to 32 logical px, plus its gap.
+fn mascot_px(scale: f32) -> f32 {
+    (scale.round().max(1.0) * 32.0) / scale.max(0.5)
+}
+
+fn mascot_room(state: &State, scale: f32) -> f32 {
+    // Its box overhangs by the sprite's empty columns (4 of 32 each side).
+    if state.settings.look.mascot { mascot_px(scale) * 0.75 + 10.0 } else { 0.0 }
+}
+
 fn slot_room(k: &str) -> f32 {
     match k {
         "date" => 84.0,
@@ -3084,12 +3105,18 @@ fn change_settings(ui: &Island, f: impl FnOnce(&mut Settings)) {
             eprintln!("settings not saved: {err}");
         }
         sync_banners(state);
+        // The mascot cheers each change.
+        if let Some(p) = state.pet.as_mut() {
+            p.cheer();
+        }
         state.settings_window.as_ref().map(|w| (w.as_weak(), state.settings.clone()))
     })
     .flatten();
     if let Some((win, settings)) = refill {
         if let Some(win) = win.upgrade() {
             fill_settings(&win, &settings);
+            // The mascot just turned on: she walks again.
+            start_pet();
         }
     }
     refresh(ui);
@@ -3770,6 +3797,7 @@ fn open_settings(ui: &Island) {
     let existing = with_state(|state| state.settings_window.as_ref().map(|w| w.as_weak())).flatten();
     if let Some(win) = existing.and_then(|w| w.upgrade()) {
         let _ = win.show();
+        start_pet();
         return;
     }
     let Ok(win) = SettingsWindow::new() else { return };
@@ -3868,7 +3896,12 @@ fn open_settings(ui: &Island) {
     win.on_theme_picked(move |theme| {
         if let Some(ui) = island.upgrade() {
             change_settings(&ui, |s| s.look.theme = theme.to_string());
-            with_state(|state| state.bg_preview = None);
+            with_state(|state| {
+                state.bg_preview = None;
+                if let Some(p) = state.pet.as_mut() {
+                    p.poke(&theme);
+                }
+            });
             update_background(&ui);
         }
     });
@@ -4188,8 +4221,68 @@ fn open_settings(ui: &Island) {
         Timer::single_shot(std::time::Duration::from_millis(50), release_settings);
         slint::CloseRequestResponse::HideWindow
     });
+    win.on_pet_clicked(|| {
+        with_state(|state| {
+            let theme = state.settings.look.theme();
+            if let Some(p) = state.pet.as_mut() {
+                p.poke(theme);
+            }
+        });
+    });
     with_state(|state| state.settings_window = Some(win));
     update_background(ui);
+    start_pet();
+}
+
+/// The Settings window's room for the mascot, from its height now.
+fn pet_room(win: &SettingsWindow) -> pet::Room {
+    let h = win.window().size().height as f32 / win.window().scale_factor().max(0.5);
+    pet::Room { h: if h > 10.0 { h } else { 680.0 }, wall: SETTINGS_SIDEBAR_W, size: win.get_pet_size() }
+}
+
+/// The mascot's clock: 10 ticks a second while Settings is open and the
+/// mascot is on, nothing otherwise.
+fn start_pet() {
+    if snapshot_mode() {
+        // No clock in a snapshot: she just stands on the floor.
+        if let Some(win) = with_state(|state| state.settings_window.as_ref().map(|w| w.as_weak())).flatten().and_then(|w| w.upgrade()) {
+            let p = pet::Pet::new(pet_room(&win));
+            win.set_pet_x(p.x);
+            win.set_pet_y(p.y);
+        }
+        return;
+    }
+    let wanted = with_state(|state| state.settings.look.mascot && state.pet_timer.is_none()).unwrap_or(false);
+    if !wanted {
+        return;
+    }
+    let timer = Timer::default();
+    timer.start(TimerMode::Repeated, std::time::Duration::from_millis(1000 / pet::HZ), pet_tick);
+    with_state(|state| state.pet_timer = Some(timer));
+}
+
+/// Moves the mascot one step and draws it; stops when Settings is gone,
+/// hidden, or the mascot is turned off.
+fn pet_tick() {
+    let win = with_state(|state| state.settings_window.as_ref().map(|w| w.as_weak())).flatten().and_then(|w| w.upgrade());
+    let on = with_state(|state| state.settings.look.mascot).unwrap_or(false);
+    let Some(win) = win.filter(|w| on && w.window().is_visible()) else {
+        with_state(|state| state.pet_timer = None);
+        return;
+    };
+    let room = pet_room(&win);
+    let shown = with_state(|state| {
+        let p = state.pet.get_or_insert_with(|| pet::Pet::new(room));
+        p.tick(room);
+        (p.x, p.y, p.frame, p.left, p.say.clone())
+    });
+    if let Some((x, y, frame, left, say)) = shown {
+        win.set_pet_x(x);
+        win.set_pet_y(y);
+        win.set_pet_frame(frame.into());
+        win.set_pet_left(left);
+        win.set_pet_say(say.into());
+    }
 }
 
 /// Drops the closed Settings window and its caches, then hands the freed
@@ -4201,6 +4294,7 @@ fn release_settings() {
         s.chats_loading = false;
         s.bg_preview = None;
         s.bg_key.clear();
+        s.pet_timer = None;
         s.settings_window.take()
     })
     .flatten();
@@ -4387,6 +4481,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             last_shown: String::new(),
             life: mascot::Life::default(),
             life_timer: Timer::default(),
+            pet: None,
+            pet_timer: None,
             glass_timer: Timer::default(),
             stats_timer: Timer::default(),
             stats_every: 0,
@@ -4921,6 +5017,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         refresh(&ui);
     });
     let weak = ui.as_weak();
+    ui.on_todo_view_changed(move || {
+        if let Some(ui) = weak.upgrade() {
+            refresh(&ui);
+        }
+    });
+    let weak = ui.as_weak();
     ui.on_todo_clear_done(move || {
         let Some(ui) = weak.upgrade() else { return };
         with_state(|state| {
@@ -5092,6 +5194,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .into_iter()
                 .map(|(from_min, to_min, focused_s, full)| daily::FocusRound { date: today.clone(), from_min, to_min, focused_s, full })
                 .collect();
+            // FUBUNOTCH_V2_DEMO_FOCUS=run: a round running, 7 minutes in.
+            if std::env::var("FUBUNOTCH_V2_DEMO_FOCUS").is_ok_and(|v| v == "run") {
+                let now = now_ms(state.started);
+                state.focus.start(now.saturating_sub(7 * 60_000));
+                focus_activity(state, now);
+            }
+        });
+    }
+    if std::env::var_os("FUBUNOTCH_V2_DEMO_SHELF").is_some() {
+        // A few kept files, in memory only (they needn't exist: "Missing").
+        with_state(|state| {
+            state.data.shelf = ["C:\\Users\\demo\\Documents\\Quarterly report final v3.pdf", "C:\\Users\\demo\\Pictures\\poster-draft.png", "C:\\Users\\demo\\Downloads\\assets"]
+                .iter()
+                .map(|p| shelf::Item { path: (*p).into() })
+                .collect();
         });
     }
     if std::env::var_os("FUBUNOTCH_V2_DEMO_TODO").is_some() {
@@ -5196,7 +5313,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let p = if question {
                 serde_json::json!({ "session_id": "demo", "cwd": "C:\\work\\fubunotch-v2", "tool_name": "AskUserQuestion",
                     "tool_input": { "questions": [{ "question": "Where should the build run?", "header": "Build in", "multiSelect": false,
-                        "options": [{ "label": "Install here", "description": "" }, { "label": "Office PC", "description": "" }, { "label": "NotchDeck first", "description": "" }] }] } })
+                        "options": [{ "label": "Install here", "description": "" }, { "label": "Office PC", "description": "" }, { "label": "Ask me later", "description": "" }] }] } })
             } else {
                 serde_json::json!({ "session_id": "demo", "cwd": "C:\\work\\fubunotch-v2", "tool_name": "Bash",
                     "tool_input": { "command": "cargo build --workspace && cargo test --workspace" } })

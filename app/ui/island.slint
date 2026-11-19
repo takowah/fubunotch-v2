@@ -18,6 +18,8 @@ import "../assets/fonts/Allo-SemiBold.otf";
 import "../assets/fonts/Allo-Bold.otf";
 import "../assets/fonts/Allo-ExtraBold.otf";
 import { Ice } from "theme.slint";
+// The mascots: every theme's frames, written by scripts/sprites.py.
+import { Sprites } from "sprites.slint";
 export { Ice }
 
 export struct ActionInfo {
@@ -449,7 +451,8 @@ global Glyphs {
     // Not in Segoe Fluent: a mosque, drawn (a dome, its spire, a door).
     out property <string> mosque: "M 3 20.5 H 21 M 6 20.5 V 13.5 A 6 6 0 0 1 18 13.5 V 20.5 M 12 7.5 V 4 M 10.5 20.5 V 17.5 A 1.5 1.5 0 0 1 13.5 17.5 V 20.5";
     public pure function tab(id: string) -> string {
-        return id == "day" ? "\u{EB05}" : id == "notifications" ? "\u{EA8F}" : id == "music" ? "\u{EC4F}" : id == "lyrics" ? "\u{E8E4}" : id == "accounts" ? "\u{E716}" : id == "control" ? "\u{E9E9}" : "\u{E8D6}";
+        return id == "focus" ? "\u{E916}" : id == "water" ? "\u{EB42}" : id == "todo" ? "\u{E73A}" : id == "shelf" ? "\u{E7B8}"
+            : id == "day" ? "\u{EB05}" : id == "notifications" ? "\u{EA8F}" : id == "music" ? "\u{EC4F}" : id == "lyrics" ? "\u{E8E4}" : id == "accounts" ? "\u{E716}" : id == "control" ? "\u{E9E9}" : "\u{E8D6}";
     }
     public pure function service(title: string) -> string {
         return title == "Claude Desktop" ? "\u{E7F4}" : title == "Claude Code" ? "\u{E756}" : "\u{E943}";
@@ -1332,6 +1335,8 @@ component NotifPage inherits Rectangle {
     callback clicked(int);
     callback clear();
     callback answered(string, string);
+    // The mascot stands over the empty page (Island draws it): the line goes under her.
+    in property <bool> mascot;
     // One column for a single notification, else two.
     property <int> cols: root.items.length == 1 ? 1 : 2;
     property <length> col-w: (root.width - (self.cols - 1) * 10px) / self.cols;
@@ -1339,7 +1344,8 @@ component NotifPage inherits Rectangle {
     property <length> grid-y: 28px + self.ask-rows * 50px;
     if root.items.length == 0 && root.asks.length == 0 : Text {
         width: parent.width;
-        height: parent.height;
+        y: root.mascot ? parent.height - 22px : 0px;
+        height: root.mascot ? 18px : parent.height;
         vertical-alignment: center;
         text: "No notifications";
         color: Mini.text-3;
@@ -1847,6 +1853,570 @@ component AccountsPage inherits Rectangle {
     }
 }
 
+// ── FubuNotch's own pages and its mascot ─────────────────────────────────────
+
+// The theme's pixel chibi (32 x 32 sprites from scripts/sprites.py), always
+// at a whole multiple of its pixels on screen: `want` is the size asked for,
+// the sprite takes the nearest multiple of 32 physical pixels (one at
+// least), so no sprite pixel is stretched unevenly at 125 % or 150 %.
+component Mascot inherits Rectangle {
+    // A frame: idle, idle2, blink, twitch, wag1, wag2, happy, sleep, walk1-4, climb1-2, sit.
+    in property <string> mood: "idle";
+    // Where it stands and hops, in sprite pixels.
+    in property <int> dx;
+    in property <int> dy;
+    in property <bool> left;
+    in property <length> want: 32px;
+    callback clicked();
+    out property <length> size: max(1, round(root.want / 1phx / 32)) * 32phx;
+    width: self.size;
+    height: self.size;
+    Image {
+        x: root.dx * root.size / 32;
+        y: root.dy * root.size / 32;
+        width: root.size;
+        height: root.size;
+        image-rendering: pixelated;
+        source: Sprites.pick(Ice.theme, root.mood, root.left);
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// A round button that matters most on its page (start a Focus round, add a
+// glass): a solid disc in the ink, its glyph in the body's colour.
+component BigButton inherits Rectangle {
+    in property <string> glyph;
+    in property <length> glyph-size: 15px;
+    callback clicked();
+    width: 40px;
+    height: 40px;
+    border-radius: self.height / 2;
+    background: area.pressed ? Mini.wash.with-alpha(0.7) : area.has-hover ? Mini.wash : Mini.wash.with-alpha(0.88);
+    animate background { duration: 120ms; }
+    Glyph { text: root.glyph; font-size: root.glyph-size; color: Mini.light ? #ffffff : Mini.base; }
+    area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// A card on a page: the same quiet fill as Prayer's and Control's.
+component PageCard inherits Rectangle {
+    border-radius: 14px;
+    background: Mini.wash.with-alpha(min(1, 0.039 * Mini.wk));
+}
+
+// A small heading inside a card ("TODAY", "BY THE HOUR").
+component CardLabel inherits Text {
+    color: Mini.label;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    vertical-alignment: center;
+}
+
+// A 26 px round glyph button that shows its disc only when pointed at
+// (the shelf's Copy and remove, a task's remove).
+component SmallIconButton inherits Rectangle {
+    in property <string> glyph;
+    out property <bool> hovered: area.has-hover;
+    callback clicked();
+    width: 26px;
+    height: 26px;
+    border-radius: 13px;
+    background: area.pressed ? Mini.wash.with-alpha(min(1, 0.26 * Mini.wk)) : area.has-hover ? Mini.wash.with-alpha(min(1, 0.16 * Mini.wk)) : transparent;
+    animate background { duration: 120ms; }
+    Glyph { text: root.glyph; font-size: 10.5px; color: area.has-hover ? Mini.ink : Mini.text-3; }
+    area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// Focus (Pomodoro): the phase, the time left and its bar on the left card
+// with the controls; today's rounds on the right, how long each really was.
+component FocusPage inherits Rectangle {
+    in property <FocusView> f;
+    callback command(string);
+    property <length> card-w: 380px;
+    property <color> tint: root.f.on-break ? Mini.good : Mini.accent;
+    PageCard {
+        x: 0;
+        width: root.card-w;
+        height: root.height;
+        Text { x: 16px; y: 14px; height: 16px; text: root.f.phase; color: root.tint; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+        Text { x: 16px; y: 32px; height: 42px; text: root.f.left; color: Mini.ink; font-size: 34px; font-weight: 700; vertical-alignment: center; }
+        Text { x: 16px; y: 76px; height: 15px; text: root.f.rounds; color: Mini.label; font-size: 11.5px; vertical-alignment: center; }
+        HorizontalLayout {
+            x: parent.width - 16px - self.preferred-width;
+            y: 28px;
+            width: self.preferred-width;
+            height: 40px;
+            spacing: 8px;
+            VerticalLayout { alignment: center; MediaButton { glyph: "\u{E72C}"; glyph-size: 12px; clicked => { root.command("reset"); } } }
+            BigButton { glyph: root.f.running ? Glyphs.pause : Glyphs.play; clicked => { root.command(root.f.running ? "pause" : "start"); } }
+            VerticalLayout { alignment: center; MediaButton { glyph: Glyphs.next; glyph-size: 12px; clicked => { root.command("skip"); } } }
+        }
+        Bar { x: 16px; y: parent.height - 18px; width: parent.width - 32px; value: root.f.fraction; tint: root.tint; }
+    }
+    PageCard {
+        x: root.card-w + 10px;
+        width: root.width - self.x;
+        height: root.height;
+        VerticalLayout {
+            padding: 14px;
+            padding-top: 12px;
+            spacing: 2px;
+            alignment: start;
+            HorizontalLayout {
+                height: 18px;
+                spacing: 8px;
+                CardLabel { text: "TODAY"; }
+                Text { horizontal-stretch: 1; text: root.f.today; color: Mini.text-2; font-size: 11.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+            }
+            Rectangle { height: 4px; }
+            for r in root.f.log : HorizontalLayout {
+                height: 19px;
+                spacing: 8px;
+                Rectangle {
+                    width: 6px;
+                    height: 6px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 3px;
+                    background: r.full ? Mini.accent : Mini.mute;
+                }
+                Text { horizontal-stretch: 1; text: r.time; color: Mini.text-2; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                Text { text: r.length; color: r.full ? Mini.ink : Mini.label; font-size: 12px; font-weight: r.full ? 600 : 400; vertical-alignment: center; }
+            }
+            if root.f.log.length == 0 : Text {
+                text: "Finished rounds land here, with how long each one really ran.";
+                color: Mini.text-3;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// Water: today's glasses toward the goal with the next reminder, a glass at
+// a time (and Undo); on the right today by the hour over the active hours.
+component WaterPage inherits Rectangle {
+    in property <WaterView> w;
+    callback command(string);
+    property <length> card-w: 380px;
+    PageCard {
+        x: 0;
+        width: root.card-w;
+        height: root.height;
+        Text { x: 16px; y: 14px; height: 16px; text: "Today"; color: Mini.accent; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+        Text { x: parent.width - 16px - self.width; y: 14px; width: self.preferred-width; height: 16px; text: root.w.percent; color: Mini.label; font-size: 11.5px; font-weight: 600; vertical-alignment: center; }
+        HorizontalLayout {
+            x: 16px;
+            y: 32px;
+            width: self.preferred-width;
+            height: 42px;
+            spacing: 6px;
+            Text { text: root.w.total; color: Mini.ink; font-size: 34px; font-weight: 700; vertical-alignment: center; }
+            // On the big number's baseline, near enough (Slint lines up boxes).
+            VerticalLayout {
+                alignment: end;
+                padding-bottom: 8px;
+                Text { text: "/ " + root.w.goal; color: Mini.text-3; font-size: 13px; }
+            }
+        }
+        Text {
+            x: 16px;
+            y: 76px;
+            width: parent.width - 32px - water-actions.width - 12px;
+            height: 15px;
+            text: root.w.next;
+            color: root.w.due ? Mini.warn : Mini.label;
+            font-size: 11.5px;
+            font-weight: root.w.due ? 600 : 400;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        water-actions := HorizontalLayout {
+            x: parent.width - 16px - self.preferred-width;
+            y: 28px;
+            width: self.preferred-width;
+            height: 40px;
+            spacing: 8px;
+            if root.w.drinks > 0 : VerticalLayout { alignment: center; ActionPill { label: "Undo"; clicked => { root.command("undo"); } } }
+            // + a glass: the page's one big action.
+            Rectangle {
+                width: add-label.preferred-width + 28px;
+                height: 40px;
+                border-radius: 20px;
+                background: add-area.pressed ? Mini.wash.with-alpha(0.7) : add-area.has-hover ? Mini.wash : Mini.wash.with-alpha(0.88);
+                animate background { duration: 120ms; }
+                add-label := Text { text: "+ " + root.w.glass; color: Mini.light ? #ffffff : Mini.base; font-size: 13px; font-weight: 700; }
+                add-area := TouchArea { mouse-cursor: pointer; clicked => { root.command("drink"); } }
+            }
+        }
+        Bar { x: 16px; y: parent.height - 18px; width: parent.width - 32px; value: root.w.fraction; tint: Mini.accent; }
+    }
+    // Today by the hour (the hour now in full colour).
+    PageCard {
+        x: root.card-w + 10px;
+        width: root.width - self.x;
+        height: root.height;
+        HorizontalLayout {
+            x: 14px;
+            y: 12px;
+            width: parent.width - 28px;
+            height: 18px;
+            spacing: 8px;
+            CardLabel { text: "BY THE HOUR"; }
+            Text { horizontal-stretch: 1; text: root.w.hours-text; color: Mini.label; font-size: 11px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+        }
+        HorizontalLayout {
+            x: 14px;
+            y: 36px;
+            width: parent.width - 28px;
+            height: parent.height - self.y - 10px;
+            spacing: 3px;
+            for b[i] in root.w.hours : VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: end;
+                spacing: 3px;
+                Rectangle {
+                    height: max(3px, (parent.height - 15px) * b.fraction);
+                    border-radius: 2px;
+                    background: b.now ? Mini.accent : b.fraction > 0 ? Mini.accent.with-alpha(0.55) : Mini.wash.with-alpha(min(1, 0.12 * Mini.wk));
+                }
+                // Every other hour's label (and now's): a dozen don't fit side by side.
+                Text {
+                    height: 12px;
+                    text: b.now || mod(i, 2) == 0 ? b.label : "";
+                    color: b.now ? Mini.ink : Mini.faint;
+                    font-size: 9.5px;
+                    font-weight: b.now ? 700 : 400;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+// The shelf: files dropped on the island, kept where they are (only their
+// paths), two to a row; a click opens one, Copy puts it on the clipboard.
+component ShelfPage inherits Rectangle {
+    in property <[ShelfRow]> items;
+    in property <bool> drop-hover;
+    callback open(int);
+    callback copy(int);
+    callback remove(int);
+    callback clear();
+    property <length> col-w: (root.width - 10px) / 2;
+    if root.drop-hover : Rectangle {
+        width: root.width;
+        height: root.height;
+        border-radius: 14px;
+        background: Mini.accent.with-alpha(0.12);
+        border-width: 1.5px;
+        border-color: Mini.accent.with-alpha(0.7);
+        VerticalLayout {
+            alignment: center;
+            spacing: 6px;
+            Glyph { height: 22px; text: "\u{E896}"; font-size: 20px; color: Mini.ink; }
+            Text { text: "Drop to keep it here"; color: Mini.ink; font-size: 14px; font-weight: 700; horizontal-alignment: center; }
+        }
+    }
+    if !root.drop-hover && root.items.length == 0 : VerticalLayout {
+        width: root.width;
+        height: root.height;
+        alignment: center;
+        spacing: 5px;
+        Glyph { height: 24px; text: "\u{E7B8}"; font-size: 20px; color: Mini.text-3; }
+        Text { text: "Drag a file onto the island to keep it here"; color: Mini.text-2; font-size: 13px; font-weight: 600; horizontal-alignment: center; }
+        Text { text: "Nothing is copied: the shelf only remembers where it is."; color: Mini.text-3; font-size: 12px; horizontal-alignment: center; }
+    }
+    if !root.drop-hover && root.items.length > 0 : Rectangle {
+        x: 8px;
+        y: 0;
+        width: parent.width - 16px;
+        height: 26px;
+        Text { x: 0; width: self.preferred-width; height: 100%; text: "Shelf · " + root.items.length; color: Mini.label; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+        Text {
+            x: parent.width - self.width;
+            width: self.preferred-width;
+            height: 100%;
+            text: "Clear all";
+            color: clear-area.has-hover ? Mini.ink : Mini.faint;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-alignment: center;
+            animate color { duration: 180ms; }
+            clear-area := TouchArea { mouse-cursor: pointer; clicked => { root.clear(); } }
+        }
+    }
+    if !root.drop-hover && root.items.length > 0 : Flickable {
+        y: 28px;
+        width: root.width;
+        height: root.height - self.y;
+        interactive: false;
+        content-height: ceil(root.items.length / 2) * 46px;
+        for f[i] in root.items : Rectangle {
+            x: mod(i, 2) * (root.col-w + 10px);
+            y: floor(i / 2) * 46px;
+            width: root.col-w;
+            height: 42px;
+            border-radius: 12px;
+            background: row.pressed ? Mini.wash.with-alpha(min(1, 0.12 * Mini.wk)) : row.has-hover ? Mini.wash.with-alpha(min(1, 0.08 * Mini.wk)) : Mini.wash.with-alpha(min(1, 0.039 * Mini.wk));
+            animate background { duration: 120ms; }
+            row := TouchArea { mouse-cursor: pointer; clicked => { root.open(i); } }
+            Rectangle {
+                x: 8px;
+                y: (parent.height - self.height) / 2;
+                width: 26px;
+                height: 26px;
+                border-radius: 7px;
+                background: Mini.wash.with-alpha(min(1, 0.1 * Mini.wk));
+                Glyph { text: f.detail == "Folder" ? "\u{E8B7}" : "\u{E8A5}"; font-size: 13px; color: f.detail == "Missing" ? Mini.text-3 : Mini.ink; }
+            }
+            VerticalLayout {
+                x: 42px;
+                width: parent.width - self.x - (row.has-hover || copy-b.hovered || rm-b.hovered ? 72px : 10px);
+                alignment: center;
+                Text { text: f.name; color: f.detail == "Missing" ? Mini.text-3 : Mini.ink; font-size: 12.5px; font-weight: 600; overflow: elide; }
+                Text { text: f.detail; color: f.detail == "Missing" ? Mini.warn : Mini.text-3; font-size: 11px; overflow: elide; }
+            }
+            // Copy and remove, while pointed at.
+            HorizontalLayout {
+                x: parent.width - 8px - self.preferred-width;
+                y: (parent.height - 26px) / 2;
+                width: self.preferred-width;
+                height: 26px;
+                spacing: 4px;
+                opacity: row.has-hover || copy-b.hovered || rm-b.hovered ? 1 : 0;
+                animate opacity { duration: 120ms; }
+                copy-b := SmallIconButton { glyph: "\u{E8C8}"; clicked => { root.copy(i); } }
+                rm-b := SmallIconButton { glyph: "\u{E711}"; clicked => { root.remove(i); } }
+            }
+        }
+    }
+}
+
+// One task: the grip (open tasks only; drag it to move the task), the round
+// box, the text (struck through when done), remove while pointed at.
+component TodoRow inherits Rectangle {
+    in property <TaskRow> task;
+    in property <int> index;
+    in property <int> open-count;
+    in property <length> pitch;
+    callback toggle();
+    callback remove();
+    callback move(int);
+    property <length> drag-dy;
+    // Where the row lands: a whole number of rows away, never among the done ones.
+    property <int> target: clamp(root.index + round(root.drag-dy / root.pitch), 0, root.open-count - 1);
+    height: root.pitch - 2px;
+    z: grip.pressed ? 10 : 0;
+    Rectangle {
+        y: grip.pressed ? root.drag-dy : 0px;
+        width: parent.width;
+        height: parent.height;
+        border-radius: 9px;
+        background: grip.pressed ? Mini.base : row.pressed ? Mini.wash.with-alpha(min(1, 0.12 * Mini.wk)) : row.has-hover ? Mini.wash.with-alpha(min(1, 0.06 * Mini.wk)) : transparent;
+        border-width: grip.pressed ? 1px : 0px;
+        border-color: Mini.accent.with-alpha(0.6);
+        animate background { duration: 120ms; }
+        row := TouchArea { mouse-cursor: pointer; clicked => { root.toggle(); } }
+        // The grip: six dots.
+        Rectangle {
+            x: 2px;
+            width: 14px;
+            opacity: root.task.done ? 0 : (grip.has-hover || grip.pressed ? 1 : row.has-hover ? 0.6 : 0.3);
+            for d in [0, 1, 2, 3, 4, 5] : Rectangle {
+                x: d < 3 ? 4px : 8px;
+                y: parent.height / 2 - 6px + mod(d, 3) * 5px;
+                width: 2px;
+                height: 2px;
+                background: Mini.label;
+            }
+            grip := TouchArea {
+                enabled: !root.task.done;
+                mouse-cursor: self.pressed ? grabbing : grab;
+                // The row follows the mouse, so mouse-y is measured from where
+                // the row is now: added on, not set.
+                moved => { root.drag-dy += self.mouse-y - self.pressed-y; }
+                changed pressed => {
+                    if !self.pressed {
+                        if root.target != root.index { root.move(root.target); }
+                        root.drag-dy = 0px;
+                    }
+                }
+            }
+        }
+        // The box.
+        Rectangle {
+            x: 22px;
+            y: (parent.height - self.height) / 2;
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            background: root.task.done ? Mini.accent : transparent;
+            border-width: root.task.done ? 0px : 1.5px;
+            border-color: row.has-hover ? Mini.ink : Mini.label;
+            animate background { duration: 140ms; }
+            if root.task.done : Path {
+                x: 3px;
+                y: 3px;
+                width: 10px;
+                height: 10px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M 4 12.5 L 9.5 18 L 20 6";
+                stroke: Mini.light ? #ffffff : Mini.base;
+                stroke-width: 2.6px;
+            }
+        }
+        label := Text {
+            x: 48px;
+            width: parent.width - self.x - 34px;
+            height: parent.height;
+            text: root.task.text;
+            color: root.task.done ? Mini.text-3 : Mini.ink;
+            font-size: 13px;
+            vertical-alignment: center;
+            overflow: elide;
+            animate color { duration: Ice.fade; }
+        }
+        // The strike-through, drawn: it grows across when a task is done.
+        Rectangle {
+            x: label.x;
+            y: parent.height / 2;
+            height: 1.2px;
+            width: root.task.done ? min(label.preferred-width, label.width) : 0px;
+            background: Mini.text-3;
+            animate width { duration: Ice.fade; easing: ease-out; }
+        }
+        rm := SmallIconButton {
+            x: parent.width - self.width - 4px;
+            y: (parent.height - self.height) / 2;
+            glyph: "\u{E711}";
+            opacity: row.has-hover || self.hovered ? 1 : 0;
+            clicked => { root.remove(); }
+        }
+    }
+}
+
+// The to-do list: a box to add a task on top, open tasks in the user's
+// order (drag the grip), done ones struck through at the bottom; Log shows
+// what was cleared, newest first.
+component TodoPage inherits Rectangle {
+    in property <[TaskRow]> tasks;
+    in property <[DoneRow]> log;
+    in property <int> open-count;
+    in-out property <bool> show-log;
+    callback add(string);
+    callback toggle(int);
+    callback remove(int);
+    callback move(int, int);
+    callback clear-done();
+    // Log or back: the island takes the new list's height.
+    callback view-changed();
+    property <length> pitch: 28px;
+    HorizontalLayout {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: 30px;
+        spacing: 8px;
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: 10px;
+            background: Mini.wash.with-alpha(min(1, (input.has-focus ? 0.08 : 0.05) * Mini.wk));
+            border-width: 1px;
+            border-color: input.has-focus ? Mini.accent.with-alpha(0.7) : Mini.wash.with-alpha(min(1, 0.06 * Mini.wk));
+            animate background, border-color { duration: 140ms; }
+            Glyph { x: 10px; width: 14px; text: "\u{E710}"; font-size: 11px; color: input.has-focus ? Mini.ink : Mini.text-3; }
+            // A bare TextInput doesn't scroll: it slides inside this clip to
+            // keep the cursor in sight, as Slint's own LineEdit does.
+            Rectangle {
+                x: 32px;
+                width: parent.width - 32px - 12px;
+                clip: true;
+                input := TextInput {
+                    property <length> scroll-x;
+                    x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.scroll-x));
+                    width: max(parent.width - self.text-cursor-width, self.preferred-width);
+                    height: 100%;
+                    color: Mini.ink;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    single-line: true;
+                    cursor-position-changed(pos) => {
+                        if pos.x + self.scroll-x < 0px {
+                            self.scroll-x = -pos.x;
+                        } else if pos.x + self.scroll-x > parent.width - self.text-cursor-width {
+                            self.scroll-x = parent.width - pos.x - self.text-cursor-width;
+                        }
+                    }
+                    accepted => {
+                        root.add(self.text);
+                        self.text = "";
+                        self.scroll-x = 0px;
+                    }
+                }
+            }
+            if input.text == "" : Text { x: 32px; height: parent.height; text: "Add a task, then Enter"; color: Mini.text-3; font-size: 13px; vertical-alignment: center; }
+        }
+        if root.tasks.length > 0 && !root.show-log : Text {
+            text: root.open-count == 0 ? "All done" : root.open-count + " open";
+            color: Mini.label;
+            font-size: 11.5px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        if root.tasks.length > root.open-count && !root.show-log : VerticalLayout { alignment: center; ActionPill { label: "Clear done"; clicked => { root.clear-done(); } } }
+        if root.log.length > 0 : VerticalLayout { alignment: center; ActionPill { label: root.show-log ? "Back" : "Log"; clicked => { root.show-log = !root.show-log; root.view-changed(); } } }
+    }
+    if root.tasks.length == 0 && !root.show-log : VerticalLayout {
+        x: 0;
+        y: 38px;
+        width: root.width;
+        height: root.height - self.y;
+        alignment: center;
+        spacing: 4px;
+        Text { text: "Nothing to do"; color: Mini.text-2; font-size: 13px; font-weight: 600; horizontal-alignment: center; }
+        Text { text: "Type above and press Enter; drag the dots to move a task."; color: Mini.text-3; font-size: 12px; horizontal-alignment: center; }
+    }
+    // Done and cleared, newest first: the day on its first line.
+    if root.show-log : Flickable {
+        y: 38px;
+        width: root.width;
+        height: root.height - self.y;
+        interactive: false;
+        content-height: done-rows.preferred-height;
+        done-rows := VerticalLayout {
+            spacing: 0px;
+            for r in root.log : HorizontalLayout {
+                height: 24px;
+                padding-left: 8px;
+                spacing: 10px;
+                Text { width: 52px; text: r.day; color: Mini.label; font-size: 11px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                Text { width: 38px; text: r.time; color: Mini.faint; font-size: 11.5px; vertical-alignment: center; }
+                Text { horizontal-stretch: 1; text: r.text; color: Mini.text-2; font-size: 12.5px; vertical-alignment: center; overflow: elide; }
+            }
+        }
+    }
+    // Wheel only: a mouse drag here is the grip's, never a scroll.
+    if !root.show-log && root.tasks.length > 0 : Flickable {
+        y: 38px;
+        width: root.width;
+        height: root.height - self.y;
+        interactive: false;
+        content-height: root.tasks.length * root.pitch;
+        for t[i] in root.tasks : TodoRow {
+            y: i * root.pitch;
+            width: root.width;
+            task: t;
+            index: i;
+            open-count: root.open-count;
+            pitch: root.pitch;
+            toggle => { root.toggle(t.id); }
+            remove => { root.remove(t.id); }
+            move(to) => { root.move(t.id, to); }
+        }
+    }
+}
+
 // ── The island ───────────────────────────────────────────────────────────────
 
 // Day Progress (as Poni's): how much of the waking day has gone, a bar from
@@ -2209,6 +2779,8 @@ export component Island inherits Window {
     callback todo-remove(int);
     callback todo-move(int, int);
     callback todo-clear-done();
+    // The to-do page switched between its list and its log.
+    callback todo-view-changed();
     in property <int> todo-open;
     callback mascot-clicked();
     callback hover-changed(bool);
@@ -2239,6 +2811,9 @@ export component Island inherits Window {
     callback music-command(string);
     callback lyrics-nudge(float);
 
+    // The mascot at 32 px, snapped to a whole multiple of its pixels (Mascot).
+    property <length> mascot-px: max(1, round(32px / 1phx / 32)) * 32phx;
+    property <bool> notif-empty: root.notifications.length == 0 && root.asks.length == 0;
     property <bool> hidden: mode == "hidden";
     property <bool> compact: mode == "compact";
     property <bool> expanded: mode == "expanded";
@@ -2624,6 +3199,20 @@ export component Island inherits Window {
                 padding-right: 16px;
                 spacing: 10px;
                 alignment: center;
+                // Her box overhangs by the sprite's empty columns (4 of 32 each side).
+                if root.mascot-on : Rectangle {
+                    width: root.mascot-px * 0.75;
+                    Mascot {
+                        x: -self.size / 8;
+                        // Her figure (rows 5 to 31 of 32) centred, not her box.
+                        y: (parent.height - self.size) / 2 - self.size / 16;
+                        want: 32px;
+                        mood: root.mascot-mood;
+                        dy: root.mascot-dy;
+                        left: root.mascot-left;
+                        clicked => { root.mascot-clicked(); }
+                    }
+                }
                 if root.has-front && root.front.icon != "" : SysIcon { name: root.front.icon; y: (parent.height - self.height) / 2; }
                 if root.has-front && root.front.icon == "" : AppIcon { size: 26px; accent: root.front.accent; initial: root.front.initial; logo: root.front.logo-small; has-logo: root.front.has-logo; y: (parent.height - self.height) / 2; }
                 if !root.has-front && root.idle-left != "" : IdleSlot { kind: root.idle-left; text: root.idle-left-text; date: root.date; net: root.status-net; battery: root.status-battery; level: root.status-battery-level; charging: root.status-charging; }
@@ -2713,7 +3302,7 @@ export component Island inherits Window {
                     }
                 }
                 // The time, right after the tabs.
-                Text {
+                top-clock := Text {
                     x: tab-track.x + tab-track.width + 16px;
                     width: self.preferred-width;
                     y: 1px + 12px;
@@ -2724,9 +3313,22 @@ export component Island inherits Window {
                     font-weight: 700;
                     vertical-alignment: center;
                 }
+                // The mascot after the time, while the tabs leave her room (and
+                // not while she stands on the empty Notifications page).
+                if root.mascot-on && !(root.active-tab == "notifications" && root.notif-empty)
+                    && top-clock.x + top-clock.width + 10px + root.mascot-px < quick.x - 12px : Mascot {
+                    x: top-clock.x + top-clock.width + 10px - self.size / 8;
+                    y: 1px + 12px + (36px - self.size) / 2 - self.size / 16;
+                    want: 32px;
+                    mood: root.mascot-mood;
+                    dx: root.mascot-dx;
+                    dy: root.mascot-dy;
+                    left: root.mascot-left;
+                    clicked => { root.mascot-clicked(); }
+                }
                 // The quick buttons: Do not disturb, the notifications with
                 // their count, the gear.
-                HorizontalLayout {
+                quick := HorizontalLayout {
                     x: parent.inner-x + parent.inner-w - self.preferred-width;
                     width: self.preferred-width;
                     y: 1px + 12px + 3px;
@@ -2754,6 +3356,7 @@ export component Island inherits Window {
                             items: root.notifications;
                             asks: root.asks;
                             total: root.notif-total;
+                            mascot: root.mascot-on;
                             clicked(i) => { root.notif-clicked(i); }
                             clear => { root.notif-clear(); }
                             answered(id, a) => { root.ask-answered(id, a); }
@@ -2783,6 +3386,55 @@ export component Island inherits Window {
                             line-held: root.line-held;
                             command(c) => { root.music-command(c); }
                             cover-size(s) => { root.music-cover-size(s); }
+                        }
+                    }
+                    // Nothing to show: the mascot stands in for the list (FubuNotch's Home).
+                    if root.mascot-on && root.active-tab == "notifications" && root.notif-empty : Mascot {
+                        x: (parent.width - self.size) / 2;
+                        y: (parent.height - 26px - self.size) / 2 + self.size / 16;
+                        want: 64px;
+                        mood: root.mascot-mood;
+                        dx: root.mascot-dx;
+                        dy: root.mascot-dy;
+                        left: root.mascot-left;
+                        clicked => { root.mascot-clicked(); }
+                    }
+                    Page {
+                        shown: root.active-tab == "focus";
+                        FocusPage { width: parent.width; height: parent.height; f: root.pomodoro; command(c) => { root.focus-command(c); } }
+                    }
+                    Page {
+                        shown: root.active-tab == "water";
+                        WaterPage { width: parent.width; height: parent.height; w: root.water; command(c) => { root.water-command(c); } }
+                    }
+                    Page {
+                        shown: root.active-tab == "todo";
+                        TodoPage {
+                            width: parent.width;
+                            height: parent.height;
+                            tasks: root.tasks;
+                            log: root.todo-log;
+                            open-count: root.todo-open;
+                            show-log <=> root.todo-show-log;
+                            add(t) => { root.todo-add(t); }
+                            toggle(id) => { root.todo-toggle(id); }
+                            remove(id) => { root.todo-remove(id); }
+                            move(id, to) => { root.todo-move(id, to); }
+                            clear-done => { root.todo-clear-done(); }
+                            view-changed => { root.todo-view-changed(); }
+                        }
+                    }
+                    Page {
+                        shown: root.active-tab == "shelf";
+                        ShelfPage {
+                            width: parent.width;
+                            height: parent.height;
+                            items: root.shelf;
+                            drop-hover: root.drop-hover;
+                            open(i) => { root.shelf-open(i); }
+                            copy(i) => { root.shelf-copy(i); }
+                            remove(i) => { root.shelf-remove(i); }
+                            clear => { root.shelf-clear(); }
                         }
                     }
                     Page {

@@ -17,6 +17,8 @@ import "../assets/fonts/Allo-Bold.otf";
 import "../assets/fonts/Allo-ExtraBold.otf";
 import { Button, Palette } from "std-widgets.slint";
 import { Ice } from "theme.slint";
+// The mascots: every theme's frames, written by scripts/sprites.py.
+import { Sprites } from "sprites.slint";
 
 export struct ModuleRow {
     id: string,
@@ -827,7 +829,26 @@ component SlotZone inherits Rectangle {
     a := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
-// A theme to pick: a small island in its colours, its name and swatches.
+// A theme's pixel chibi, at the whole multiple of its 32 pixels nearest to
+// `want` (the island's Mascot does the same): crisp at 125 % and 150 %.
+component Chibi inherits Rectangle {
+    in property <string> theme;
+    in property <string> mood: "idle";
+    in property <bool> left;
+    in property <length> want: 32px;
+    out property <length> size: max(1, round(root.want / 1phx / 32)) * 32phx;
+    width: self.size;
+    height: self.size;
+    Image {
+        width: root.size;
+        height: root.size;
+        image-rendering: pixelated;
+        source: Sprites.pick(root.theme, root.mood, root.left);
+    }
+}
+
+// A theme to pick: a small island in its colours, its member's chibi under
+// it (happy while pointed at), its name and swatches.
 component ThemeCard inherits Rectangle {
     in property <string> id;
     in property <string> name;
@@ -880,9 +901,14 @@ component ThemeCard inherits Rectangle {
                 }
             }
         }
-        // A hint of the open island below: two lines of "content".
-        Rectangle { x: (parent.width - 70px) / 2; y: 52px; width: 70px; height: 5px; border-radius: 2.5px; background: #ffffff1a; }
-        Rectangle { x: (parent.width - 46px) / 2; y: 62px; width: 46px; height: 5px; border-radius: 2.5px; background: #ffffff10; }
+        // The member, standing on the desk's floor.
+        Chibi {
+            x: (parent.width - self.size) / 2;
+            y: parent.height - 1px - self.size * 31 / 32;
+            theme: root.id;
+            mood: a.has-hover ? "happy" : "idle";
+            want: 36px;
+        }
     }
     HorizontalLayout {
         y: 98px;
@@ -1060,7 +1086,7 @@ export component SettingsWindow inherits Window {
     default-font-family: "Allo";
     title: "FubuNotch v2 · Settings";
     preferred-width: 900px;
-    preferred-height: 620px;
+    preferred-height: 680px;
     min-width: 760px;
     min-height: 520px;
     // Opaque: without it the software renderer leaves the window see-through.
@@ -1073,6 +1099,16 @@ export component SettingsWindow inherits Window {
     in-out property <string> page: "general";
     // Which side of the idle island the choices below its preview change.
     in-out property <string> slot-side: "left";
+
+    // The mascot walking about the sidebar: where it is and what it does
+    // (Rust moves it, pet.rs), its size a whole multiple of its pixels.
+    in property <length> pet-x: 20px;
+    in property <length> pet-y: 580px;
+    in property <string> pet-frame: "idle";
+    in property <bool> pet-left;
+    in property <string> pet-say;
+    out property <length> pet-size: max(1, round(88px / 1phx / 32)) * 32phx;
+    callback pet-clicked();
 
     callback module-toggled(string, bool);
     callback module-moved(string, int);
@@ -1144,28 +1180,29 @@ export component SettingsWindow inherits Window {
                     padding-left: 6px;
                     padding-bottom: 18px;
                     spacing: 11px;
+                    // The theme's member on a tile (the walking one is below).
                     Rectangle {
-                        width: 38px;
-                        height: 38px;
-                        border-radius: 10px;
+                        width: 44px;
+                        height: 44px;
+                        border-radius: 12px;
                         background: K.tile;
                         border-width: 1px;
                         border-color: #ffffff14;
-                        // A crown (kanmuri).
-                        Path {
-                            width: 22px;
-                            height: 22px;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
-                            fill: Ice.glow;
-                            commands: "M 2.5 7.5 L 7.5 12 L 12 4.5 L 16.5 12 L 21.5 7.5 L 19.2 17.5 H 4.8 Z M 4.8 19 H 19.2 V 21 H 4.8 Z";
+                        clip: true;
+                        Chibi {
+                            x: (parent.width - self.size) / 2;
+                            y: (parent.height - self.size) / 2 - self.size / 16;
+                            theme: root.s.theme;
+                            mood: head-area.has-hover ? "happy" : "idle";
+                            want: 40px;
                         }
+                        head-area := TouchArea { mouse-cursor: pointer; clicked => { root.pet-clicked(); } }
                     }
                     VerticalLayout {
                         alignment: center;
                         spacing: 0px;
-                        Text { text: "FubuNotch v2"; color: K.ink; font-size: 15px; font-weight: 700; }
-                        Text { text: "Settings"; color: K.hint; font-size: 12px; }
+                        Text { text: "FubuNotch"; color: K.ink; font-size: 15px; font-weight: 700; }
+                        Text { text: "v2 · Settings"; color: K.hint; font-size: 12px; }
                     }
                 }
                 Heading { text: "ISLAND"; height: 26px; }
@@ -1292,6 +1329,15 @@ export component SettingsWindow inherits Window {
                                     padding-right: 5px;
                                     spacing: 4px;
                                     alignment: center;
+                                    if root.s.mascot : Rectangle {
+                                        width: preview-chibi.size * 0.75 + 6px;
+                                        preview-chibi := Chibi {
+                                            x: 6px - self.size / 8;
+                                            y: (parent.height - self.size) / 2 - self.size / 16;
+                                            theme: root.s.theme;
+                                            want: 28px;
+                                        }
+                                    }
                                     SlotZone {
                                         y: (parent.height - self.height) / 2;
                                         kind: root.s.idle-left;
@@ -1505,13 +1551,23 @@ export component SettingsWindow inherits Window {
                     spacing: 10px;
                     Row {
                         ThemeCard { id: "graphite"; name: "Graphite"; c1: #f2f2f7; c2: #636366; body: #050505; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
-                        ThemeCard { id: "fubuki"; name: "Ice"; c1: #5fd4ff; c2: #f4f6fb; body: #0b1424; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
-                        ThemeCard { id: "mio"; name: "Crimson"; c1: #ff5a6e; c2: #ffc2ca; body: #160b10; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
+                        ThemeCard { id: "fubuki"; name: "Fubuki"; c1: #5fd4ff; c2: #f4f6fb; body: #0b1424; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
+                        ThemeCard { id: "mio"; name: "Mio"; c1: #ff5a6e; c2: #ffc2ca; body: #160b10; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
                     }
                     Row {
-                        ThemeCard { id: "towa"; name: "Violet"; c1: #c08cff; c2: #ff7ac1; body: #120c1f; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
-                        ThemeCard { id: "azki"; name: "Rose"; c1: #ff5d9e; c2: #ffc6dc; body: #170c16; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
-                        ThemeCard { id: "suisei"; name: "Comet"; c1: #6aa0ff; c2: #f2c94c; body: #0a1030; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
+                        ThemeCard { id: "towa"; name: "Towa"; c1: #c08cff; c2: #ff7ac1; body: #120c1f; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
+                        ThemeCard { id: "azki"; name: "AZKi"; c1: #ff5d9e; c2: #ffc6dc; body: #170c16; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
+                        ThemeCard { id: "suisei"; name: "Suisei"; c1: #6aa0ff; c2: #f2c94c; body: #0a1030; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
+                    }
+                }
+                if root.page == "look" : Rectangle { height: 10px; }
+                if root.page == "look" : Card {
+                    SettingRow {
+                        title: "Mascot";
+                        hint: "The theme's pixel chibi in the capsule, the open island and here in Settings. Graphite has Fubuki.";
+                        tall: true;
+                        last: true;
+                        Toggle { on: root.s.mascot; toggled(v) => { root.flag-changed("look.mascot", v); } }
                     }
                 }
                 if root.page == "look" : Heading { text: "BACKGROUND"; }
@@ -1765,6 +1821,31 @@ export component SettingsWindow inherits Window {
                     act(a, id, v) => { root.account-act(a, id, v); }
                 }
             }
+        }
+    }
+
+    // ── The mascot, on top of everything ──
+    if root.s.mascot : Rectangle {
+        x: root.pet-x;
+        y: root.pet-y;
+        width: root.pet-size;
+        height: root.pet-size;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            image-rendering: pixelated;
+            source: Sprites.pick(root.s.theme, root.pet-frame, root.pet-left);
+        }
+        TouchArea { mouse-cursor: pointer; clicked => { root.pet-clicked(); } }
+        if root.pet-say != "" : Rectangle {
+            // Above her head, kept inside the window.
+            x: max(4px - root.pet-x, (parent.width - self.width) / 2);
+            y: -14px;
+            width: bubble.preferred-width + 20px;
+            height: 26px;
+            border-radius: 13px;
+            background: K.ink;
+            bubble := Text { text: root.pet-say; color: K.ground; font-size: 12.5px; font-weight: 700; }
         }
     }
 }
