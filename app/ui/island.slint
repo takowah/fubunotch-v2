@@ -881,7 +881,35 @@ component MediaButton inherits Rectangle {
     area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
-// A small round toggle (the lyrics card's あ, Ro and pin).
+// A labelled toggle chip (the Music page's Line and Hold, FubuNotch's), on
+// both the lyrics page and a song without lyrics, so neither switch hides.
+component HoldChip inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <bool> on;
+    callback clicked();
+    height: 24px;
+    width: row.preferred-width;
+    border-radius: 12px;
+    background: area.pressed ? Mini.wash.with-alpha(min(1, 0.5 * Mini.wk)) : area.has-hover ? Mini.wash.with-alpha(min(1, 0.4 * Mini.wk)) : root.on ? (Mini.light ? #ffffff : Mini.wash.with-alpha(0.333)) : Mini.wash.with-alpha(min(1, 0.149 * Mini.wk));
+    animate background { duration: 120ms; }
+    row := HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 10px;
+        spacing: 5px;
+        Glyph { width: 12px; text: root.icon; font-size: 11px; color: root.on ? Mini.ink : Mini.wash.with-alpha(min(1, 0.7 * Mini.wk)); }
+        Text {
+            text: root.label;
+            font-size: 11px;
+            font-weight: 600;
+            color: root.on ? Mini.ink : Mini.wash.with-alpha(min(1, 0.7 * Mini.wk));
+            vertical-alignment: center;
+        }
+    }
+    area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// A small round toggle (the lyrics card's あ and Ro).
 component PageToggle inherits Rectangle {
     in property <string> label;
     in property <bool> glyph;
@@ -1235,6 +1263,7 @@ component MusicWide inherits Rectangle {
     in property <float> volume;
     in property <bool> live;
     in property <bool> line-held;
+    in property <bool> held;
     callback command(string);
     // The big cover's size, so Rust hands its picture at exactly that size.
     callback cover-size(length);
@@ -1304,20 +1333,17 @@ component MusicWide inherits Rectangle {
         }
         Rectangle { width: 8px; }
         Text { text: bar.dragging ? "-" + Clock.mm-ss((1 - bar.drag-value) * root.music.length) : root.music.remaining; color: Mini.text-2; font-size: 11px; min-width: 34px; horizontal-alignment: right; vertical-alignment: center; }
-        // Line: the song's lyric on the capsule (Mini Island's lyric switch).
-        Rectangle {
-            width: 34px;
-            Rectangle {
-                x: 8px;
-                y: (parent.height - self.height) / 2;
-                width: 26px;
-                height: 26px;
-                border-radius: 13px;
-                background: line-area.pressed ? Mini.wash.with-alpha(min(1, 0.32 * Mini.wk)) : line-area.has-hover ? Mini.wash.with-alpha(min(1, 0.2 * Mini.wk)) : root.line-held ? Mini.wash.with-alpha(min(1, 0.251 * Mini.wk)) : transparent;
-                Glyph { text: Glyphs.line; font-size: 12px; color: root.line-held ? Mini.ink : Mini.wash.with-alpha(min(1, 0.702 * Mini.wk)); }
-                line-area := TouchArea { mouse-cursor: pointer; clicked => { root.command("line-hold"); } }
-            }
-        }
+    }
+    // Line and Hold, labelled, as on the lyrics page: under the controls,
+    // right-aligned with them.
+    HorizontalLayout {
+        x: parent.width - root.pad - self.preferred-width;
+        y: root.pad + 34px + 10px;
+        width: self.preferred-width;
+        height: 24px;
+        spacing: 4px;
+        HoldChip { label: "Line"; icon: Glyphs.line; on: root.line-held; clicked => { root.command("line-hold"); } }
+        HoldChip { label: "Hold"; icon: root.held ? Glyphs.pinned : Glyphs.pin; on: root.held; clicked => { root.command("hold"); } }
     }
 }
 
@@ -1445,6 +1471,7 @@ component LyricsPage inherits Rectangle {
     in property <Music> music;
     in property <color> accent;
     in property <bool> held;
+    in property <bool> line-held;
     // The lyrics are Japanese (あ and Ro show).
     in property <bool> japanese;
     in-out property <bool> furigana: true;
@@ -1591,7 +1618,8 @@ component LyricsPage inherits Rectangle {
         spacing: 4px;
         if root.japanese : PageToggle { label: "あ"; on: root.furigana; clicked => { root.furigana = !root.furigana; } }
         if root.japanese : PageToggle { label: "Ro"; on: root.romaji; clicked => { root.romaji = !root.romaji; } }
-        PageToggle { label: root.held ? Glyphs.pinned : Glyphs.pin; glyph: true; on: root.held; clicked => { root.command("hold"); } }
+        HoldChip { label: "Line"; icon: Glyphs.line; on: root.line-held; clicked => { root.command("line-hold"); } }
+        HoldChip { label: "Hold"; icon: root.held ? Glyphs.pinned : Glyphs.pin; on: root.held; clicked => { root.command("hold"); } }
     }
 }
 
@@ -3369,6 +3397,7 @@ export component Island inherits Window {
                             music: root.music;
                             accent: root.song-accent;
                             held: root.held;
+                            line-held: root.line-held;
                             japanese: root.lyrics-japanese;
                             furigana <=> root.furigana;
                             live: root.expanded && (root.active-tab == "music" || root.active-tab == "lyrics");
@@ -3383,6 +3412,7 @@ export component Island inherits Window {
                             volume: root.volume;
                             live: root.expanded && root.active-tab == "music";
                             line-held: root.line-held;
+                            held: root.held;
                             command(c) => { root.music-command(c); }
                             cover-size(s) => { root.music-cover-size(s); }
                         }
