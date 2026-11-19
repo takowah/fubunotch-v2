@@ -1554,15 +1554,16 @@ export component SettingsWindow inherits Window {
                 if root.page == "look" : Heading { text: "THEME"; }
                 if root.page == "look" : GridLayout {
                     spacing: 10px;
+                    // The members first, Fubuki leading (THEMES' order); Graphite last.
                     Row {
-                        ThemeCard { id: "graphite"; name: "Graphite"; c1: #f2f2f7; c2: #636366; body: #050505; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
                         ThemeCard { id: "fubuki"; name: "Fubuki"; c1: #5fd4ff; c2: #f4f6fb; body: #0b1424; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
                         ThemeCard { id: "mio"; name: "Mio"; c1: #ff5a6e; c2: #ffc2ca; body: #160b10; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
+                        ThemeCard { id: "towa"; name: "Towa"; c1: #c08cff; c2: #ff7ac1; body: #120c1f; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
                     }
                     Row {
-                        ThemeCard { id: "towa"; name: "Towa"; c1: #c08cff; c2: #ff7ac1; body: #120c1f; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
                         ThemeCard { id: "azki"; name: "AZKi"; c1: #ff5d9e; c2: #ffc6dc; body: #170c16; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
                         ThemeCard { id: "suisei"; name: "Suisei"; c1: #6aa0ff; c2: #f2c94c; body: #0a1030; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
+                        ThemeCard { id: "graphite"; name: "Graphite"; c1: #f2f2f7; c2: #636366; body: #050505; chosen: root.s.theme == self.id; picked => { root.theme-picked(self.id); } }
                     }
                 }
                 if root.page == "look" : Rectangle { height: 10px; }

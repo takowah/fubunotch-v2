@@ -1898,6 +1898,16 @@ component Mascot inherits Rectangle {
     out property <length> size: max(1, round(root.want / 1phx / 32)) * 32phx;
     width: self.size;
     height: self.size;
+    // A soft disc in the theme's colour behind the dark-haired members (Mio,
+    // AZKi), so they don't sink into a dark island. It follows the hops.
+    if Ice.theme == "mio" || Ice.theme == "azki" : Rectangle {
+        width: root.size * 0.86;
+        height: self.width;
+        x: (root.size - self.width) / 2 + root.dx * root.size / 32;
+        y: (root.size - self.height) / 2 + root.size * 0.04 + root.dy * root.size / 32;
+        border-radius: self.width / 2;
+        background: Mini.accent.with-alpha(0.2);
+    }
     Image {
         x: root.dx * root.size / 32;
         y: root.dy * root.size / 32;
