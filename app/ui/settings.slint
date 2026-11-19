@@ -188,7 +188,6 @@ global SetGlyphs {
     out property <string> picture: "\u{EB9F}";
     out property <string> warning: "\u{E7BA}";
     out property <string> check: "\u{E73E}";
-    out property <string> video: "\u{E714}";
     public pure function page(id: string) -> string {
         return id == "general" ? "\u{E713}"
             : id == "look" ? "\u{E790}"
@@ -1589,16 +1588,6 @@ export component SettingsWindow inherits Window {
                     SettingRow { title: "Synced lyrics"; hint: "Sends song title, artist, album and length to LRCLIB."; Toggle { on: root.s.lyrics; toggled(v) => { root.flag-changed("music.lyrics", v); } } }
                     SettingRow { title: "Lyrics from YouTube Music"; hint: "When LRCLIB has none. Unofficial endpoints: may stop working."; Toggle { on: root.s.lyrics-youtube; toggled(v) => { root.flag-changed("music.lyrics_youtube", v); } } }
                     SettingRow { title: "Japanese lyrics in romaji"; hint: ""; last: true; Toggle { on: root.s.romaji; toggled(v) => { root.flag-changed("music.romaji", v); } } }
-                }
-                if root.page == "music" : Heading { text: "WATCH IN ISLAND"; }
-                if root.page == "music" : Card {
-                    SettingRow {
-                        title: "Picture-in-picture docks under the island";
-                        hint: "In Chrome or Edge: YouTube's PiP button, right-click a video twice, or the PiP button in Chrome's media controls.";
-                        glyph: SetGlyphs.video;
-                        tall: true;
-                        last: true;
-                    }
                 }
 
                 // ── Notifications ──

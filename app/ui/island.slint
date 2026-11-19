@@ -444,7 +444,6 @@ global Glyphs {
     out property <string> pin: "\u{E718}";
     out property <string> pinned: "\u{E840}";
     out property <string> moon: "\u{E708}";
-    out property <string> video: "\u{E714}";
     out property <string> line: "\u{E90B}";
     out property <string> place: "\u{E81D}";
     // Not in Segoe Fluent: a mosque, drawn (a dome, its spire, a door).
@@ -907,14 +906,13 @@ component PageToggle inherits Rectangle {
 }
 
 // The top bar's round quick buttons (Do not disturb, notifications, the
-// gear, a docked video): a faint disc, lighter when pointed at or on; an
-// optional red count in the corner.
+// gear): a faint disc, lighter when pointed at or on; an optional red count
+// in the corner.
 component QuickButton inherits Rectangle {
     in property <string> glyph;
     in property <bool> on;
     in property <int> badge;
     callback clicked();
-    callback right-clicked();
     width: 30px;
     height: 30px;
     border-radius: 15px;
@@ -944,11 +942,6 @@ component QuickButton inherits Rectangle {
     area := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
-        pointer-event(e) => {
-            if e.button == PointerEventButton.right && e.kind == PointerEventKind.up {
-                root.right-clicked();
-            }
-        }
     }
 }
 
@@ -2184,13 +2177,6 @@ export component Island inherits Window {
     in property <bool> mic-on;
     in property <bool> cam-on;
     callback dnd-clicked();
-    // A YouTube video docked under the island ("Watch in island"), kept
-    // shown (held) or following the island; its title.
-    in property <bool> watching;
-    in property <bool> watch-held;
-    in property <string> watch-title;
-    callback watch-clicked();
-    callback watch-back();
     in property <int> mascot-dx;
     in property <int> mascot-dy;
     in property <bool> mascot-left;
@@ -2652,7 +2638,6 @@ export component Island inherits Window {
                 if root.has-front && root.front.has-progress : Bar { width: 70px; value: root.front.progress; tint: Paint.readable(root.front.accent); y: (parent.height - self.height) / 2; }
                 if !root.has-front && root.idle-right != "" : IdleSlot { kind: root.idle-right; text: root.idle-right-text; date: root.date; net: root.status-net; battery: root.status-battery; level: root.status-battery-level; charging: root.status-charging; }
                 if root.waiting > 0 : Text { text: "+" + root.waiting; color: Mini.label; font-size: 11px; font-weight: 600; vertical-alignment: center; }
-                if root.watching : Glyph { width: 14px; text: Glyphs.video; font-size: 11px; color: Mini.label; }
                 if root.dnd : Glyph { width: 14px; text: Glyphs.moon; font-size: 11px; color: Mini.label; }
             }
 
@@ -2739,20 +2724,14 @@ export component Island inherits Window {
                     font-weight: 700;
                     vertical-alignment: center;
                 }
-                // The quick buttons: a docked video (while one is), Do not
-                // disturb, the notifications with their count, the gear.
+                // The quick buttons: Do not disturb, the notifications with
+                // their count, the gear.
                 HorizontalLayout {
                     x: parent.inner-x + parent.inner-w - self.preferred-width;
                     width: self.preferred-width;
                     y: 1px + 12px + 3px;
                     height: 30px;
                     spacing: 8px;
-                    if root.watching : QuickButton {
-                        glyph: Glyphs.video;
-                        on: root.watch-held;
-                        clicked => { root.watch-clicked(); }
-                        right-clicked => { root.watch-back(); }
-                    }
                     QuickButton { glyph: Glyphs.moon; on: root.dnd; clicked => { root.dnd-clicked(); } }
                     QuickButton {
                         glyph: Glyphs.bell;

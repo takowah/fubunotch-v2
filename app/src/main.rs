@@ -9,7 +9,6 @@
 mod autostart;
 mod prayer;
 mod day;
-mod watch;
 mod banners;
 mod mascot;
 mod bg;
@@ -198,15 +197,6 @@ struct State {
     music_events: u64,
     /// Do not disturb: the island stays down for notifications (calls excepted).
     dnd: bool,
-    /// "Watch in island": the docked video, and whether it is kept shown.
-    watching: Option<Watching>,
-    watch_held: bool,
-    /// The pointer left the island for the video: the island stays open
-    /// until it leaves the video too.
-    watch_hover: bool,
-    /// A PiP window the user dragged away from the island: theirs now, not
-    /// docked again while it is open.
-    watch_freed: Option<isize>,
     /// Whether a Focus round ran at the last refresh: DND follows it.
     last_focus_running: bool,
     /// Until when the front shows under Line's lyric (ms).
@@ -1663,21 +1653,6 @@ fn refresh(ui: &Island) {
             state.mode = Mode::Hidden;
             state.hide_at = None;
         }
-        // "Watch in island": the pointer went from the island onto the video;
-        // once it leaves the video too, the island goes back as usual.
-        if state.watch_hover {
-            let on_video = state.watching.as_ref().and_then(|w| w.hwnd).is_some_and(|h| watch::pointer_over(windows::Win32::Foundation::HWND(h as *mut core::ffi::c_void)));
-            if !on_video {
-                state.watch_hover = false;
-                if !state.pinned && !state.held && state.mode == Mode::Expanded {
-                    state.mode = Mode::Compact;
-                    state.hide_at = Some(now + hide_after(&state.settings));
-                }
-            }
-        }
-        ui.set_watching(state.watching.is_some());
-        ui.set_watch_held(state.watch_held);
-        ui.set_watch_title(state.watching.as_ref().map(|w| w.title.as_str()).unwrap_or("").into());
         let expanded = state.mode == Mode::Expanded;
         ui.set_mode(match state.mode {
             Mode::Hidden => "hidden",
@@ -1757,7 +1732,6 @@ fn refresh(ui: &Island) {
         };
         morph_to(ui, state, size);
         glass_sync(ui, state);
-        follow_watch(ui, state, now);
         // The mascot lives only while it can be seen: no ticks when hidden.
         if state.mode != Mode::Hidden && state.settings.look.mascot {
             if !state.life_timer.running() {
@@ -1788,14 +1762,6 @@ fn refresh(ui: &Island) {
         let page_tick = page_tick.min(focus_tick).min(prayer_tick).min(daily_wake(state, now));
         let under_in = if line_notice && !asking { state.line_notice_until.saturating_sub(now) } else { u64::MAX };
         let page_tick = page_tick.min(under_in);
-        // While a video is docked: often enough to follow the pointer on it,
-        // and to find its window right after Chrome opens it.
-        let watch_tick = match &state.watching {
-            Some(w) if w.hwnd.is_none() || state.watch_hover => 250,
-            Some(_) => 1_000,
-            None => u64::MAX,
-        };
-        let page_tick = page_tick.min(watch_tick);
         let hide_in = state.hide_at.filter(|_| state.mode == Mode::Compact && !asking).map_or(u64::MAX, |t| t.saturating_sub(now));
         let delay = wake.unwrap_or(u64::MAX).min(local_time::ms_to_next_minute()).min(page_tick).min(hide_in).max(15);
         let weak = ui.as_weak();
@@ -1834,7 +1800,7 @@ fn refresh(ui: &Island) {
             }
         }
         // Drawn again only when what the capsule shows has changed.
-        let shown = format!("{}|{capsule_line}|{line_notice}|{front_sig}|{}|{}", state.watching.is_some(), ui.get_idle_left_text(), ui.get_idle_right_text());
+        let shown = format!("{capsule_line}|{line_notice}|{front_sig}|{}|{}", ui.get_idle_left_text(), ui.get_idle_right_text());
         if state.mode == Mode::Compact && shown != state.last_shown {
             show_changes(ui);
         }
@@ -2407,116 +2373,6 @@ fn is_call(title: &str, body: &str) -> bool {
 }
 
 /// FUBUNOTCH_V2_SNAPSHOT: a picture is drawn and the app quits.
-/// A browser's video picture-in-picture window docked under the island
-/// (found by the WinEvent hook; none for a snapshot's demo).
-struct Watching {
-    hwnd: Option<isize>,
-    title: String,
-    /// When it was docked (ms since start).
-    since: u64,
-    /// Where FubuNotch v2 last put it (physical pixels): elsewhere means the
-    /// user dragged it, and it is let go.
-    placed: Option<(i32, i32)>,
-}
-
-fn as_hwnd(h: isize) -> windows::Win32::Foundation::HWND {
-    windows::Win32::Foundation::HWND(h as *mut core::ffi::c_void)
-}
-
-/// A browser's video picture-in-picture appeared, or the docked one may have
-/// gone (from the WinEvent hook, and once at start for one already open):
-/// dock a new one, let go of a closed one.
-fn pip_check(ui: &Island) {
-    if snapshot_mode() {
-        return;
-    }
-    let changed = with_state(|state| {
-        let now = now_ms(state.started);
-        if let Some(w) = &state.watching {
-            if w.hwnd.is_some_and(|h| !watch::alive(as_hwnd(h))) {
-                state.watching = None;
-                state.watch_held = false;
-                state.watch_hover = false;
-                watch::track(None);
-                return true;
-            }
-            return false;
-        }
-        let Some(h) = watch::find_plain() else {
-            state.watch_freed = None;
-            return false;
-        };
-        // The one the user dragged away stays free until it is closed.
-        if state.watch_freed == Some(h.0 as isize) {
-            return false;
-        }
-        state.watch_freed = None;
-        let title = if state.music.has_session { state.music.title.clone() } else { String::new() };
-        state.watching = Some(Watching { hwnd: Some(h.0 as isize), title, since: now, placed: None });
-        // Just opened: shown at once, until the user lets it follow the island.
-        state.watch_held = true;
-        watch::track(Some(h));
-        true
-    })
-    .unwrap_or(false);
-    if changed {
-        refresh(ui);
-    }
-}
-
-/// The island's "back to tab": the picture-in-picture window is closed, and
-/// the browser puts the video back in its tab.
-fn watch_back() {
-    if let Some(h) = with_state(|state| state.watching.as_ref().and_then(|w| w.hwnd)).flatten() {
-        watch::close(as_hwnd(h));
-    }
-}
-
-/// Keeps the docked video under the island: shown while the island is open,
-/// the video is held or the pointer is on it, hidden otherwise (Chrome keeps
-/// playing). Dragged away by the user, it is let go: Chrome's PiP is
-/// movable again, until it is closed.
-fn follow_watch(ui: &Island, state: &mut State, now: u64) {
-    if snapshot_mode() {
-        return;
-    }
-    let Some(w) = state.watching.as_ref() else { return };
-    let Some(hwnd) = w.hwnd.map(as_hwnd).filter(|h| watch::alive(*h)) else {
-        // Closed (Chrome hides a closed PiP): let go now.
-        state.watching = None;
-        state.watch_held = false;
-        state.watch_hover = false;
-        watch::track(None);
-        return;
-    };
-    // Not where it was put (and not Chrome settling it right after it
-    // opened): the user dragged it. Theirs now.
-    if let Some((px, py)) = w.placed {
-        let r = watch::rect(hwnd);
-        if now.saturating_sub(w.since) > 1_500 && ((r.left - px).abs() > 8 || (r.top - py).abs() > 8) {
-            state.watch_freed = Some(hwnd.0 as isize);
-            state.watching = None;
-            state.watch_held = false;
-            state.watch_hover = false;
-            watch::track(None);
-            return;
-        }
-    }
-    let Some(island) = hwnd_of(ui.window()) else { return };
-    let r = watch::rect(island);
-    let scale = ui.window().scale_factor();
-    let below = if state.mode == Mode::Expanded { state.size_to.1 } else { state.settings.look.sizes().expanded_h };
-    let x = (r.left + r.right) / 2;
-    let y = r.top + ((TOP + below + 10.0) * scale).round() as i32;
-    let shown = state.watch_held || state.mode == Mode::Expanded || state.watch_hover;
-    // As wide as the island's video area: 384 px (Chrome's own size is 366).
-    let width = (384.0 * scale).round() as i32;
-    let at = watch::place(hwnd, Some(island), x, y, shown, width);
-    if let Some(w) = state.watching.as_mut() {
-        w.placed = Some(at);
-    }
-}
-
 fn snapshot_mode() -> bool {
     std::env::var_os("FUBUNOTCH_V2_SNAPSHOT").is_some()
 }
@@ -4526,12 +4382,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             line_held: false,
             music_events: 0,
             dnd: std::env::var_os("FUBUNOTCH_V2_DND").is_some(),
-            // FUBUNOTCH_V2_DEMO_WATCH: a docked video, for snapshots.
-            watching: std::env::var_os("FUBUNOTCH_V2_DEMO_WATCH")
-                .map(|_| Watching { hwnd: None, title: "Demo stream".into(), since: 0, placed: None }),
-            watch_held: false,
-            watch_hover: false,
-            watch_freed: None,
             last_focus_running: false,
             line_notice_until: 0,
             last_shown: String::new(),
@@ -4624,7 +4474,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let inside = false;
         let was_hidden = with_state(|state| {
             let was_hidden = state.mode == Mode::Hidden;
-            let onto_video = !over && state.watching.as_ref().and_then(|w| w.hwnd).is_some_and(|h| watch::pointer_over(windows::Win32::Foundation::HWND(h as *mut core::ffi::c_void)));
             // A question from Claude Code stays compact under the pointer: its
             // Allow / Deny are in the capsule, and opening would move them away.
             let asking = state.mode == Mode::Compact && state.arbiter.view().front.is_some_and(|a| a.kind == Kind::Ask);
@@ -4638,9 +4487,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 state.mode = Mode::Expanded;
                 state.hide_at = None;
-                state.watch_hover = false;
-            } else if onto_video {
-                state.watch_hover = true;
             } else if !state.pinned && !state.held && !state.drop_hover {
                 state.mode = Mode::Compact;
                 state.hide_at = Some(now_ms(state.started) + hide_after(&state.settings));
@@ -4832,27 +4678,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         refresh(&ui);
     });
 
-    let weak = ui.as_weak();
-    ui.on_watch_clicked(move || {
-        if let Some(ui) = weak.upgrade() {
-            with_state(|state| state.watch_held = !state.watch_held);
-            refresh(&ui);
-        }
-    });
-    ui.on_watch_back(watch_back);
-
-    // Any browser PiP docks itself: Windows reports windows appearing and
-    // going, nothing is polled. One may be open already.
-    let weak = ui.as_weak();
-    watch::hook(move || {
-        let weak = weak.clone();
-        let _ = slint::invoke_from_event_loop(move || {
-            if let Some(ui) = weak.upgrade() {
-                pip_check(&ui);
-            }
-        });
-    });
-    pip_check(&ui);
 
     let weak = ui.as_weak();
     ui.on_dnd_clicked(move || {
@@ -5528,10 +5353,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         with_state(|state| {
             if banners::give_back(banners::SETTINGS, &mut state.data.banners, |_| true) {
                 store::save_data(&state.data);
-            }
-            // A docked video comes back in sight: nothing would show it.
-            if let Some(h) = state.watching.as_ref().and_then(|w| w.hwnd).filter(|h| watch::alive(as_hwnd(*h))) {
-                watch::release(as_hwnd(h));
             }
         });
         let _ = slint::quit_event_loop();
