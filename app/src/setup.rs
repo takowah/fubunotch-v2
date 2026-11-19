@@ -315,3 +315,148 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 }
+
+/// One MCP connection an account can send (NotchDeck's MCP list): its own
+/// ("user"), a project's, or Claude Desktop's (shared on this PC).
+#[derive(Clone, Debug)]
+pub struct McpEntry {
+    pub id: String,
+    pub name: String,
+    /// "user" | "project" | "desktop".
+    pub scope: String,
+    pub project: String,
+    /// "Local", "HTTP", "SSE".
+    pub kind: String,
+    /// The host, or the command and its first argument.
+    pub summary: String,
+}
+
+fn mcp_kind(c: &Value) -> String {
+    match c.get("type").and_then(|t| t.as_str()) {
+        Some("stdio") => "Local".into(),
+        Some(t) => t.to_uppercase(),
+        None if c.get("url").is_some() => "HTTP".into(),
+        None => "Local".into(),
+    }
+}
+
+fn mcp_summary(c: &Value) -> String {
+    if let Some(u) = c.get("url").and_then(|u| u.as_str()) {
+        return u.split("://").nth(1).and_then(|r| r.split('/').next()).unwrap_or(u).to_string();
+    }
+    let base = |s: &str| s.rsplit(['\\', '/']).next().unwrap_or(s).to_string();
+    let cmd = c.get("command").and_then(|x| x.as_str()).map(base).unwrap_or_default();
+    let arg = c.get("args").and_then(|a| a.as_array()).and_then(|a| a.iter().filter_map(|x| x.as_str()).find(|x| !x.starts_with('-'))).map(base).unwrap_or_default();
+    [cmd, arg].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ")
+}
+
+fn sorted_keys(m: &Map<String, Value>) -> Vec<String> {
+    let mut k: Vec<String> = m.keys().cloned().collect();
+    k.sort_by_key(|a| a.to_lowercase());
+    k
+}
+
+/// Every MCP connection `s` has: its own, its projects', and Claude Desktop's.
+pub fn mcp_entries(s: &Slot) -> Vec<McpEntry> {
+    let mut out = Vec::new();
+    let mut add = |name: &str, scope: &str, project: &str, c: &Value| {
+        let id = if scope == "project" { format!("project:{project}/{name}") } else { format!("{scope}/{name}") };
+        out.push(McpEntry { id, name: name.into(), scope: scope.into(), project: project.into(), kind: mcp_kind(c), summary: mcp_summary(c) });
+    };
+    let st = read(&s.state).unwrap_or(Value::Null);
+    let user = obj(st.get("mcpServers"));
+    for k in sorted_keys(&user) {
+        add(&k, "user", "", &user[&k]);
+    }
+    let projects = obj(st.get("projects"));
+    let mut pk: Vec<&String> = projects.keys().collect();
+    pk.sort();
+    for p in pk {
+        let servers = obj(projects[p].get("mcpServers"));
+        for k in sorted_keys(&servers) {
+            add(&k, "project", p, &servers[&k]);
+        }
+    }
+    let d = read(&crate::accounts::desktop_config()).unwrap_or(Value::Null);
+    let desk = obj(d.get("mcpServers"));
+    for k in sorted_keys(&desk) {
+        add(&k, "desktop", "", &desk[&k]);
+    }
+    out
+}
+
+/// Adds the connections `ids` (from `mcp_entries(from)`) to `to`; ones it
+/// already has by that name stay. (added, skipped). Backed up first.
+pub fn mcp_send(ids: &[String], from: &Slot, to: &Slot) -> Result<(usize, usize), String> {
+    let src = read(&from.state).unwrap_or(Value::Null);
+    let desk = read(&crate::accounts::desktop_config()).unwrap_or(Value::Null);
+    let mut dst = read(&to.state).unwrap_or(Value::Object(Map::new()));
+    if !dst.is_object() {
+        dst = Value::Object(Map::new());
+    }
+    let mut user = obj(dst.get("mcpServers"));
+    let mut projects = obj(dst.get("projects"));
+    let (mut added, mut skipped) = (0, 0);
+    for e in mcp_entries(from).into_iter().filter(|e| ids.contains(&e.id)) {
+        let cfg = match e.scope.as_str() {
+            "user" => src.get("mcpServers").and_then(|m| m.get(&e.name)).cloned(),
+            "project" => src.get("projects").and_then(|p| p.get(&e.project)).and_then(|p| p.get("mcpServers")).and_then(|m| m.get(&e.name)).cloned(),
+            _ => desk.get("mcpServers").and_then(|m| m.get(&e.name)).cloned(),
+        };
+        let Some(cfg) = cfg else {
+            skipped += 1;
+            continue;
+        };
+        if e.scope == "project" {
+            let mut proj = obj(projects.get(&e.project));
+            let mut servers = obj(proj.get("mcpServers"));
+            if servers.contains_key(&e.name) {
+                skipped += 1;
+                continue;
+            }
+            servers.insert(e.name.clone(), cfg);
+            proj.insert("mcpServers".into(), Value::Object(servers));
+            projects.insert(e.project.clone(), Value::Object(proj));
+        } else {
+            if user.contains_key(&e.name) {
+                skipped += 1;
+                continue;
+            }
+            user.insert(e.name.clone(), cfg);
+        }
+        added += 1;
+    }
+    if added > 0 {
+        dst["mcpServers"] = Value::Object(user);
+        if !projects.is_empty() {
+            dst["projects"] = Value::Object(projects);
+        }
+        write_with_backup(&dst, &to.state)?;
+    }
+    Ok((added, skipped))
+}
+
+#[cfg(test)]
+mod mcp_tests {
+    use super::*;
+
+    #[test]
+    fn sends_picked_servers_and_keeps_the_ones_there() {
+        let root = std::env::temp_dir().join(format!("kanmuri-mcp-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let from = Slot { dir: root.join("a"), state: root.join("a.json") };
+        let to = Slot { dir: root.join("b"), state: root.join("b.json") };
+        std::fs::write(&from.state, r#"{"mcpServers":{"one":{"url":"https://x.io/mcp"},"two":{"command":"node","args":["s.js"]}},"projects":{"C:/p":{"mcpServers":{"three":{"command":"uvx","args":["t"]}}}}}"#).unwrap();
+        std::fs::write(&to.state, r#"{"mcpServers":{"two":{"command":"mine"}},"oauthAccount":{"k":1}}"#).unwrap();
+        let ids: Vec<String> = mcp_entries(&from).into_iter().filter(|e| e.scope != "desktop").map(|e| e.id).collect();
+        assert_eq!(ids.len(), 3);
+        let (added, skipped) = mcp_send(&ids, &from, &to).unwrap();
+        assert_eq!((added, skipped), (2, 1));
+        let v: Value = serde_json::from_slice(&std::fs::read(&to.state).unwrap()).unwrap();
+        assert_eq!(v["mcpServers"]["two"]["command"], "mine");
+        assert_eq!(v["mcpServers"]["one"]["url"], "https://x.io/mcp");
+        assert_eq!(v["projects"]["C:/p"]["mcpServers"]["three"]["command"], "uvx");
+        assert_eq!(v["oauthAccount"]["k"], 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}

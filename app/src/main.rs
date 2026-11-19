@@ -27,6 +27,7 @@ mod shelf;
 mod snapshot;
 mod accounts;
 mod setup;
+mod chats;
 mod weather;
 mod control;
 mod pixels;
@@ -246,6 +247,18 @@ struct State {
     setup_to: String,
     setup_parts: Option<Vec<String>>,
     setup_report: String,
+    /// Settings > Accounts > MCP servers: the ones picked, what the last send did.
+    mcp_picked: Vec<String>,
+    mcp_report: String,
+    /// Settings > Accounts > Chats: the two accounts, the chats picked, the
+    /// folders open, the list read (for which account), what the last copy did.
+    chats_from: String,
+    chats_to: String,
+    chats_picked: Vec<String>,
+    chats_open: Vec<String>,
+    chats_list: Option<(String, Vec<chats::Folder>)>,
+    chats_loading: bool,
+    chats_report: String,
     settings: Settings,
     /// What is playing (the Music module), and its artwork as an image.
     music: music::Snapshot,
@@ -771,7 +784,13 @@ fn auto_screen_check() {
     let current = if !at.is_empty() && screens.iter().any(|(n, _)| *n == at) { at.clone() } else { home.clone() };
     let busy = with_state(|s| s.mode == Mode::Expanded).unwrap_or(false);
     let fg = unsafe { GetForegroundWindow() };
-    let ours = island_hwnd(&ui) == Some(fg);
+    // Kanmuri's own windows (the island, Settings) say nothing about the screen in use:
+    // with Follow me, Settings on one screen dragged the island back after a pick.
+    let ours = {
+        let mut pid = 0u32;
+        unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(fg, Some(&mut pid)) };
+        pid == std::process::id()
+    };
     let fg_screen = if ours { None } else { screen_of(fg).map(|(n, _)| n) };
     let move_to = AUTO.with(|a| {
         let mut a = a.borrow_mut();
@@ -3300,6 +3319,71 @@ fn apply_look(ui: &Island, state: &mut State) {
 
 // ── Liquid Glass ─────────────────────────────────────────────────────────────
 
+/// The keyboard hook that lets screenshots see the island (0 = none).
+static SHOT_HOOK: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+/// How long the island stays in screen capture after a screenshot key:
+/// Snip & Sketch and Print Screen freeze the screen within a second.
+const SHOT_MS: u64 = 4000;
+
+/// Liquid Glass leaves the island out of screen capture, so screenshots
+/// missed it. While the look is on, a low-level keyboard hook (Windows calls
+/// it per key, nothing is polled) watches for Print Screen, Win+Shift+S and
+/// Win+Shift+R: the island goes back into capture for a few seconds, the
+/// glass keeps its last frame meanwhile. Off with the look.
+fn screenshot_keys(on: bool) {
+    use std::sync::atomic::Ordering::Relaxed;
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, WH_KEYBOARD_LL};
+    let h = SHOT_HOOK.load(Relaxed);
+    unsafe {
+        if on && h == 0 {
+            let module = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).ok().map(|m| windows::Win32::Foundation::HINSTANCE(m.0));
+            if let Ok(hook) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(on_shot_key), module, 0) {
+                SHOT_HOOK.store(hook.0 as isize, Relaxed);
+            }
+        } else if !on && h != 0 {
+            let _ = UnhookWindowsHookEx(HHOOK(h as *mut core::ffi::c_void));
+            SHOT_HOOK.store(0, Relaxed);
+        }
+    }
+}
+
+unsafe extern "system" fn on_shot_key(code: i32, wparam: windows::Win32::Foundation::WPARAM, lparam: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LWIN, VK_RWIN, VK_SHIFT, VK_SNAPSHOT};
+    use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_SYSKEYDOWN};
+    if code >= 0 && (wparam.0 as u32 == WM_KEYDOWN || wparam.0 as u32 == WM_SYSKEYDOWN) {
+        let k = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
+        let down = |v: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetAsyncKeyState(v.0 as i32) } < 0;
+        let win = down(VK_LWIN) || down(VK_RWIN);
+        let snip = win && down(VK_SHIFT) && (k.vkCode == b'S' as u32 || k.vkCode == b'R' as u32);
+        if k.vkCode == VK_SNAPSHOT.0 as u32 || snip {
+            screenshot_soon();
+        }
+    }
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
+/// A screenshot is coming: the island back into capture now, out again once
+/// it is taken.
+fn screenshot_soon() {
+    glass::SHOOTING_UNTIL.store(glass::now_ms() + SHOT_MS, std::sync::atomic::Ordering::Relaxed);
+    let Some(ui) = ISLAND.with(|i| i.borrow().as_ref().and_then(|w| w.upgrade())) else { return };
+    if let Some(hwnd) = island_hwnd(&ui) {
+        glass::exclude_from_capture(hwnd, false);
+    }
+    // Later, from the event loop (not inside the hook): left out again.
+    Timer::single_shot(std::time::Duration::from_millis(SHOT_MS + 50), || {
+        if glass::shooting() {
+            return;
+        }
+        if let Some(ui) = ISLAND.with(|i| i.borrow().as_ref().and_then(|w| w.upgrade())) {
+            with_state(|state| {
+                state.glass_excluded = None;
+                glass_sync(&ui, state);
+            });
+        }
+    });
+}
+
 /// Starts or stops Liquid Glass' clock: it runs only while the look is
 /// Liquid Glass and the island is shown (0 % CPU hidden). Also leaves the
 /// island out of screen capture while the look is on (and only then: it
@@ -3313,7 +3397,12 @@ fn glass_sync(ui: &Island, state: &mut State) {
         }
         return;
     }
-    if state.glass_excluded != Some(look_on) {
+    if look_on {
+        screenshot_keys(true);
+    } else {
+        screenshot_keys(false);
+    }
+    if state.glass_excluded != Some(look_on) && !glass::shooting() {
         if let Some(hwnd) = island_hwnd(ui) {
             let ok = glass::exclude_from_capture(hwnd, look_on);
             store::log(&format!("glass: left out of capture {look_on} ({})", if ok { "ok" } else { "refused" }));
@@ -3585,6 +3674,144 @@ fn fill_setup(win: &SettingsWindow) {
     win.set_setup_parts_a(ModelRc::new(VecModel::from(chips[..4].to_vec())));
     win.set_setup_parts_b(ModelRc::new(VecModel::from(chips[4..].to_vec())));
     win.set_setup_report(report.into());
+    fill_mcp(win);
+    fill_chats(win);
+}
+
+/// Settings > Accounts > MCP servers: the Send setup "From" account's servers.
+fn fill_mcp(win: &SettingsWindow) {
+    let (from, picked, report) = with_state(|s| (s.setup_from.clone(), s.mcp_picked.clone(), s.mcp_report.clone())).unwrap_or_default();
+    let entries = accounts::claude_slot(&from).map(|slot| setup::mcp_entries(&slot)).unwrap_or_default();
+    let rows: Vec<McpItem> = entries
+        .iter()
+        .map(|e| {
+            let place = match e.scope.as_str() {
+                "project" => format!("Project {}", e.project.rsplit(['\\', '/']).next().unwrap_or(&e.project)),
+                "desktop" => "Claude Desktop".into(),
+                _ => "Account".into(),
+            };
+            McpItem { id: e.id.as_str().into(), name: e.name.as_str().into(), meta: format!("{place} · {} · {}", e.kind, e.summary).into(), on: picked.contains(&e.id) }
+        })
+        .collect();
+    win.set_mcp_picked(rows.iter().filter(|r| r.on).count() as i32);
+    win.set_mcp_rows(ModelRc::new(VecModel::from(rows)));
+    win.set_mcp_report(report.into());
+}
+
+fn ago(ms: u64) -> String {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    let m = now.saturating_sub(ms) / 60_000;
+    match m {
+        0 => "just now".into(),
+        1..=59 => format!("{m} min ago"),
+        60..=1439 => format!("{} h ago", m / 60),
+        _ => format!("{} d ago", m / 1440),
+    }
+}
+
+fn size_text(b: u64) -> String {
+    if b >= 1_048_576 {
+        format!("{:.1} MB", b as f64 / 1_048_576.0)
+    } else {
+        format!("{} KB", (b / 1024).max(1))
+    }
+}
+
+/// Settings > Accounts > Chats: accounts with chats (Claude Code, Claude
+/// Desktop), the list of the "From" one (read off the UI thread once per
+/// account), folders open or shut, the picks.
+fn fill_chats(win: &SettingsWindow) {
+    let all: Vec<accounts::Managed> = accounts::managed().into_iter().filter(|m| m.service == "claude" || m.service == "desktop").collect();
+    let label = |m: &accounts::Managed| m.name.clone();
+    let (from, to, list, picked, open, report, loading) = with_state(|s| {
+        if !all.iter().any(|m| m.id == s.chats_from) {
+            s.chats_from = all.iter().find(|m| m.service == "claude" && m.active).or(all.first()).map(|m| m.id.clone()).unwrap_or_default();
+        }
+        let service = all.iter().find(|m| m.id == s.chats_from).map(|m| m.service.clone()).unwrap_or_default();
+        if !all.iter().any(|m| m.id == s.chats_to && m.service == service && m.id != s.chats_from) {
+            s.chats_to = all.iter().find(|m| m.service == service && m.id != s.chats_from).map(|m| m.id.clone()).unwrap_or_default();
+        }
+        (s.chats_from.clone(), s.chats_to.clone(), s.chats_list.clone(), s.chats_picked.clone(), s.chats_open.clone(), s.chats_report.clone(), s.chats_loading)
+    })
+    .unwrap_or_default();
+    let service = all.iter().find(|m| m.id == from).map(|m| m.service.clone()).unwrap_or_default();
+    win.set_chats_app(service.as_str().into());
+    win.set_chats_from_choices(ModelRc::new(VecModel::from(all.iter().filter(|m| m.service == service).map(|m| ScreenRow { id: m.id.as_str().into(), label: label(m).into() }).collect::<Vec<_>>())));
+    win.set_chats_to_choices(ModelRc::new(VecModel::from(all.iter().filter(|m| m.service == service && m.id != from).map(|m| ScreenRow { id: m.id.as_str().into(), label: label(m).into() }).collect::<Vec<_>>())));
+    win.set_chats_from(from.as_str().into());
+    win.set_chats_to(to.as_str().into());
+    let mut rows: Vec<ChatItem> = Vec::new();
+    let mut note = report;
+    match list {
+        Some((who, folders)) if who == from => {
+            for f in &folders {
+                let n = f.chats.iter().filter(|c| picked.contains(&c.id)).count();
+                let is_open = open.contains(&f.path);
+                rows.push(ChatItem {
+                    id: f.path.as_str().into(),
+                    header: true,
+                    title: f.name.as_str().into(),
+                    meta: format!("{} chat{}{}", f.chats.len(), if f.chats.len() == 1 { "" } else { "s" }, if n > 0 { format!(" · {n} picked") } else { String::new() }).into(),
+                    on: n > 0 && n == f.chats.len(),
+                    open: is_open,
+                    can_resume: false,
+                });
+                if is_open {
+                    for c in f.chats.iter().take(200) {
+                        rows.push(ChatItem {
+                            id: c.id.as_str().into(),
+                            header: false,
+                            title: c.title.as_str().into(),
+                            meta: format!("{} · {}", ago(c.date), size_text(c.size)).into(),
+                            on: picked.contains(&c.id),
+                            open: false,
+                            can_resume: service == "claude" && !c.sid.is_empty(),
+                        });
+                    }
+                }
+            }
+            if folders.is_empty() && note.is_empty() {
+                note = if service == "desktop" { "No Code-tab chats for this account yet (it needs to have signed in once).".into() } else { "No chats in this account yet.".into() };
+            }
+        }
+        _ => {
+            if note.is_empty() {
+                note = "Reading chats…".into();
+            }
+            if snapshot_mode() && !from.is_empty() {
+                // A snapshot can't wait for the reading thread.
+                let folders = accounts::chat_home(&from).map(|h| chats::list(&h)).unwrap_or_default();
+                with_state(|s| s.chats_list = Some((from.clone(), folders)));
+                return fill_chats(win);
+            }
+            if !loading && !from.is_empty() {
+                load_chats(win, from.clone());
+            }
+        }
+    }
+    win.set_chats_picked(picked.len() as i32);
+    win.set_chats_rows(ModelRc::new(VecModel::from(rows)));
+    win.set_chats_report(note.into());
+}
+
+/// Reads an account's chats off the UI thread (hundreds of files), then fills again.
+fn load_chats(win: &SettingsWindow, id: String) {
+    with_state(|s| s.chats_loading = true);
+    let me = win.as_weak();
+    std::thread::spawn(move || {
+        let folders = accounts::chat_home(&id).map(|h| chats::list(&h)).unwrap_or_default();
+        let _ = slint::invoke_from_event_loop(move || {
+            with_state(|s| {
+                s.chats_loading = false;
+                if s.chats_from == id {
+                    s.chats_list = Some((id.clone(), folders));
+                }
+            });
+            if let Some(w) = me.upgrade() {
+                fill_chats(&w);
+            }
+        });
+    });
 }
 
 /// Settings > Accounts' three lists, read now, and a line after a failed change.
@@ -3690,7 +3917,13 @@ fn open_settings(ui: &Island) {
             // "auto:<mode>": Move automatically; else the home screen.
             match id.strip_prefix("auto:") {
                 Some(m) => change_settings(&ui, |s| s.general.auto_screen = m.to_string()),
-                None => change_settings(&ui, |s| s.general.screen = id.to_string()),
+                // Picking a screen means "put it there": Follow me would take it straight back.
+                None => change_settings(&ui, |s| {
+                    s.general.screen = id.to_string();
+                    if s.general.auto_screen == "follow" {
+                        s.general.auto_screen = "off".into();
+                    }
+                }),
             }
             // Back home first; the next check moves it again if it should.
             AUTO_AT.lock().unwrap_or_else(|e| e.into_inner()).clear();
@@ -3814,6 +4047,8 @@ fn open_settings(ui: &Island) {
             "rename" => accounts::rename(&id, &value),
             "remove" => accounts::remove(&id),
             "signin" => accounts::sign_in(&id),
+            "terminal" => accounts::terminal(&id, None, None),
+            "reveal" => accounts::reveal(&id),
             // `id` is the service here; Claude Code / Codex sign the new one in at once.
             "add" => accounts::add(&id, &value).and_then(|new_id| if id == "desktop" { Ok(()) } else { accounts::sign_in(&new_id) }),
             _ => Ok(()),
@@ -3823,6 +4058,140 @@ fn open_settings(ui: &Island) {
         }
         fill_accounts(&win, &done.err().map(|e| format!("Couldn't {action}: {e}")).unwrap_or_default());
         refresh(&ui);
+    });
+    let me = win.as_weak();
+    win.on_mcp_act(move |action, id| {
+        let Some(win) = me.upgrade() else { return };
+        match action.as_str() {
+            "pick" => {
+                with_state(|s| {
+                    s.mcp_report.clear();
+                    match s.mcp_picked.iter().position(|p| *p == id.as_str()) {
+                        Some(i) => {
+                            s.mcp_picked.remove(i);
+                        }
+                        None => s.mcp_picked.push(id.to_string()),
+                    }
+                });
+            }
+            "send" => {
+                let (from, to, picked) = with_state(|s| (s.setup_from.clone(), s.setup_to.clone(), s.mcp_picked.clone())).unwrap_or_default();
+                let report = match (accounts::claude_slot(&from), accounts::claude_slot(&to)) {
+                    (Some(f), Some(t)) if from != to => match setup::mcp_send(&picked, &f, &t) {
+                        Ok((added, skipped)) => format!("Sent {added}{}.", if skipped > 0 { format!(", {skipped} already there") } else { String::new() }),
+                        Err(e) => format!("Couldn't send: {e}"),
+                    },
+                    _ => "Pick two Claude Code accounts in Send setup.".to_string(),
+                };
+                store::log(&format!("mcp: {from} -> {to}: {report}"));
+                with_state(|s| {
+                    s.mcp_report = report;
+                    s.mcp_picked.clear();
+                });
+            }
+            _ => {}
+        }
+        fill_setup(&win);
+    });
+    let me = win.as_weak();
+    win.on_chats_act(move |action, id| {
+        let Some(win) = me.upgrade() else { return };
+        match action.as_str() {
+            "app" => {
+                // The app's account in use (else its first) becomes "From".
+                let pick = accounts::managed().into_iter().filter(|m| m.service == id.as_str()).max_by_key(|m| m.active).map(|m| m.id);
+                with_state(|s| {
+                    if let Some(p) = pick {
+                        if s.chats_from != p {
+                            s.chats_from = p;
+                            s.chats_picked.clear();
+                            s.chats_open.clear();
+                            s.chats_list = None;
+                            s.chats_report.clear();
+                        }
+                    }
+                });
+            }
+            "from" => {
+                with_state(|s| {
+                    if s.chats_from != id.as_str() {
+                        s.chats_from = id.to_string();
+                        s.chats_picked.clear();
+                        s.chats_open.clear();
+                        s.chats_list = None;
+                        s.chats_report.clear();
+                    }
+                });
+            }
+            "to" => {
+                with_state(|s| {
+                    s.chats_to = id.to_string();
+                    s.chats_report.clear();
+                });
+            }
+            "open" => {
+                with_state(|s| match s.chats_open.iter().position(|p| *p == id.as_str()) {
+                    Some(i) => {
+                        s.chats_open.remove(i);
+                    }
+                    None => s.chats_open.push(id.to_string()),
+                });
+            }
+            "pick" => {
+                with_state(|s| {
+                    s.chats_report.clear();
+                    match s.chats_picked.iter().position(|p| *p == id.as_str()) {
+                        Some(i) => {
+                            s.chats_picked.remove(i);
+                        }
+                        None => s.chats_picked.push(id.to_string()),
+                    }
+                });
+            }
+            "pick-folder" => {
+                with_state(|s| {
+                    s.chats_report.clear();
+                    let ids: Vec<String> = s.chats_list.as_ref().and_then(|(_, f)| f.iter().find(|f| f.path == id.as_str())).map(|f| f.chats.iter().map(|c| c.id.clone()).collect()).unwrap_or_default();
+                    let all_on = ids.iter().all(|c| s.chats_picked.contains(c));
+                    s.chats_picked.retain(|c| !ids.contains(c));
+                    if !all_on {
+                        s.chats_picked.extend(ids);
+                    }
+                });
+            }
+            "resume" => {
+                let found = with_state(|s| {
+                    s.chats_list.as_ref().and_then(|(_, f)| f.iter().flat_map(|f| f.chats.iter()).find(|c| c.id == id.as_str()).cloned()).map(|c| (s.chats_from.clone(), c))
+                })
+                .flatten();
+                if let Some((acc, c)) = found {
+                    if c.sid.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') && !c.sid.is_empty() {
+                        let r = accounts::terminal(&acc, Some(std::path::Path::new(&c.folder)), Some(&format!("claude --resume {}", c.sid)));
+                        if let Err(e) = r {
+                            with_state(|s| s.chats_report = format!("Couldn't resume: {e}"));
+                        }
+                    }
+                }
+            }
+            "copy" => {
+                let (from, to, picked) = with_state(|s| (s.chats_from.clone(), s.chats_to.clone(), s.chats_picked.clone())).unwrap_or_default();
+                let report = match (accounts::chat_home(&from), accounts::chat_home(&to)) {
+                    (Some(f), Some(t)) => match chats::copy(&picked, &f, &t) {
+                        Ok((copied, skipped)) => format!("Copied {copied} chat{}{}.", if copied == 1 { "" } else { "s" }, if skipped > 0 { format!(", {skipped} skipped (already there)") } else { String::new() }),
+                        Err(e) => format!("Couldn't copy: {e}"),
+                    },
+                    (_, None) => "The other account hasn't signed in yet.".to_string(),
+                    _ => "Pick an account to copy from.".to_string(),
+                };
+                store::log(&format!("chats: {from} -> {to}: {report}"));
+                with_state(|s| {
+                    s.chats_report = report;
+                    s.chats_picked.clear();
+                });
+            }
+            _ => {}
+        }
+        fill_chats(&win);
     });
     let me = win.as_weak();
     win.on_setup_act(move |action, id| {
@@ -4088,6 +4457,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             setup_to: String::new(),
             setup_parts: None,
             setup_report: String::new(),
+            mcp_picked: Vec::new(),
+            mcp_report: String::new(),
+            chats_from: String::new(),
+            chats_to: String::new(),
+            chats_picked: Vec::new(),
+            chats_open: Vec::new(),
+            chats_list: None,
+            chats_loading: false,
+            chats_report: String::new(),
             settings,
             music: music::Snapshot::default(),
             music_art: None,

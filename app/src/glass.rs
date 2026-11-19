@@ -95,8 +95,24 @@ fn margin(scale: f32) -> i32 {
     (glass::MARGIN * scale).ceil() as i32
 }
 
+/// Until when (ms since the Unix epoch) a screenshot may be being taken: the
+/// island is back in screen capture meanwhile, so nothing is grabbed (it would
+/// grab itself) and the glass keeps its last frame.
+pub static SHOOTING_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+pub fn shooting() -> bool {
+    SHOOTING_UNTIL.load(std::sync::atomic::Ordering::Relaxed) > now_ms()
+}
+
 fn live(g: &mut Glass, grab: &mut Grabber, out: &mut Vec<u8>, job: &Job) -> Done {
     let unchanged = Done { key: job.key.clone(), hash: job.last_hash, light: job.was_light, pixels: None };
+    if shooting() {
+        return unchanged;
+    }
     let m = margin(job.scale);
     let Some((px, lw, lh, cx, cy, cw, _ch)) = grab.grab(job.x - m, job.y - m, job.w as i32 + 2 * m, job.h as i32 + 2 * m) else {
         return unchanged;

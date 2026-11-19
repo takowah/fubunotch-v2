@@ -933,3 +933,89 @@ mod tests {
         assert_eq!(v["active"]["claude"], "claude-x");
     }
 }
+
+/// Where an account keeps its chats: a Claude Code account's `projects`
+/// folder, or the Claude Desktop account's uuid (its Code-tab chats sit in
+/// Claude Desktop's `claude-code-sessions\<uuid>`).
+pub enum ChatHome {
+    Code(PathBuf),
+    Desktop { sessions: PathBuf, uuid: String },
+}
+
+pub fn chat_home(id: &str) -> Option<ChatHome> {
+    let state = read_json(&state_path())?;
+    let active = state.get("active").cloned().unwrap_or(Value::Null);
+    let a = state.get("accounts")?.as_array()?.iter().find(|a| a.get("id").and_then(|x| x.as_str()) == Some(id))?.clone();
+    let service = a.get("service").and_then(|x| x.as_str())?;
+    let dir = account_dir(&a, id);
+    match service {
+        "claude" => Some(ChatHome::Code(dir.join("projects"))),
+        "desktop" => {
+            let is_active = active.get("desktop").and_then(|x| x.as_str()) == Some(id);
+            let cfg = if is_active { desktop::support().join("config.json") } else { dir.join("config.json") };
+            let uuid = desktop::account_uuid(&cfg)?;
+            Some(ChatHome::Desktop { sessions: desktop::support().join("claude-code-sessions"), uuid })
+        }
+        _ => None,
+    }
+}
+
+/// (service, config dir, is default) of an account.
+fn slot_of(id: &str) -> Result<(String, PathBuf, bool, String), String> {
+    let state = read_json(&state_path()).ok_or("no accounts set up")?;
+    let a = state.get("accounts").and_then(|l| l.as_array()).and_then(|l| l.iter().find(|a| a.get("id").and_then(|x| x.as_str()) == Some(id))).cloned().ok_or("no such account")?;
+    let service = a.get("service").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let is_default = a.get("isDefault").and_then(|x| x.as_bool()).unwrap_or(false);
+    let name = a.get("name").and_then(|x| x.as_str()).unwrap_or(id).replace(['"', '&', '|', '<', '>', '^', '%'], " ");
+    let dir = if is_default {
+        match service.as_str() {
+            "claude" => home().join(".claude"),
+            "codex" => home().join(".codex"),
+            _ => account_dir(&a, id),
+        }
+    } else {
+        account_dir(&a, id)
+    };
+    Ok((service, dir, is_default, name))
+}
+
+/// A terminal for the account (its config folder set), in `cwd`, running
+/// `run` when given (e.g. `claude --resume <id>`), as NotchDeck's.
+pub fn terminal(id: &str, cwd: Option<&Path>, run: Option<&str>) -> Result<(), String> {
+    let (service, dir, is_default, name) = slot_of(id)?;
+    let var = match service.as_str() {
+        "claude" => "CLAUDE_CONFIG_DIR",
+        "codex" => "CODEX_HOME",
+        _ => return Err("Claude Desktop has no terminal".into()),
+    };
+    let mut line = format!("title {name}");
+    if let Some(r) = run {
+        line.push_str(&format!(" & {r}"));
+    }
+    let mut cmd = std::process::Command::new("cmd.exe");
+    cmd.args(["/k", &line]);
+    if is_default {
+        cmd.env_remove(var);
+    } else {
+        cmd.env(var, &dir);
+    }
+    let cwd = cwd.filter(|p| p.is_dir()).map(Path::to_path_buf).unwrap_or_else(home);
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(0x0000_0010).current_dir(cwd).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Opens the account's folder in Explorer.
+pub fn reveal(id: &str) -> Result<(), String> {
+    let (_, dir, _, _) = slot_of(id)?;
+    std::process::Command::new("explorer.exe").arg(&dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Claude Desktop's Code-tab chat folder (titles of Code chats it ran).
+pub fn chat_sessions_dir() -> Option<PathBuf> {
+    Some(desktop::support().join("claude-code-sessions"))
+}
+
+/// Claude Desktop's MCP config (shared by every account on this PC).
+pub fn desktop_config() -> PathBuf {
+    desktop::support().join("claude_desktop_config.json")
+}

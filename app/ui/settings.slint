@@ -50,6 +50,25 @@ export struct SetupPart {
     have: string,
 }
 
+// A row of Settings > Accounts > Chats: a folder (header) or one of its chats.
+export struct ChatItem {
+    id: string,
+    header: bool,
+    title: string,
+    meta: string,
+    on: bool,
+    open: bool,
+    can-resume: bool,
+}
+
+// One MCP connection to send (Settings > Accounts > MCP servers).
+export struct McpItem {
+    id: string,
+    name: string,
+    meta: string,
+    on: bool,
+}
+
 // A screen the island can sit on (Settings > General > Screen).
 export struct ScreenRow {
     id: string,
@@ -458,6 +477,9 @@ component AccountsCard inherits Card {
                 alignment: center;
                 HorizontalLayout {
                     spacing: 6px;
+                    // A terminal signed in as this account; its folder in Explorer.
+                    if root.service != "desktop" : SmallButton { glyph: "\u{E756}"; clicked => { root.act("terminal", a.id, ""); } }
+                    SmallButton { glyph: "\u{E838}"; clicked => { root.act("reveal", a.id, ""); } }
                     if a.can-sign-in : SmallButton { label: "Sign in…"; clicked => { root.act("signin", a.id, ""); } }
                     if !a.is-default : SmallButton { label: "Remove"; enabled: !(root.service == "desktop" && a.active); clicked => { root.act("remove", a.id, ""); } }
                 }
@@ -537,6 +559,139 @@ component SendSetupCard inherits Card {
             Text {
                 horizontal-stretch: 1;
                 text: root.report != "" ? root.report : root.from == root.to ? "Pick two different accounts." : "Adds what the other account lacks; keeps what it has. A backup of each file is made first.";
+                color: K.hint;
+                font-size: 12px;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// A tick box (Chats, MCP servers).
+component Tick inherits Rectangle {
+    in property <bool> on;
+    in property <bool> part;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    background: root.on ? Ice.glow : transparent;
+    border-width: 1.5px;
+    border-color: root.on ? Ice.glow : K.label;
+    Text { text: root.on ? "✓" : root.part ? "–" : ""; color: K.on-accent; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+}
+
+// Chats (NotchDeck's Chats tab): an account's chats by folder, newest first;
+// the picked ones copied to another account of the same app (never over a
+// chat it has). A folder's tick picks all of it; its name opens it. Claude
+// Code chats can be resumed in a terminal.
+component ChatsCard inherits Card {
+    in property <string> app;
+    in property <[ScreenRow]> from-choices;
+    in property <[ScreenRow]> to-choices;
+    in property <string> from;
+    in property <string> to;
+    in property <[ChatItem]> rows;
+    in property <string> report;
+    in property <int> picked;
+    callback act(string, string);
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 14px;
+        padding-top: 12px;
+        padding-bottom: 14px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 10px;
+            Text { width: 40px; text: "App"; color: K.label; font-size: 12.5px; vertical-alignment: center; }
+            HorizontalLayout { alignment: start; Segmented { choices: [{id: "claude", label: "Claude Code"}, {id: "desktop", label: "Claude Desktop"}]; value: root.app; picked(id) => { root.act("app", id); } } }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            Text { width: 40px; text: "From"; color: K.label; font-size: 12.5px; vertical-alignment: center; }
+            HorizontalLayout { alignment: start; Segmented { choices: root.from-choices; value: root.from; picked(id) => { root.act("from", id); } } }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            Text { width: 40px; text: "To"; color: K.label; font-size: 12.5px; vertical-alignment: center; }
+            if root.to-choices.length > 0 : HorizontalLayout { alignment: start; Segmented { choices: root.to-choices; value: root.to; picked(id) => { root.act("to", id); } } }
+            if root.to-choices.length == 0 : Text { text: "Add another account of this app to copy chats to it."; color: K.hint; font-size: 12px; vertical-alignment: center; }
+        }
+        for r in root.rows : Rectangle {
+            height: r.header ? 34px : 30px;
+            border-radius: 6px;
+            background: ra.has-hover ? #ffffff0a : transparent;
+            HorizontalLayout {
+                padding-left: r.header ? 4px : 26px;
+                padding-right: 4px;
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: center;
+                    Tick { on: r.on; }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    Text { text: (r.header ? (r.open ? "▾ " : "▸ ") : "") + r.title; color: r.header ? K.ink : K.label; font-size: r.header ? 13px : 12.5px; font-weight: r.header ? 600 : 400; overflow: elide; }
+                }
+                VerticalLayout { alignment: center; Text { text: r.meta; color: K.hint; font-size: 11.5px; } }
+                if r.can-resume : VerticalLayout { alignment: center; SmallButton { label: "Resume"; clicked => { root.act("resume", r.id); } } }
+            }
+            // The tick picks; the rest of a folder's row opens it.
+            TouchArea { x: 0; width: r.header ? 28px : parent.width - (r.can-resume ? 90px : 0px); mouse-cursor: pointer; clicked => { root.act(r.header ? "pick-folder" : "pick", r.id); } }
+            ra := TouchArea { x: 28px; width: r.header ? parent.width - 28px : 0px; mouse-cursor: pointer; clicked => { root.act("open", r.id); } }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            SmallButton { label: "Copy " + (root.picked > 0 ? root.picked + " " : "") + "to account"; primary: true; enabled: root.picked > 0 && root.to != ""; clicked => { root.act("copy", ""); } }
+            Text {
+                horizontal-stretch: 1;
+                text: root.report != "" ? root.report : "Copies never overwrite a chat the other account already has.";
+                color: K.hint;
+                font-size: 12px;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// MCP servers, one by one (NotchDeck's MCP list): from the Send setup's
+// "From" account to its "To"; a server the other account has by that name stays.
+component McpCard inherits Card {
+    in property <[McpItem]> rows;
+    in property <string> report;
+    in property <int> picked;
+    in property <bool> can-send;
+    callback act(string, string);
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 14px;
+        spacing: 4px;
+        if root.rows.length == 0 : Text { text: "This account has no MCP servers."; color: K.hint; font-size: 12px; }
+        for r in root.rows : Rectangle {
+            height: 30px;
+            border-radius: 6px;
+            background: ma.has-hover ? #ffffff0a : transparent;
+            HorizontalLayout {
+                padding-left: 4px;
+                padding-right: 4px;
+                spacing: 8px;
+                VerticalLayout { alignment: center; Tick { on: r.on; } }
+                VerticalLayout { alignment: center; Text { text: r.name; color: K.ink; font-size: 12.5px; font-weight: 600; } }
+                VerticalLayout { alignment: center; horizontal-stretch: 1; Text { text: r.meta; color: K.hint; font-size: 11.5px; overflow: elide; } }
+            }
+            ma := TouchArea { mouse-cursor: pointer; clicked => { root.act("pick", r.id); } }
+        }
+        HorizontalLayout {
+            padding-top: 6px;
+            spacing: 10px;
+            SmallButton { label: "Send " + (root.picked > 0 ? root.picked + " " : "") + "servers"; primary: true; enabled: root.picked > 0 && root.can-send; clicked => { root.act("send", ""); } }
+            Text {
+                horizontal-stretch: 1;
+                text: root.report != "" ? root.report : "Uses Send setup's From and To. A backup of the file is made first.";
                 color: K.hint;
                 font-size: 12px;
                 vertical-alignment: center;
@@ -945,6 +1100,20 @@ export component SettingsWindow inherits Window {
     in property <[SetupPart]> setup-parts-b;
     in property <string> setup-report;
     callback setup-act(string, string);
+    // Settings > Accounts > Chats and MCP servers.
+    in property <string> chats-app;
+    in property <[ScreenRow]> chats-from-choices;
+    in property <[ScreenRow]> chats-to-choices;
+    in property <string> chats-from;
+    in property <string> chats-to;
+    in property <[ChatItem]> chats-rows;
+    in property <string> chats-report;
+    in property <int> chats-picked;
+    callback chats-act(string, string);
+    in property <[McpItem]> mcp-rows;
+    in property <string> mcp-report;
+    in property <int> mcp-picked;
+    callback mcp-act(string, string);
     // A byte as two hex digits: the swatches' "#rrggbb".
     pure function hex(v: int) -> string {
         return root.digit(floor(v / 16)) + root.digit(mod(v, 16));
@@ -1567,6 +1736,26 @@ export component SettingsWindow inherits Window {
                     pick(which, id) => { root.setup-act("pick-" + which, id); }
                     toggle(id) => { root.setup-act("toggle", id); }
                     send => { root.setup-act("send", ""); }
+                }
+                if root.page == "accounts" : Heading { text: "MCP SERVERS, ONE BY ONE"; }
+                if root.page == "accounts" : McpCard {
+                    rows: root.mcp-rows;
+                    report: root.mcp-report;
+                    picked: root.mcp-picked;
+                    can-send: root.setup-from != root.setup-to;
+                    act(a, id) => { root.mcp-act(a, id); }
+                }
+                if root.page == "accounts" : Heading { text: "CHATS"; }
+                if root.page == "accounts" : ChatsCard {
+                    app: root.chats-app;
+                    from-choices: root.chats-from-choices;
+                    to-choices: root.chats-to-choices;
+                    from: root.chats-from;
+                    to: root.chats-to;
+                    rows: root.chats-rows;
+                    report: root.chats-report;
+                    picked: root.chats-picked;
+                    act(a, id) => { root.chats-act(a, id); }
                 }
                 if root.page == "accounts" : Heading { text: "CODEX"; }
                 if root.page == "accounts" : AccountsCard {
