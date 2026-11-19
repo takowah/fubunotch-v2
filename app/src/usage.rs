@@ -554,11 +554,11 @@ fn demo_view(id: &str) -> View {
     let offset = (crate::local_time::utc_offset_hours() * 3600.0) as i64;
     let w = |label: &str, used: f32, in_h: i64| Window { label: label.into(), used, resets_at: Some(now + in_h * 3600 + 1800) };
     let (u, expired) = match id {
-        "desktop-partner" | "claude-partner" => (
+        "desktop-team" | "claude-team" => (
             Usage { plan: "Max 20x".into(), windows: vec![w("5-hour", 32.0, 2), w("Week · all models", 58.0, 50), w("Week · Opus", 91.0, 50)], updated: now, ..Usage::default() },
             false,
         ),
-        "desktop-daffa" | "claude-daffa" => (
+        "desktop-alex" | "claude-alex" => (
             Usage { plan: "Max 5x".into(), windows: vec![w("5-hour", 4.0, 4), w("Week · all models", 77.0, 98)], updated: now - 18 * 60, ..Usage::default() },
             true,
         ),

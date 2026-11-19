@@ -106,7 +106,7 @@ pub struct Track {
 
 static TRACK: Mutex<Track> = Mutex::new(Track { key: String::new(), app: String::new(), base: 0.0, since_ms: None, clock_only: false, paused_at_ms: None });
 
-/// The position as the song's own, whatever the player reports (Daffa, 17 Nov
+/// The position as the song's own, whatever the player reports (a tester, 17 Nov
 /// 2026: Apple Music in a browser, the lyrics far off or gone):
 /// - A player that plays its queue as one stream counts on across songs. When
 ///   the song changes in the same player, a position already past 5 s is that

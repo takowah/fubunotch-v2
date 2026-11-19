@@ -63,12 +63,12 @@ pub fn load() -> Vec<Account> {
 }
 
 const DEMO: &[u8] = br#"{"accounts":[
-    {"id":"desktop-daffa","service":"desktop","name":"Daffa Max"},
-    {"id":"desktop-partner","service":"desktop","name":"Partner Kyou Ultra"},
-    {"id":"claude-partner","service":"claude","name":"Partner Area Ultra"},
-    {"id":"claude-daffa","service":"claude","name":"Daffa Max"},
+    {"id":"desktop-alex","service":"desktop","name":"Alex Max"},
+    {"id":"desktop-team","service":"desktop","name":"Team Ultra"},
+    {"id":"claude-team","service":"claude","name":"Studio Ultra"},
+    {"id":"claude-alex","service":"claude","name":"Alex Max"},
     {"id":"codex-main","service":"codex","name":"Main"}],
-    "active":{"desktop":"desktop-partner","claude":"claude-partner","codex":"codex-main"}}"#;
+    "active":{"desktop":"desktop-team","claude":"claude-team","codex":"codex-main"}}"#;
 
 pub fn parse(bytes: &[u8]) -> Vec<Account> {
     let Ok(v) = serde_json::from_slice::<Value>(bytes) else { return Vec::new() };
@@ -749,17 +749,17 @@ mod tests {
     #[test]
     fn reads_accounts_and_the_active_one() {
         let s = br#"{"accounts":[
-            {"id":"desktop-default","service":"desktop","name":"Daffa Max","isDefault":true},
+            {"id":"desktop-default","service":"desktop","name":"Alex Max","isDefault":true},
             {"id":"claude-default","service":"claude","name":"Partner"},
-            {"id":"claude-daffa","service":"claude","name":"Daffa"},
+            {"id":"claude-alex","service":"claude","name":"Alex"},
             {"id":"chatgpt-x","service":"chatgpt","name":"Web"}],
-            "active":{"desktop":"desktop-default","claude":"claude-daffa"}}"#;
+            "active":{"desktop":"desktop-default","claude":"claude-alex"}}"#;
         let a = parse(s);
         assert_eq!(a.len(), 3, "chatgpt is left out");
         assert!(a[0].active);
         assert!(!a[1].active);
         assert!(a[2].active);
-        assert_eq!(a[2].name, "Daffa");
+        assert_eq!(a[2].name, "Alex");
     }
 
     #[test]
