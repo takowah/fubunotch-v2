@@ -256,7 +256,7 @@ component Toggle inherits Rectangle {
     width: 38px;
     height: 22px;
     border-radius: 11px;
-    background: !enabled ? K.fill : on ? Ice.glow : a.has-hover ? #ffffff33 : #ffffff26;
+    background: !enabled ? K.fill : on ? (a.pressed ? Ice.glow.darker(0.15) : Ice.glow) : a.pressed ? #ffffff40 : a.has-hover ? #ffffff33 : #ffffff26;
     animate background { duration: 160ms; }
     Rectangle {
         width: 18px;
@@ -284,8 +284,8 @@ component SmallButton inherits Rectangle {
     height: 28px;
     border-radius: 7px;
     background: !enabled ? #ffffff08
-        : primary ? (a.has-hover ? Ice.frost : Ice.glow)
-        : a.has-hover ? K.fill-hover : K.fill;
+        : primary ? (a.pressed ? Ice.glow.darker(0.15) : a.has-hover ? Ice.frost : Ice.glow)
+        : a.pressed ? #ffffff2e : a.has-hover ? K.fill-hover : K.fill;
     animate background { duration: 140ms; }
     row := HorizontalLayout {
         padding-left: root.label == "" ? 0 : 12px;
@@ -326,7 +326,7 @@ component Stepper inherits Rectangle {
         minus := Rectangle {
             width: 30px;
             border-radius: 6px;
-            background: ma.has-hover && ma.enabled ? K.fill-hover : transparent;
+            background: ma.pressed && ma.enabled ? #ffffff2e : ma.has-hover && ma.enabled ? K.fill-hover : transparent;
             Glyph { text: "\u{E738}"; font-size: 10px; color: ma.enabled ? K.ink : K.faint; }
             ma := TouchArea { enabled: root.value > root.minimum; mouse-cursor: pointer; clicked => { root.changed(max(root.minimum, root.value - root.step)); } }
         }
@@ -344,7 +344,7 @@ component Stepper inherits Rectangle {
         Rectangle {
             width: 30px;
             border-radius: 6px;
-            background: pa.has-hover && pa.enabled ? K.fill-hover : transparent;
+            background: pa.pressed && pa.enabled ? #ffffff2e : pa.has-hover && pa.enabled ? K.fill-hover : transparent;
             Glyph { text: "\u{E710}"; font-size: 10px; color: pa.enabled ? K.ink : K.faint; }
             pa := TouchArea { enabled: root.value < root.maximum; mouse-cursor: pointer; clicked => { root.changed(min(root.maximum, root.value + root.step)); } }
         }
@@ -358,7 +358,9 @@ component Segmented inherits Rectangle {
     callback picked(string);
     height: 30px;
     border-radius: 8px;
-    background: K.fill;
+    background: root.choices.length == 0 ? transparent : K.fill;
+    min-width: root.choices.length == 0 ? none-text.preferred-width : 0px;
+    none-text := Text { visible: root.choices.length == 0; x: 0; text: "None yet"; color: K.hint; font-size: 12.5px; vertical-alignment: center; }
     HorizontalLayout {
         padding: 2px;
         spacing: 2px;
@@ -366,7 +368,7 @@ component Segmented inherits Rectangle {
             min-width: t.preferred-width + 26px;
             horizontal-stretch: 1;
             border-radius: 6px;
-            background: c.id == root.value ? #5b5b60 : ca.has-hover ? #ffffff10 : transparent;
+            background: c.id == root.value ? #5b5b60 : ca.pressed ? #ffffff1f : ca.has-hover ? #ffffff10 : transparent;
             animate background { duration: 140ms; }
             t := Text {
                 text: c.label;
@@ -538,12 +540,15 @@ component SendSetupCard inherits Card {
         // The parts, four a row: a click picks or drops one; under each what "From" has.
         for row in [root.parts-a, root.parts-b] : HorizontalLayout {
             spacing: 8px;
-            alignment: start;
             for p in row : Rectangle {
-                width: 150px;
+                // Four even columns that shrink with the window (one
+                // preferred width for all, so the room is shared evenly).
+                min-width: 96px;
+                preferred-width: 150px;
+                horizontal-stretch: 1;
                 height: 48px;
                 border-radius: 8px;
-                background: p.on ? #ffffff1f : pa.has-hover ? #ffffff10 : #ffffff08;
+                background: pa.pressed ? #ffffff29 : p.on ? #ffffff1f : pa.has-hover ? #ffffff10 : #ffffff08;
                 border-width: 1px;
                 border-color: p.on ? Ice.glow.with-alpha(0.7) : transparent;
                 animate background { duration: 120ms; }
@@ -627,7 +632,7 @@ component ChatsCard inherits Card {
         for r in root.rows : Rectangle {
             height: r.header ? 34px : 30px;
             border-radius: 6px;
-            background: ra.has-hover ? #ffffff0a : transparent;
+            background: ra.pressed ? #ffffff14 : ra.has-hover ? #ffffff0a : transparent;
             HorizontalLayout {
                 padding-left: r.header ? 4px : 26px;
                 padding-right: 4px;
@@ -682,7 +687,7 @@ component McpCard inherits Card {
         for r in root.rows : Rectangle {
             height: 30px;
             border-radius: 6px;
-            background: ma.has-hover ? #ffffff0a : transparent;
+            background: ma.pressed ? #ffffff14 : ma.has-hover ? #ffffff0a : transparent;
             HorizontalLayout {
                 padding-left: 4px;
                 padding-right: 4px;
@@ -731,7 +736,7 @@ component NavItem inherits Rectangle {
     callback clicked();
     height: 32px;
     border-radius: 8px;
-    background: active ? #ffffff1c : a.has-hover ? #ffffff0d : transparent;
+    background: active ? #ffffff1c : a.pressed ? #ffffff17 : a.has-hover ? #ffffff0d : transparent;
     animate background { duration: 140ms; }
     HorizontalLayout {
         padding-left: 10px;
@@ -804,7 +809,7 @@ component SlotZone inherits Rectangle {
     width: max(46px, inner.preferred-width);
     height: 30px;
     border-radius: 15px;
-    background: selected ? #ffffff26 : a.has-hover ? #ffffff14 : transparent;
+    background: selected ? #ffffff26 : a.pressed ? #ffffff1f : a.has-hover ? #ffffff14 : transparent;
     border-width: selected ? 1px : 0;
     border-color: Ice.glow.with-alpha(0.7);
     animate background { duration: 140ms; }
@@ -861,7 +866,7 @@ component ThemeCard inherits Rectangle {
     min-width: 140px;
     height: 132px;
     border-radius: 12px;
-    background: a.has-hover && !chosen ? #232326 : K.card;
+    background: a.pressed && !chosen ? #2a2a2e : a.has-hover && !chosen ? #232326 : K.card;
     border-width: chosen ? 2px : 1px;
     border-color: chosen ? Ice.glow : K.card-edge;
     animate background { duration: 140ms; }
@@ -1014,7 +1019,7 @@ component LookCard inherits Rectangle {
     min-width: 100px;
     height: 108px;
     border-radius: 12px;
-    background: a.has-hover && !chosen ? #232326 : K.card;
+    background: a.pressed && !chosen ? #2a2a2e : a.has-hover && !chosen ? #232326 : K.card;
     border-width: chosen ? 2px : 1px;
     border-color: chosen ? Ice.glow : K.card-edge;
     animate background { duration: 140ms; }
@@ -1066,7 +1071,7 @@ component Swatch inherits Rectangle {
     width: 30px;
     height: 30px;
     border-radius: 15px;
-    background: chosen ? Ice.glow : a.has-hover ? #ffffff40 : transparent;
+    background: chosen ? Ice.glow : a.pressed ? #ffffff59 : a.has-hover ? #ffffff40 : transparent;
     Rectangle {
         x: 3px;
         y: 3px;
@@ -1763,8 +1768,8 @@ export component SettingsWindow inherits Window {
                         }
                     }
                 }
-                if root.page == "accounts" : Text { text: "Edit a name and press Enter or click elsewhere: it saves at once."; color: K.hint; font-size: 12px; wrap: word-wrap; }
-                if root.page == "accounts" && root.account-note != "" : Text { text: root.account-note; color: #ff9f0a; font-size: 12.5px; wrap: word-wrap; }
+                if root.page == "accounts" : HorizontalLayout { padding-left: 6px; padding-top: 4px; Text { text: "Edit a name and press Enter or click elsewhere: it saves at once."; color: K.hint; font-size: 12px; wrap: word-wrap; } }
+                if root.page == "accounts" && root.account-note != "" : HorizontalLayout { padding-left: 6px; Text { text: root.account-note; color: #ff9f0a; font-size: 12.5px; wrap: word-wrap; } }
                 if root.page == "accounts" : Heading { text: "CLAUDE DESKTOP"; }
                 if root.page == "accounts" : AccountsCard {
                     service: "desktop";
