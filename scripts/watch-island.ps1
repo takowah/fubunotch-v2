@@ -1,22 +1,22 @@
 # Records the island for a while: a picture of the top of its screen every
-# $Every seconds, for $Seconds, into tools\watch\<time>.png, plus the app log's
+# $Every seconds, for $Seconds, into scripts\watch\<time>.png, plus the app log's
 # new lines. For checking real behaviour (song changes, notices) without
-# asking the owner to report each glitch. Run outside Claude's container
-# (explorer.exe tools\watch-island.bat) or from a normal PowerShell.
+# asking the owner to report each glitch. Run from a normal PowerShell:
+#   .\scripts\watch-island.ps1 -Seconds 120
 param([int]$Seconds = 240, [double]$Every = 2, [string]$Screen = '')
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 $out = Join-Path $PSScriptRoot 'watch'
 New-Item -ItemType Directory -Force $out | Out-Null
 Get-ChildItem $out -Filter *.png -ErrorAction SilentlyContinue | Remove-Item -Force
 if (-not $Screen) {
-    $sf = Join-Path $env:APPDATA 'Kanmuri\settings.json'
+    $sf = Join-Path $env:APPDATA 'FubuNotch v2\settings.json'
     try { $Screen = (Get-Content $sf -Raw | ConvertFrom-Json).general.screen } catch {}
 }
 $s = [System.Windows.Forms.Screen]::AllScreens | Where-Object { $_.DeviceName -eq $Screen } | Select-Object -First 1
 if (-not $s) { $s = [System.Windows.Forms.Screen]::PrimaryScreen }
 $w = 900; $h = 340
 $x = $s.Bounds.X + [int](($s.Bounds.Width - $w) / 2); $y = $s.Bounds.Y
-$log = Join-Path $env:APPDATA 'Kanmuri\kanmuri.log'
+$log = Join-Path $env:APPDATA 'FubuNotch v2\fubunotch-v2.log'
 $start = (Get-Item $log -ErrorAction SilentlyContinue).Length
 $end = (Get-Date).AddSeconds($Seconds)
 $prev = $null

@@ -3,5 +3,5 @@
 scripts/pixel/.cache/
 __pycache__/
 .claude/worktrees/
-tools/*.log
-tools/watch/
+scripts/watch/
+/target-*/
