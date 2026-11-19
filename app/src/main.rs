@@ -101,10 +101,13 @@ const LYRIC_ONE_LINE: usize = 56;
 /// page makes a 196 px panel, a tall one (lyrics) 268 px, and a page with
 /// more in it (notifications, accounts) grows to fit.
 const EXPANDED_CHROME: f32 = 74.0;
-/// Notifications: a header and up to six rows in two columns ($ITEM_H + 2 each).
+/// Notifications: a header and one column of rows ($ITEM_H + 2 each). The
+/// page shows four, and a slice of a fifth when there are more, so it reads
+/// as a list that scrolls.
 const NOTIF_HEADER_H: f32 = 28.0;
 const NOTIF_ROW_PITCH: f32 = 50.0;
-const NOTIF_ROWS_MAX: usize = 6;
+const NOTIF_ROWS_SHOWN: f32 = 4.0;
+const NOTIF_ROWS_PEEK: f32 = 0.45;
 /// Claude Code's questions shown at the top of the Notifications page.
 const ASK_ROWS_MAX: usize = 3;
 /// Accounts: one column per app, its title and its chips stacked.
@@ -501,41 +504,11 @@ fn activity_aumid(notifications: &VecDeque<notif::Notif>, a: &Activity) -> Strin
     notifications.iter().find(|n| n.app == a.source).map(|n| n.aumid.clone()).or_else(|| notif::seen_apps().get(&a.source).cloned()).unwrap_or_default()
 }
 
-/// The stack a notification belongs to: its app (by AUMID, else its name).
-fn notif_key(n: &notif::Notif) -> &str {
-    if n.aumid.is_empty() {
-        &n.app
-    } else {
-        &n.aumid
-    }
-}
-
-/// The most rows one app gets on the Notifications page, so a chatty app
-/// can't fill it (18 Nov 2026).
-const NOTIF_PER_APP: usize = 2;
-
-/// The Notifications page's rows (indexes in the list, newest first): as
-/// before, one a notification, but at most NOTIF_PER_APP of each app.
+/// The Notifications page's rows (indexes in the list, newest first): every
+/// notification kept (NOTIF_HISTORY), in one column that scrolls (the owner,
+/// 19 Nov 2026: the earlier ones must stay reachable, no cap per app).
 fn notif_view(list: &std::collections::VecDeque<notif::Notif>) -> Vec<usize> {
-    let mut seen: Vec<(&str, usize)> = Vec::new();
-    let mut rows = Vec::new();
-    for (i, n) in list.iter().enumerate() {
-        let k = notif_key(n);
-        let c = match seen.iter_mut().find(|(x, _)| *x == k) {
-            Some(e) => {
-                e.1 += 1;
-                e.1
-            }
-            None => {
-                seen.push((k, 1));
-                1
-            }
-        };
-        if c <= NOTIF_PER_APP {
-            rows.push(i);
-        }
-    }
-    rows
+    (0..list.len()).collect()
 }
 
 /// An app's logo as an image with rounded corners, `px` physical pixels a
@@ -1692,11 +1665,11 @@ fn refresh(ui: &Island) {
                     _ if state.notifications.is_empty() && ask_count == 0 => page_h,
                     _ => {
                         // Claude Code's questions first, one a row; then the
-                        // notifications in two columns (one for a single one).
-                        let q = ask_count.min(ASK_ROWS_MAX);
-                        let n = notif_view(&state.notifications).len().min(NOTIF_ROWS_MAX);
-                        let cols = if n == 1 { 1 } else { 2 };
-                        (NOTIF_HEADER_H + (q + n.div_ceil(cols)) as f32 * NOTIF_ROW_PITCH).max(page_h)
+                        // notifications, one a row, scrolling past four.
+                        let q = ask_count.min(ASK_ROWS_MAX) as f32;
+                        let n = notif_view(&state.notifications).len() as f32;
+                        let rows = if n > NOTIF_ROWS_SHOWN { NOTIF_ROWS_SHOWN + NOTIF_ROWS_PEEK } else { n };
+                        (NOTIF_HEADER_H + (q + rows) * NOTIF_ROW_PITCH).max(page_h)
                     }
                 };
                 (sizes.expanded_w, (EXPANDED_CHROME + page).min(EXPANDED_MAX_H))
@@ -5555,12 +5528,12 @@ mod notif_view_tests {
     use super::*;
 
     #[test]
-    fn one_app_gets_two_rows_at_most_and_the_order_stays() {
+    fn every_notification_gets_a_row_newest_first() {
         let mk = |id: u32, app: &str| notif::Notif { id, app: app.into(), aumid: format!("{app}!App"), title: String::new(), body: String::new(), time: String::new() };
-        // Newest first: five from WhatsApp around one from Discord.
+        // Newest first: five from WhatsApp around one from Discord, all kept.
         let list: std::collections::VecDeque<notif::Notif> =
             [mk(7, "WhatsApp"), mk(6, "WhatsApp"), mk(5, "WhatsApp"), mk(4, "Discord"), mk(3, "WhatsApp"), mk(2, "WhatsApp")].into_iter().collect();
-        assert_eq!(notif_view(&list), vec![0, 1, 3]);
+        assert_eq!(notif_view(&list), vec![0, 1, 2, 3, 4, 5]);
     }
 }
 

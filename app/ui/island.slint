@@ -1361,9 +1361,8 @@ component NotifPage inherits Rectangle {
     callback answered(string, string);
     // The mascot stands over the empty page (Island draws it): the line goes under her.
     in property <bool> mascot;
-    // One column for a single notification, else two.
-    property <int> cols: root.items.length == 1 ? 1 : 2;
-    property <length> col-w: (root.width - (self.cols - 1) * 10px) / self.cols;
+    // One column, newest first; the wheel scrolls back through the earlier
+    // ones (the owner, 19 Nov 2026: every notification, not four in two columns).
     property <int> ask-rows: min(root.asks.length, 3);
     property <length> grid-y: 28px + self.ask-rows * 50px;
     if root.items.length == 0 && root.asks.length == 0 : Text {
@@ -1385,7 +1384,7 @@ component NotifPage inherits Rectangle {
             x: 0;
             width: self.preferred-width;
             height: 100%;
-            text: root.total > min(6, root.items.length) ? "Notifications (" + min(6, root.items.length) + " of " + root.total + ")" : "Notifications";
+            text: root.total > 0 ? "Notifications (" + root.total + ")" : "Notifications";
             color: Mini.label;
             font-size: 11px;
             font-weight: 600;
@@ -1435,11 +1434,17 @@ component NotifPage inherits Rectangle {
             for a in q.actions : ActionPill { label: a.label; clicked => { root.answered(q.id, a.id); } }
         }
     }
+    if root.items.length > 0 : Flickable {
+        y: root.grid-y;
+        width: root.width;
+        height: root.height - self.y;
+        // Rows take clicks; the wheel scrolls.
+        interactive: false;
+        content-height: root.items.length * 50px - 2px;
     for n[i] in root.items : Rectangle {
-        visible: i < 6;
-        x: mod(i, root.cols) * (root.col-w + 10px);
-        y: root.grid-y + floor(i / root.cols) * 50px;
-        width: root.col-w;
+        x: 0;
+        y: i * 50px;
+        width: root.width;
         height: 48px;
         Tinted { width: parent.width; height: parent.height; tint: n.accent; lit: row.has-hover; }
         if row.pressed : Rectangle { border-radius: 14px; background: Mini.wash.with-alpha(min(1, 0.06 * Mini.wk)); }
@@ -1461,6 +1466,7 @@ component NotifPage inherits Rectangle {
             vertical-alignment: center;
         }
         row := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(n.index); } }
+    }
     }
 }
 
