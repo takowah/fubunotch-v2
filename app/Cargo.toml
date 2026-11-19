@@ -1,6 +1,6 @@
 [package]
-name = "kanmuri"
-description = "Kanmuri: a modular dynamic island for Windows"
+name = "fubunotch-v2"
+description = "FubuNotch v2: a modular dynamic island for Windows"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

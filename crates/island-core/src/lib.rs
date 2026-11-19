@@ -1,4 +1,4 @@
-//! Kanmuri's core: the activity contract and the priority arbiter.
+//! FubuNotch v2's core: the activity contract and the priority arbiter.
 //! No UI and no I/O, so it can be tested on its own and kept if the UI changes.
 
 pub mod activity;

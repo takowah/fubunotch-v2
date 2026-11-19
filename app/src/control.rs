@@ -313,7 +313,7 @@ mod tests {
     #[test]
     #[ignore]
     fn dark_mode_round_trip() {
-        let log = std::env::var("KANMURI_STEP_LOG").ok();
+        let log = std::env::var("FUBUNOTCH_V2_STEP_LOG").ok();
         let step = |s: &str| {
             if let Some(p) = &log {
                 use std::io::Write;
@@ -335,7 +335,7 @@ mod tests {
         println!("dark mode {d} -> {} -> {d}", !d);
     }
 
-    /// Prints what this PC has (cargo test -p kanmuri control_probe -- --ignored --nocapture).
+    /// Prints what this PC has (cargo test -p fubunotch-v2 control_probe -- --ignored --nocapture).
     #[test]
     #[ignore]
     fn control_probe() {

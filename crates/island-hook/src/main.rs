@@ -1,13 +1,13 @@
-//! kanmuri-hook: what Claude Code runs on each hook event.
+//! fubunotch-v2-hook: what Claude Code runs on each hook event.
 //!
-//!   kanmuri-hook <EventName>   (the event's JSON on stdin)
+//!   fubunotch-v2-hook <EventName>   (the event's JSON on stdin)
 //!
-//! It posts the JSON to Kanmuri's webhook (127.0.0.1:47821/claude/<Event>)
+//! It posts the JSON to FubuNotch v2's webhook (127.0.0.1:47821/claude/<Event>)
 //! and, for a PermissionRequest, waits for the island's answer and prints the
 //! documented `hookSpecificOutput`. The rules:
 //! - never block Claude Code: if the app isn't running, it exits at once;
 //! - never allow anything a human didn't click: no answer prints nothing, and
-//!   Claude Code asks in its terminal as if Kanmuri weren't there.
+//!   Claude Code asks in its terminal as if FubuNotch v2 weren't there.
 
 
 use std::io::{Read, Write};
@@ -23,8 +23,7 @@ const STDIN_LIMIT: u64 = 1024 * 1024;
 
 fn token() -> Option<String> {
     let dir = std::env::var_os("APPDATA")?;
-    // Kanmuri (was FubuNotch v2): the new folder first, the old one until it is copied.
-    let path = ["Kanmuri", "FubuNotch v2"].iter().map(|n| std::path::Path::new(&dir).join(n).join("token")).find(|p| p.exists()).unwrap_or_default();
+    let path = std::path::Path::new(&dir).join("FubuNotch v2").join("token");
     let t = std::fs::read_to_string(path).ok()?.trim().to_string();
     (t.len() >= 32).then_some(t)
 }
@@ -59,7 +58,7 @@ fn decision_json(decision: &str) -> Option<String> {
     let d = decision.trim();
     let behavior = match d {
         "allow" => r#"{"behavior":"allow"}"#.to_string(),
-        "deny" => r#"{"behavior":"deny","message":"Denied from Kanmuri"}"#.to_string(),
+        "deny" => r#"{"behavior":"deny","message":"Denied from FubuNotch v2"}"#.to_string(),
         _ => {
             let input = d.strip_prefix("input:")?.trim();
             if !(input.starts_with('{') && input.ends_with('}')) || input.contains('\n') {

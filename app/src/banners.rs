@@ -2,13 +2,13 @@
 // Windows' own pop-up banners are off app by app, with the switch Windows
 // Settings → Notifications → <app> → "Show notification banners" writes
 // (ShowBanner = 0 under the app's key). The notifications still land in
-// Windows' notification centre, where Kanmuri reads them.
+// Windows' notification centre, where FubuNotch v2 reads them.
 //
 // Three layers, so even an app's first notification goes to the island: every
 // app in the Start menu up front (by its AUMID, also those that never sent
 // one), each app Windows adds a key for later (`watch`), and any other app at
 // its first notification. What each app had is kept, to put back exactly; keys
-// Kanmuri made are removed again. Per user (HKCU), no admin rights.
+// FubuNotch v2 made are removed again. Per user (HKCU), no admin rights.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -25,12 +25,12 @@ use windows::Win32::System::Registry::{
 pub const SETTINGS: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings";
 const VALUE: &str = "ShowBanner";
 
-/// What an app had before Kanmuri turned its banners off.
+/// What an app had before FubuNotch v2 turned its banners off.
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Kept {
     /// Its ShowBanner; none = no value (Windows then shows banners).
     pub before: Option<u32>,
-    /// Its key didn't exist: Kanmuri made it, and removes it again.
+    /// Its key didn't exist: FubuNotch v2 made it, and removes it again.
     pub created: bool,
 }
 
@@ -218,7 +218,7 @@ pub fn give_back(base: &str, kept: &mut BTreeMap<String, Kept>, which: impl Fn(&
 /// goes under `base`: Windows makes one for a newly installed app.
 pub fn watch(base: &'static str, changed: impl Fn() + Send + 'static) {
     std::thread::Builder::new()
-        .name("kanmuri-banners".into())
+        .name("fubunotch-banners".into())
         .spawn(move || {
             let Some(key) = open(base, KEY_NOTIFY) else { return };
             loop {
@@ -242,7 +242,7 @@ mod tests {
     use super::*;
 
     /// A scratch key of our own, never Windows' real settings.
-    const TEST: &str = "Software\\Kanmuri tests\\banners";
+    const TEST: &str = "Software\\FubuNotch v2 tests\\banners";
 
     #[test]
     fn take_then_give_back_restores_each_app_exactly() {

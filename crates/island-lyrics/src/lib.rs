@@ -203,7 +203,7 @@ pub fn pick_search(hits: &[Value], duration: f64) -> Option<Lyrics> {
 pub(crate) fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(TIMEOUT))
-        .user_agent(concat!("Kanmuri/", env!("CARGO_PKG_VERSION"), " (personal)"))
+        .user_agent(concat!("FubuNotch-v2/", env!("CARGO_PKG_VERSION"), " (personal)"))
         .http_status_as_error(false)
         .build()
         .into()

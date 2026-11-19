@@ -14,7 +14,7 @@
 //   times a second only while the island is shown, and an unchanged screen
 //   (same hash) costs no redraw.
 //
-// Snapshots have no screen: KANMURI_DEMO_BACKDROP=<picture> (else the
+// Snapshots have no screen: FUBUNOTCH_V2_DEMO_BACKDROP=<picture> (else the
 // snapshot's own gradient) stands in for it.
 
 use std::sync::mpsc::{channel, Sender};
@@ -212,7 +212,7 @@ impl Grabber {
 // ── Snapshots ───────────────────────────────────────────────────────────────
 
 /// What is "behind" a snapshot's window of `w` x `h` physical px, RGBA:
-/// KANMURI_DEMO_BACKDROP's picture (cropped to cover), else a desktop-ish
+/// FUBUNOTCH_V2_DEMO_BACKDROP's picture (cropped to cover), else a desktop-ish
 /// gradient. Decoded once per size.
 pub fn demo_backdrop(w: u32, h: u32) -> Vec<u8> {
     static CACHE: Mutex<Option<((u32, u32), Vec<u8>)>> = Mutex::new(None);
@@ -222,7 +222,7 @@ pub fn demo_backdrop(w: u32, h: u32) -> Vec<u8> {
             return px.clone();
         }
     }
-    let picture = std::env::var("KANMURI_DEMO_BACKDROP")
+    let picture = std::env::var("FUBUNOTCH_V2_DEMO_BACKDROP")
         .ok()
         .filter(|p| !p.is_empty())
         // Windows' picture decoder wants backslashes and a full path.
@@ -270,7 +270,7 @@ pub fn demo(win: (u32, u32), x: i32, y: i32, w: u32, h: u32, radius: f32, scale:
 mod tests {
     use super::*;
 
-    /// Needs a desktop (not a locked PC or CI): `cargo test -p kanmuri grab -- --ignored`.
+    /// Needs a desktop (not a locked PC or CI): `cargo test -p fubunotch-v2 grab -- --ignored`.
     #[test]
     #[ignore]
     fn grab_reads_the_screen_small() {

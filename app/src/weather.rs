@@ -24,7 +24,7 @@ pub fn fetch(lat: f64, lon: f64) -> Result<Weather, String> {
     let url = format!(
         "https://api.open-meteo.com/v1/forecast?latitude={lat:.3}&longitude={lon:.3}&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1"
     );
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(15))).user_agent("kanmuri").build().into();
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(15))).user_agent("fubunotch-v2").build().into();
     let mut r = agent.get(&url).call().map_err(|e| e.to_string())?;
     let body = r.body_mut().with_config().limit(64 * 1024).read_to_string().map_err(|e| e.to_string())?;
     parse(&body).ok_or_else(|| "unexpected answer".into())
@@ -89,7 +89,7 @@ mod tests {
         assert!(parse("{}").is_none());
     }
 
-    /// Asks Open-Meteo for real (network): cargo test -p kanmuri weather_live -- --ignored --nocapture
+    /// Asks Open-Meteo for real (network): cargo test -p fubunotch-v2 weather_live -- --ignored --nocapture
     #[test]
     #[ignore]
     fn weather_live() {

@@ -70,12 +70,12 @@ pub enum Event {
     /// Create or update; `updated_at` is restamped by the app's clock.
     Upsert(Activity),
     End(String),
-    /// A Claude Code hook (relayed by kanmuri-hook): its event name and
+    /// A Claude Code hook (relayed by fubunotch-v2-hook): its event name and
     /// payload; a permission request also carries where its answer goes.
     Claude { event: String, payload: serde_json::Value, reply: Option<Reply> },
     /// The YouTube Music extension's report.
     Ytm(YtmState),
-    /// Kanmuri was started again while running: the island comes back
+    /// FubuNotch v2 was started again while running: the island comes back
     /// (placed again, on top, out of hiding) instead of a second copy.
     Show,
 }

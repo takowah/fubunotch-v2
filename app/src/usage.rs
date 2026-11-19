@@ -6,7 +6,7 @@
 //   from api.anthropic.com/api/oauth/usage with its OAuth token, only while
 //   the token is still valid. The token is never refreshed, written, logged
 //   or kept: an expired one shows the last usage kept with "open Claude Code
-//   to refresh". Only the usage (no token) is kept, in %APPDATA%\Kanmuri\usage.json.
+//   to refresh". Only the usage (no token) is kept, in %APPDATA%\FubuNotch v2\usage.json.
 // - Claude Desktop: its tokens stay in Electron's storage, untouched. Its
 //   `config.json` names the account it last signed in with
 //   (`lastKnownAccountUuid`); the Claude Code account with the same uuid
@@ -101,7 +101,7 @@ fn home() -> PathBuf {
 }
 
 fn demo() -> bool {
-    std::env::var_os("KANMURI_DEMO_USAGE").is_some()
+    std::env::var_os("FUBUNOTCH_V2_DEMO_USAGE").is_some()
 }
 
 // ── What the page shows ─────────────────────────────────────────────────────
@@ -430,7 +430,7 @@ fn refresh(dir: &Path) -> Option<String> {
     let refresh_token = v.get("claudeAiOauth")?.get("refreshToken")?.as_str()?.to_string();
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(15)))
-        .user_agent("kanmuri")
+        .user_agent("fubunotch-v2")
         .http_status_as_error(false)
         .build()
         .into();
@@ -460,7 +460,7 @@ fn refresh(dir: &Path) -> Option<String> {
 fn fetch(token: &str) -> Result<Value, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(10)))
-        .user_agent("kanmuri")
+        .user_agent("fubunotch-v2")
         .http_status_as_error(false)
         .build()
         .into();
@@ -596,7 +596,7 @@ pub fn sweep_in_background(done: impl FnOnce() + Send + 'static) {
     });
 }
 
-// ── KANMURI_DEMO_USAGE ──────────────────────────────────────────────────────
+// ── FUBUNOTCH_V2_DEMO_USAGE ──────────────────────────────────────────────────────
 
 fn demo_view(id: &str) -> View {
     let now = now_s();

@@ -1,4 +1,4 @@
-// Where Kanmuri keeps its things: %APPDATA%\Kanmuri (settings.json
+// Where FubuNotch v2 keeps its things: %APPDATA%\FubuNotch v2 (settings.json
 // and the webhook token). A save goes to a temporary file first, then replaces
 // the old one, so a crash mid-write never leaves half a file.
 
@@ -7,20 +7,7 @@ use std::path::PathBuf;
 use island_core::Settings;
 
 pub fn data_dir() -> PathBuf {
-    let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    let dir = base.join("Kanmuri");
-    // Renamed from FubuNotch v2 (18 Nov 2026): its folder is copied over once.
-    let old = base.join("FubuNotch v2");
-    if !dir.exists() && old.is_dir() && std::fs::create_dir_all(&dir).is_ok() {
-        if let Ok(entries) = std::fs::read_dir(&old) {
-            for e in entries.flatten() {
-                if e.path().is_file() {
-                    let _ = std::fs::copy(e.path(), dir.join(e.file_name()));
-                }
-            }
-        }
-    }
-    dir
+    std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("FubuNotch v2")
 }
 
 fn settings_path() -> PathBuf {
@@ -39,12 +26,12 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
     std::fs::rename(&tmp, settings_path())
 }
 
-/// One line in %APPDATA%\Kanmuri\kanmuri.log, with the local time.
+/// One line in %APPDATA%\FubuNotch v2\fubunotch-v2.log, with the local time.
 pub fn log(line: &str) {
     use std::io::Write;
     let dir = data_dir();
     let _ = std::fs::create_dir_all(&dir);
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("kanmuri.log")) {
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("fubunotch-v2.log")) {
         let _ = writeln!(f, "{} {line}", crate::local_time::stamp());
     }
 }
@@ -63,7 +50,7 @@ pub struct Data {
     pub notif_apps: std::collections::BTreeMap<String, String>,
     /// Focus rounds, oldest first.
     pub focus_log: Vec<island_core::daily::FocusRound>,
-    /// The apps whose Windows banners Kanmuri turned off (AUMID → what
+    /// The apps whose Windows banners FubuNotch v2 turned off (AUMID → what
     /// they had): put back as they were.
     pub banners: std::collections::BTreeMap<String, crate::banners::Kept>,
 }

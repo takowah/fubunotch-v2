@@ -77,10 +77,10 @@ pub fn warmth(look: &LookSettings, now_min: f32, sunset: u32, sunrise: u32) -> f
 // ── The wallpaper ────────────────────────────────────────────────────────────
 
 /// The wallpaper's colour, darkened for the island. Blocks (decodes a
-/// picture): call on a thread. KANMURI_DEMO_WALLPAPER=<picture | rrggbb>
+/// picture): call on a thread. FUBUNOTCH_V2_DEMO_WALLPAPER=<picture | rrggbb>
 /// stands in for the desktop's (snapshots).
 pub fn wallpaper_color() -> Option<Rgb> {
-    if let Ok(demo) = std::env::var("KANMURI_DEMO_WALLPAPER") {
+    if let Ok(demo) = std::env::var("FUBUNOTCH_V2_DEMO_WALLPAPER") {
         if let Some(c) = look::parse_hex(&demo) {
             return look::wallpaper_color(&[c.0, c.1, c.2, 255]);
         }

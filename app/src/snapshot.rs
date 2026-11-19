@@ -1,5 +1,5 @@
 // Checks of the UI without a screen (a locked PC, CI): with
-// KANMURI_SNAPSHOT=<file.png> the app draws into memory instead of
+// FUBUNOTCH_V2_SNAPSHOT=<file.png> the app draws into memory instead of
 // windows, lets the animations run out, and writes what a window shows to a
 // PNG over a desktop-like background. Nothing here runs otherwise.
 
@@ -12,9 +12,9 @@ use slint::platform::{Platform, WindowAdapter, WindowEvent};
 use slint::PlatformError;
 
 /// Pixels per logical pixel in the PNG: sharp enough to judge (1.5), or\r
-/// KANMURI_SNAPSHOT_SCALE (1 for pixel-for-pixel checks against a screenshot).
+/// FUBUNOTCH_V2_SNAPSHOT_SCALE (1 for pixel-for-pixel checks against a screenshot).
 pub fn scale() -> f32 {
-    std::env::var("KANMURI_SNAPSHOT_SCALE").ok().and_then(|v| v.parse().ok()).filter(|s: &f32| *s >= 0.5 && *s <= 4.0).unwrap_or(1.5)
+    std::env::var("FUBUNOTCH_V2_SNAPSHOT_SCALE").ok().and_then(|v| v.parse().ok()).filter(|s: &f32| *s >= 0.5 && *s <= 4.0).unwrap_or(1.5)
 }
 
 struct SnapPlatform;
@@ -48,7 +48,7 @@ impl Platform for SnapPlatform {
 
 /// The output file, when a snapshot was asked for.
 pub fn requested() -> Option<String> {
-    std::env::var("KANMURI_SNAPSHOT").ok().filter(|s| !s.is_empty())
+    std::env::var("FUBUNOTCH_V2_SNAPSHOT").ok().filter(|s| !s.is_empty())
 }
 
 /// Puts Slint on the in-memory platform. Call before any window is made.
@@ -88,7 +88,7 @@ pub fn write(index: usize, size: (f32, f32), path: &str) -> Result<(), Box<dyn s
     window.draw_if_needed(|renderer| {
         renderer.render(&mut buf, w as usize);
     });
-    // Over a desktop-ish backdrop (a gradient, or KANMURI_DEMO_BACKDROP's
+    // Over a desktop-ish backdrop (a gradient, or FUBUNOTCH_V2_DEMO_BACKDROP's
     // picture), so transparency, glow and Liquid Glass show.
     let backdrop = crate::glass::demo_backdrop(w, h);
     let mut rgb = Vec::with_capacity((w * h * 3) as usize);

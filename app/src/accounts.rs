@@ -1,5 +1,5 @@
 // Accounts: the Claude Desktop, Claude Code and Codex accounts, and the switch
-// between them. Kanmuri does the switching itself (it used to ask NotchDeck, an
+// between them. FubuNotch v2 does the switching itself (it used to ask NotchDeck, an
 // AccountDeck fork, which is no longer needed); the accounts stay where
 // NotchDeck kept them, %USERPROFILE%\.accountdeck (state.json and one folder per
 // account), so nothing has to be set up again.
@@ -44,9 +44,9 @@ fn state_path() -> PathBuf {
     root().join("state.json")
 }
 
-/// KANMURI_DEMO_ACCOUNTS: made-up accounts, for snapshots of the Accounts tab.
+/// FUBUNOTCH_V2_DEMO_ACCOUNTS: made-up accounts, for snapshots of the Accounts tab.
 fn demo() -> bool {
-    std::env::var_os("KANMURI_DEMO_ACCOUNTS").is_some()
+    std::env::var_os("FUBUNOTCH_V2_DEMO_ACCOUNTS").is_some()
 }
 
 /// The Accounts tab shows once there are accounts to switch between.
@@ -334,7 +334,7 @@ pub fn remove(id: &str) -> Result<(), String> {
 
 /// Opens a terminal signed in as nobody yet, its config folder set to the
 /// slot's, running the app's own login (Claude Code: /login, Codex: login).
-/// The user finishes it there; nothing of it passes through Kanmuri.
+/// The user finishes it there; nothing of it passes through FubuNotch v2.
 pub fn sign_in(id: &str) -> Result<(), String> {
     let state = read_json(&state_path()).ok_or("no accounts set up")?;
     let a = state.get("accounts").and_then(|l| l.as_array()).and_then(|l| l.iter().find(|a| a.get("id").and_then(|x| x.as_str()) == Some(id))).cloned().ok_or("no such account")?;
@@ -781,7 +781,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("kanmuri-accounts-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("fubunotch-accounts-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -851,7 +851,7 @@ mod tests {
 
     /// Live, on this PC's real accounts: Claude Code to its first other
     /// account and back to Main, checking the user variable and state.json.
-    /// Run outside any app container: `cargo test -p kanmuri live_claude -- --ignored`.
+    /// Run outside any app container: `cargo test -p fubunotch-v2 live_claude -- --ignored`.
     #[test]
     #[ignore]
     fn live_claude_code_round_trip() {
@@ -880,7 +880,7 @@ mod tests {
 
     /// Add, rename, remove and the same-account warning, in a made-up home
     /// (USERPROFILE pointed at a scratch folder; run alone:
-    /// cargo test -p kanmuri manage_in_a_scratch_home -- --ignored --test-threads=1).
+    /// cargo test -p fubunotch-v2 manage_in_a_scratch_home -- --ignored --test-threads=1).
     #[test]
     #[ignore]
     fn manage_in_a_scratch_home() {

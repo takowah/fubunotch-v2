@@ -86,7 +86,7 @@ export struct SettingsView {
     lyrics-youtube: bool,
     romaji: bool,
     notif-popups: bool,
-    // Windows lets Kanmuri read notifications.
+    // Windows lets FubuNotch v2 read notifications.
     notif-access: bool,
     notif-list: [AppSwitch],
     sys-volume: bool,
@@ -1059,7 +1059,7 @@ component Swatch inherits Rectangle {
 
 export component SettingsWindow inherits Window {
     default-font-family: "Allo";
-    title: "Kanmuri · Settings";
+    title: "FubuNotch v2 · Settings";
     preferred-width: 900px;
     preferred-height: 620px;
     min-width: 760px;
@@ -1165,7 +1165,7 @@ export component SettingsWindow inherits Window {
                     VerticalLayout {
                         alignment: center;
                         spacing: 0px;
-                        Text { text: "Kanmuri"; color: K.ink; font-size: 15px; font-weight: 700; }
+                        Text { text: "FubuNotch v2"; color: K.ink; font-size: 15px; font-weight: 700; }
                         Text { text: "Settings"; color: K.hint; font-size: 12px; }
                     }
                 }
@@ -1607,7 +1607,7 @@ export component SettingsWindow inherits Window {
                     SettingRow {
                         title: "Pop up the island";
                         tall: true;
-                        hint: "Windows' own pop-ups stay off while this module is on; off, or quitting Kanmuri, brings them back.";
+                        hint: "Windows' own pop-ups stay off while this module is on; off, or quitting FubuNotch v2, brings them back.";
                         last: root.s.notif-access;
                         Toggle { on: root.s.notif-popups; toggled(v) => { root.flag-changed("notifications.popups", v); } }
                     }
@@ -1782,20 +1782,20 @@ export component SettingsWindow inherits Window {
 
 export component Tray inherits SystemTrayIcon {
     icon: @image-url("../assets/tray.png");
-    tooltip: "Kanmuri";
+    tooltip: "FubuNotch v2";
     callback open-settings();
     callback quit();
     Menu {
         MenuItem { title: "Settings…"; activated => { root.open-settings(); } }
         MenuSeparator { }
-        MenuItem { title: "Quit Kanmuri"; activated => { root.quit(); } }
+        MenuItem { title: "Quit FubuNotch v2"; activated => { root.quit(); } }
     }
 }
 
-/// A yes/no question before something is written outside Kanmuri.
+/// A yes/no question before something is written outside FubuNotch v2.
 export component ConfirmWindow inherits Window {
     default-font-family: "Allo";
-    title: "Kanmuri";
+    title: "FubuNotch v2";
     preferred-width: 520px;
     // Its wrapped message doesn't size the window: tall enough for it and the buttons.
     preferred-height: 300px;

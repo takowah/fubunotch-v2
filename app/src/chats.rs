@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn copies_code_chats_without_overwriting_and_keeps_project_and_side_folder() {
-        let root = std::env::temp_dir().join(format!("kanmuri-chats-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("fubunotch-chats-{}", std::process::id()));
         let (a, b) = (root.join("a").join("projects"), root.join("b").join("projects"));
         let proj = a.join("C--x");
         std::fs::create_dir_all(proj.join("s1").join("subagents")).unwrap();

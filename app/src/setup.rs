@@ -47,7 +47,7 @@ fn write_with_backup(v: &Value, path: &Path) -> Result<(), String> {
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
     }
-    let tmp = path.with_extension("kanmuri.tmp");
+    let tmp = path.with_extension("fubunotch-v2.tmp");
     std::fs::write(&tmp, serde_json::to_string_pretty(v).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn sending_merges_and_never_overwrites() {
-        let base = std::env::temp_dir().join(format!("kanmuri-setup-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("fubunotch-setup-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let (a, b) = (slot(&base, "a"), slot(&base, "b"));
         std::fs::write(a.dir.join("settings.json"), r#"{"model":"opus","permissions":{"allow":["Bash(ls)","Read"]},"env":{"X":"1","Y":"2"},
@@ -442,7 +442,7 @@ mod mcp_tests {
 
     #[test]
     fn sends_picked_servers_and_keeps_the_ones_there() {
-        let root = std::env::temp_dir().join(format!("kanmuri-mcp-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("fubunotch-mcp-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let from = Slot { dir: root.join("a"), state: root.join("a.json") };
         let to = Slot { dir: root.join("b"), state: root.join("b.json") };
@@ -520,7 +520,7 @@ mod missing_tests {
 
     #[test]
     fn nothing_missing_after_a_send() {
-        let base = std::env::temp_dir().join(format!("kanmuri-missing-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("fubunotch-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let mk = |n: &str| {
             let dir = base.join(n);

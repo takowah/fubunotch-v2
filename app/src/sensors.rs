@@ -116,7 +116,7 @@ fn users(cap: &Key) -> Vec<String> {
 /// costs nothing while it waits).
 pub fn start(sink: impl Fn(InUse) + Send + 'static) {
     std::thread::Builder::new()
-        .name("kanmuri-sensors".into())
+        .name("fubunotch-sensors".into())
         .spawn(move || run(sink))
         .ok();
 }

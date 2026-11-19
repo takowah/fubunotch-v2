@@ -40,7 +40,7 @@ pub fn is_plain_pip(hwnd: HWND) -> bool {
 }
 
 /// A browser's video picture-in-picture window on screen, if one is open
-/// (also one opened before Kanmuri started). Chrome keeps hidden ones of
+/// (also one opened before FubuNotch v2 started). Chrome keeps hidden ones of
 /// its own around: only a visible one counts.
 pub fn find_plain() -> Option<HWND> {
     unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -128,7 +128,7 @@ fn is_chrome(hwnd: HWND) -> bool {
 
 /// Whether the window is still an open picture-in-picture. Chrome doesn't
 /// destroy a closed one, it hides it (and may show it again for the next
-/// video): hidden = closed. Kanmuri never hides it itself for that reason,
+/// video): hidden = closed. FubuNotch v2 never hides it itself for that reason,
 /// it moves it out of sight (`place`).
 pub fn alive(hwnd: HWND) -> bool {
     unsafe { IsWindow(Some(hwnd)).as_bool() && IsWindowVisible(hwnd).as_bool() }
@@ -176,7 +176,7 @@ pub fn place(hwnd: HWND, island: Option<HWND>, x: i32, y: i32, shown: bool, widt
 }
 
 /// Lets the window go where Chrome would put it (bottom right of the main
-/// screen), in sight: Kanmuri is quitting.
+/// screen), in sight: FubuNotch v2 is quitting.
 pub fn release(hwnd: HWND) {
     let r = rect(hwnd);
     let (w, h) = (r.right - r.left, r.bottom - r.top);

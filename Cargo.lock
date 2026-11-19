@@ -1288,6 +1288,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "fubunotch-v2"
+version = "0.1.0"
+dependencies = [
+ "island-core",
+ "island-lyrics",
+ "island-webhook",
+ "png",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "ureq",
+ "windows 0.61.3",
+ "windows-collections 0.2.0",
+ "windows-core 0.61.2",
+]
+
+[[package]]
 name = "futures"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2361,24 +2379,6 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "kanmuri"
-version = "0.1.0"
-dependencies = [
- "island-core",
- "island-lyrics",
- "island-webhook",
- "png",
- "serde",
- "serde_json",
- "slint",
- "slint-build",
- "ureq",
- "windows 0.61.3",
- "windows-collections 0.2.0",
- "windows-core 0.61.2",
 ]
 
 [[package]]

@@ -213,7 +213,7 @@ pub fn put_logo(aumid: &str, px: Vec<u8>) {
 /// `done`. Join the handle to wait for them (snapshots).
 pub fn preload(aumids: Vec<String>, done: impl FnOnce() + Send + 'static) -> Option<std::thread::JoinHandle<()>> {
     std::thread::Builder::new()
-        .name("kanmuri-logos".into())
+        .name("fubunotch-logos".into())
         .spawn(move || {
             let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
             for a in &aumids {
@@ -349,7 +349,7 @@ fn read(n: &UserNotification) -> Option<Notif> {
 
 /// Starts watching; `allowed_now` is asked for the current app list each time,
 /// `sink` gets each new allowed notification. Dropping the Watcher stops it.
-/// Whether Windows lets Kanmuri read notifications (known once the watcher ran).
+/// Whether Windows lets FubuNotch v2 read notifications (known once the watcher ran).
 pub fn has_access() -> bool {
     ACCESS.load(Ordering::Relaxed)
 }
@@ -364,7 +364,7 @@ pub fn start(
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     std::thread::Builder::new()
-        .name("kanmuri-notifications".into())
+        .name("fubunotch-notifications".into())
         .spawn(move || {
             let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
             run(&flag, allowed_now, sink, ready);

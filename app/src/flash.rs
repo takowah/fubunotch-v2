@@ -37,7 +37,7 @@ pub struct Flash {
     pub exe: String,
 }
 
-/// The app an exe belongs to, when it is one Kanmuri listens for.
+/// The app an exe belongs to, when it is one FubuNotch v2 listens for.
 pub fn app_for(exe: &str) -> Option<&'static str> {
     let file = exe.rsplit(['\\', '/']).next().unwrap_or(exe).to_lowercase();
     let stem = file.strip_suffix(".exe").unwrap_or(&file);
@@ -135,15 +135,15 @@ pub fn start(sink: impl Fn(Flash) + Send + Sync + 'static) {
     }
     STARTED.get_or_init(std::time::Instant::now);
     std::thread::Builder::new()
-        .name("kanmuri-flash".into())
+        .name("fubunotch-flash".into())
         .spawn(|| unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             let Ok(instance) = GetModuleHandleW(None) else { return };
-            let class = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: instance.into(), lpszClassName: w!("KanmuriFlashWatch"), ..Default::default() };
+            let class = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: instance.into(), lpszClassName: w!("FubuNotchFlashWatch"), ..Default::default() };
             RegisterClassW(&class);
             let _ = SHELL_MSG.set(RegisterWindowMessageW(w!("SHELLHOOK")));
             // A hidden top-level window: the shell hook doesn't reach message-only ones.
-            let Ok(hwnd) = CreateWindowExW(WS_EX_TOOLWINDOW, w!("KanmuriFlashWatch"), w!(""), WINDOW_STYLE(WS_POPUP.0), 0, 0, 0, 0, None, None, Some(instance.into()), None) else {
+            let Ok(hwnd) = CreateWindowExW(WS_EX_TOOLWINDOW, w!("FubuNotchFlashWatch"), w!(""), WINDOW_STYLE(WS_POPUP.0), 0, 0, 0, 0, None, None, Some(instance.into()), None) else {
                 crate::store::log("flash: no window");
                 return;
             };

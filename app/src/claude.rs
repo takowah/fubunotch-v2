@@ -1,4 +1,4 @@
-// The Claude Code module: hook events (relayed by kanmuri-hook through the
+// The Claude Code module: hook events (relayed by fubunotch-v2-hook through the
 // webhook) become activities, and the hooks are installed into
 // ~/.claude/settings.json only after the user saw what changes and agreed:
 // a dated backup first, the user's own entries (v1's included) never touched.
@@ -12,7 +12,7 @@
 
 use serde_json::{json, Map, Value};
 
-pub const MARKER: &str = "kanmuri-hook";
+pub const MARKER: &str = "fubunotch-v2-hook";
 
 /// The hook events installed, with Claude Code's timeout for each (seconds).
 /// PermissionRequest waits for a human: longer than the relay's own wait.
@@ -30,7 +30,7 @@ fn cut(text: &str, max: usize) -> String {
     island_core::activity::cut(text, max)
 }
 
-/// "kanmuri" for "C:\Users\x\kanmuri".
+/// "fubunotch-v2" for "C:\Users\x\fubunotch-v2".
 pub fn project(payload: &Value) -> String {
     let cwd = payload.get("cwd").and_then(Value::as_str).unwrap_or("");
     let name = cwd.trim_end_matches(['\\', '/']).rsplit(['\\', '/']).next().unwrap_or("");
@@ -103,7 +103,7 @@ fn question_plan(payload: &Value, ask_id: &str, project: &str) -> Plan {
             "source": "Claude Code",
             "kind": "ask",
             "title": cut(text, 120),
-            // One line (the capsule has one under the question): "kanmuri · Build in".
+            // One line (the capsule has one under the question): "fubunotch-v2 · Build in".
             "body": format!("{project} · {}", first.and_then(|q| q.get("header")).and_then(Value::as_str).unwrap_or("Question")),
             "ttl_ms": 110_000,
             "actions": actions,
@@ -175,14 +175,13 @@ pub fn settings_path() -> std::path::PathBuf {
 /// The relay next to this exe, as Claude Code (Git Bash on Windows) runs it:
 /// forward slashes, quoted (the path may hold spaces).
 pub fn relay_command(event: &str) -> Option<String> {
-    let exe = std::env::current_exe().ok()?.with_file_name("kanmuri-hook.exe");
+    let exe = std::env::current_exe().ok()?.with_file_name("fubunotch-v2-hook.exe");
     exe.exists().then(|| format!("\"{}\" {event}", exe.display().to_string().replace('\\', "/")))
 }
 
 fn is_ours(entry: &Value) -> bool {
     entry.get("hooks").and_then(Value::as_array).is_some_and(|hooks| {
-        // Entries written before the rename (fubunotch-v2-hook.exe) are ours too, so connecting again replaces them.
-        hooks.iter().any(|h| h.get("command").and_then(Value::as_str).is_some_and(|c| c.contains(MARKER) || c.contains("fubunotch-v2-hook")))
+        hooks.iter().any(|h| h.get("command").and_then(Value::as_str).is_some_and(|c| c.contains(MARKER)))
     })
 }
 
@@ -242,20 +241,20 @@ pub fn read_settings() -> Result<Value, String> {
     }
 }
 
-/// Backs the file up (settings.json.bak-kanmuri-<stamp>), then writes `new`.
+/// Backs the file up (settings.json.bak-fubunotch-v2-<stamp>), then writes `new`.
 /// Returns the backup's path ("" when there was no file).
 pub fn write_settings(new: &Value, stamp: &str) -> Result<String, String> {
     let path = settings_path();
     let mut backup = String::new();
     if path.exists() {
-        let b = path.with_file_name(format!("settings.json.bak-kanmuri-{stamp}"));
+        let b = path.with_file_name(format!("settings.json.bak-fubunotch-v2-{stamp}"));
         std::fs::copy(&path, &b).map_err(|e| format!("backup failed: {e}"))?;
         backup = b.display().to_string();
     } else if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let text = serde_json::to_string_pretty(new).map_err(|e| e.to_string())?;
-    let tmp = path.with_file_name("settings.json.kanmuri.tmp");
+    let tmp = path.with_file_name("settings.json.fubunotch-v2.tmp");
     std::fs::write(&tmp, text + "\n").map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
     Ok(backup)
@@ -268,7 +267,7 @@ mod tests {
     fn question(multi: bool, n_questions: usize) -> Value {
         let q = json!({ "question": "Where should the build run?", "header": "Build in", "multiSelect": multi,
             "options": [{ "label": "Install here" }, { "label": "Office PC" }] });
-        json!({ "session_id": "s", "cwd": "C:\\x\\kanmuri", "tool_name": "AskUserQuestion",
+        json!({ "session_id": "s", "cwd": "C:\\x\\fubunotch-v2", "tool_name": "AskUserQuestion",
             "tool_input": { "questions": vec![q; n_questions] } })
     }
 
@@ -297,14 +296,14 @@ mod tests {
     }
 
     fn cmd(e: &str) -> String {
-        format!("\"C:/x/kanmuri-hook.exe\" {e}")
+        format!("\"C:/x/fubunotch-v2-hook.exe\" {e}")
     }
 
     #[test]
     fn a_tool_call_in_a_few_words() {
-        let p = json!({ "tool_name": "Bash", "tool_input": { "command": "npm run build" }, "cwd": "C:\\work\\kanmuri" });
+        let p = json!({ "tool_name": "Bash", "tool_input": { "command": "npm run build" }, "cwd": "C:\\work\\fubunotch-v2" });
         assert_eq!(tool_line(&p), "Bash · npm run build");
-        assert_eq!(project(&p), "kanmuri");
+        assert_eq!(project(&p), "fubunotch-v2");
         let e = json!({ "tool_name": "Edit", "tool_input": { "file_path": "C:\\work\\app\\main.rs" } });
         assert_eq!(tool_line(&e), "Edit · main.rs");
     }

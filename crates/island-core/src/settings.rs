@@ -104,9 +104,10 @@ impl Default for SystemSettings {
     }
 }
 
-/// The island's look: a theme (Graphite, neutral, or a hololive member's
-/// colours and pixel mascot) and, if the user chose one, a picture behind it.
-pub const THEMES: &[&str] = &["graphite", "fubuki", "mio", "towa", "azki", "suisei"];
+/// The island's look: a theme (a hololive member's colours and pixel mascot,
+/// or Graphite, neutral, with Fubuki's mascot) and, if the user chose one, a
+/// picture behind it. The first is the default.
+pub const THEMES: &[&str] = &["fubuki", "mio", "towa", "azki", "suisei", "graphite"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -144,8 +145,9 @@ pub struct LookSettings {
 impl Default for LookSettings {
     fn default() -> Self {
         LookSettings { glass_tint: "auto".into(),
-            mascot: false,
-            theme: "graphite".into(),
+            // FubuNotch's own: Fubuki's colours and her chibi on the island.
+            mascot: true,
+            theme: "fubuki".into(),
             background: String::new(),
             background_dim: 0.55,
             style: "black".into(),
@@ -530,7 +532,7 @@ mod tests {
         assert_eq!(parse_hh_mm("24:00"), None);
         let f = FocusSettings { focus_min: 0, short_min: 999, long_min: 15, rounds: 40 }.plan();
         assert_eq!((f.focus_min, f.short_min, f.rounds), (1, 60, 12));
-        assert_eq!(LookSettings { theme: "pekora".into(), ..Default::default() }.theme(), "graphite");
+        assert_eq!(LookSettings { theme: "pekora".into(), ..Default::default() }.theme(), "fubuki");
         assert_eq!(DaySettings { wake: "23:00".into(), bedtime: "07:00".into() }.span(), (420, 1380), "backwards: the defaults");
         assert_eq!(DaySettings { wake: "06:15".into(), bedtime: "00:00".into() }.span(), (420, 1380));
         assert_eq!(DaySettings { wake: "06:15".into(), bedtime: "22:45".into() }.span(), (375, 1365));
@@ -554,6 +556,58 @@ mod tests {
         assert_eq!(wild.closed_alpha(), 0.2);
         let z = wild.sizes();
         assert_eq!((z.idle_w, z.idle_h, z.expanded_w, z.expanded_tall_h), (260.0, 36.0, 600.0, 255.0), "tall never under normal");
+    }
+
+    /// A settings.json as FubuNotch v2 wrote it before this base (10 Nov 2026):
+    /// every value in it stays, every field it lacks takes its default.
+    #[test]
+    fn an_old_fubunotch_v2_file_keeps_its_values() {
+        let old = br#"{
+          "modules": [
+            {"id": "music", "enabled": true}, {"id": "notifications", "enabled": true},
+            {"id": "system", "enabled": true}, {"id": "claude", "enabled": false},
+            {"id": "focus", "enabled": true}, {"id": "water", "enabled": false},
+            {"id": "todo", "enabled": true}, {"id": "shelf", "enabled": true}
+          ],
+          "music": {"lyrics": true, "lyrics_youtube": true, "romaji": false},
+          "notifications": {"popups": true, "apps": ["*"], "off": ["Docker Desktop"]},
+          "system": {"volume": true, "caps_lock": false, "keyboard_layout": true, "charger": true, "network": true, "audio_device": true},
+          "look": {"mascot": true, "theme": "mio", "background": "C:\\x\\background.jpg", "background_dim": 0.2},
+          "water": {"reminders": true, "goal_ml": 1500, "glass_ml": 300, "every_min": 45, "from": "08:00", "until": "22:00"},
+          "focus": {"focus_min": 50, "short_min": 10, "long_min": 20, "rounds": 3},
+          "general": {"hide_after_s": 7, "popups": false},
+          "autostart": true
+        }"#;
+        let s = Settings::parse(old);
+        let ids: Vec<&str> = s.modules.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(&ids[..8], ["music", "notifications", "system", "claude", "focus", "water", "todo", "shelf"], "the order kept");
+        assert!(!s.is_on("claude") && !s.is_on("water") && s.is_on("shelf"), "the switches kept");
+        assert!(s.is_on("prayer") && s.is_on("day") && s.is_on("control") && !s.is_on("weather"), "new modules at their defaults");
+        assert_eq!(s.music, MusicSettings { lyrics: true, lyrics_youtube: true, romaji: false });
+        assert_eq!(s.notifications.off, ["Docker Desktop"]);
+        assert!(!s.system.caps_lock);
+        assert!(s.system.mic_cam, "a switch it lacks: on by default");
+        assert!(s.look.mascot);
+        assert_eq!(s.look.theme(), "mio");
+        assert_eq!(s.look.background, "C:\\x\\background.jpg");
+        assert_eq!(s.look.background_dim, 0.2);
+        assert_eq!(s.look.style(), "black", "the look it never had: the default");
+        assert_eq!(s.look.sizes().idle_h, 45.0);
+        assert_eq!(s.water, WaterSettings { reminders: true, goal_ml: 1500, glass_ml: 300, every_min: 45, from: "08:00".into(), until: "22:00".into() });
+        assert_eq!(s.focus, FocusSettings { focus_min: 50, short_min: 10, long_min: 20, rounds: 3 });
+        assert_eq!((s.general.hide_after_s, s.general.popups), (7, false));
+        assert_eq!(s.general.auto_screen, "off");
+        assert_eq!(s.prayer, PrayerSettings::default());
+        assert!(s.autostart);
+        // Written back, then read again: nothing lost on the way.
+        assert_eq!(Settings::parse(s.to_json().as_bytes()), s);
+    }
+
+    #[test]
+    fn a_fresh_install_has_fubuki_and_her_mascot() {
+        let s = Settings::default();
+        assert_eq!(s.look.theme(), "fubuki");
+        assert!(s.look.mascot);
     }
 
     #[test]

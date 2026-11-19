@@ -21,7 +21,7 @@ strip = true
 
 # The app crate is mostly Slint's generated UI code: optimising it hard took ~5 min
 # a build for no visible gain (the renderer, in the slint crates, stays at "s").
-[profile.release.package.kanmuri]
+[profile.release.package.fubunotch-v2]
 opt-level = 1
 
 # Debug builds without debug info: the target folder was 6-8 GB a checkout,
@@ -42,5 +42,5 @@ lto = false
 codegen-units = 256
 incremental = true
 
-[profile.fast.package.kanmuri]
+[profile.fast.package.fubunotch-v2]
 opt-level = 0
