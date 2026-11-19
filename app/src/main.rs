@@ -504,6 +504,12 @@ fn activity_aumid(notifications: &VecDeque<notif::Notif>, a: &Activity) -> Strin
     notifications.iter().find(|n| n.app == a.source).map(|n| n.aumid.clone()).or_else(|| notif::seen_apps().get(&a.source).cloned()).unwrap_or_default()
 }
 
+/// Where the Accounts tab's terminals start (Settings → Accounts → Terminal
+/// folder), when it is set and still there.
+fn terminal_dir() -> Option<PathBuf> {
+    with_state(|s| s.settings.general.terminal_dir.clone()).filter(|d| !d.is_empty()).map(PathBuf::from).filter(|p| p.is_dir())
+}
+
 /// The Notifications page's rows (indexes in the list, newest first): every
 /// notification kept (NOTIF_HISTORY), in one column that scrolls (the owner,
 /// 19 Nov 2026: the earlier ones must stay reachable, no cap per app).
@@ -3016,6 +3022,7 @@ fn fill_settings(win: &SettingsWindow, s: &Settings) {
         popups: s.general.popups,
         idle_left: s.general.idle_left.as_str().into(),
         idle_right: s.general.idle_right.as_str().into(),
+        terminal_dir: s.general.terminal_dir.as_str().into(),
         idle_left_text: slot_preview(&s.general.idle_left, s).into(),
         idle_right_text: slot_preview(&s.general.idle_right, s).into(),
         hide_after: s.general.hide_after_s.clamp(2, 60) as i32,
@@ -3956,6 +3963,19 @@ fn open_settings(ui: &Island) {
                     });
                 });
             }
+            "terminal.pick" => {
+                let island = ui.as_weak();
+                std::thread::spawn(move || {
+                    let Some(path) = bg::pick_folder("Where the accounts' terminals start") else { return };
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let Some(ui) = island.upgrade() else { return };
+                        change_settings(&ui, |s| s.general.terminal_dir = path.display().to_string());
+                    });
+                });
+            }
+            "terminal.reset" => {
+                change_settings(&ui, |s| s.general.terminal_dir.clear());
+            }
             "background.clear" => {
                 change_settings(&ui, |s| s.look.background.clear());
                 update_background(&ui);
@@ -3981,11 +4001,11 @@ fn open_settings(ui: &Island) {
         let done = match action.as_str() {
             "rename" => accounts::rename(&id, &value),
             "remove" => accounts::remove(&id),
-            "signin" => accounts::sign_in(&id),
-            "terminal" => accounts::terminal(&id, None, None),
+            "signin" => accounts::sign_in(&id, terminal_dir().as_deref()),
+            "terminal" => accounts::terminal(&id, terminal_dir().as_deref(), None),
             "reveal" => accounts::reveal(&id),
             // `id` is the service here; Claude Code / Codex sign the new one in at once.
-            "add" => accounts::add(&id, &value).and_then(|new_id| if id == "desktop" { Ok(()) } else { accounts::sign_in(&new_id) }),
+            "add" => accounts::add(&id, &value).and_then(|new_id| if id == "desktop" { Ok(()) } else { accounts::sign_in(&new_id, terminal_dir().as_deref()) }),
             _ => Ok(()),
         };
         if let Err(e) = &done {

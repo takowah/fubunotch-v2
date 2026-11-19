@@ -37,6 +37,30 @@ pub fn pick() -> Option<PathBuf> {
     }
 }
 
+/// Asks for a folder with Windows' own dialog. Blocks: call on a thread.
+pub fn pick_folder(title: &str) -> Option<PathBuf> {
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, SIGDN_FILESYSPATH};
+    unsafe {
+        let com = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let result = (|| -> windows::core::Result<PathBuf> {
+            let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+            dialog.SetOptions(dialog.GetOptions()? | FOS_PICKFOLDERS)?;
+            dialog.SetTitle(&HSTRING::from(title))?;
+            dialog.Show(None)?;
+            let item = dialog.GetResult()?;
+            let path = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+            let s = path.to_string().unwrap_or_default();
+            windows::Win32::System::Com::CoTaskMemFree(Some(path.0 as *const _));
+            Ok(PathBuf::from(s))
+        })();
+        if com.is_ok() {
+            CoUninitialize();
+        }
+        result.ok()
+    }
+}
+
 /// Copies the picture into `dir` as background.<ext> (the old one goes) and
 /// returns the copy's path.
 pub fn import(from: &Path, dir: &Path) -> std::io::Result<PathBuf> {

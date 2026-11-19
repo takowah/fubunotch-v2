@@ -363,11 +363,14 @@ pub struct GeneralSettings {
     /// "" | "date" | "network" | "battery".
     pub idle_left: String,
     pub idle_right: String,
+    /// Where the Accounts tab's terminals (Sign in, Terminal) start; "" = the
+    /// user's folder (%USERPROFILE%).
+    pub terminal_dir: String,
 }
 
 impl Default for GeneralSettings {
     fn default() -> Self {
-        GeneralSettings { hide_after_s: 3, popups: true, screen: String::new(), auto_screen: "off".into(), idle_left: "date".into(), idle_right: "network".into() }
+        GeneralSettings { hide_after_s: 3, popups: true, screen: String::new(), auto_screen: "off".into(), idle_left: "date".into(), idle_right: "network".into(), terminal_dir: String::new() }
     }
 }
 

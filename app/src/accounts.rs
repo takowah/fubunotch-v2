@@ -335,7 +335,8 @@ pub fn remove(id: &str) -> Result<(), String> {
 /// Opens a terminal signed in as nobody yet, its config folder set to the
 /// slot's, running the app's own login (Claude Code: /login, Codex: login).
 /// The user finishes it there; nothing of it passes through FubuNotch v2.
-pub fn sign_in(id: &str) -> Result<(), String> {
+/// It starts in `cwd` (Settings → Accounts → Terminal folder), else the user's folder.
+pub fn sign_in(id: &str, cwd: Option<&Path>) -> Result<(), String> {
     let state = read_json(&state_path()).ok_or("no accounts set up")?;
     let a = state.get("accounts").and_then(|l| l.as_array()).and_then(|l| l.iter().find(|a| a.get("id").and_then(|x| x.as_str()) == Some(id))).cloned().ok_or("no such account")?;
     let service = a.get("service").and_then(|x| x.as_str()).unwrap_or("");
@@ -355,8 +356,9 @@ pub fn sign_in(id: &str) -> Result<(), String> {
         cmd.env(var, &dir);
     }
     use std::os::windows::process::CommandExt;
+    let cwd = cwd.filter(|p| p.is_dir()).map(Path::to_path_buf).unwrap_or_else(home);
     cmd.creation_flags(0x0000_0010) // CREATE_NEW_CONSOLE
-        .current_dir(home())
+        .current_dir(cwd)
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())

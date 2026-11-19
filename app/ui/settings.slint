@@ -113,6 +113,8 @@ export struct SettingsView {
     // The word sides' text as the island shows it now ("Asar 15:12", "CPU 12%").
     idle-left-text: string,
     idle-right-text: string,
+    // Where the Accounts tab's terminals start; "" = the user's folder.
+    terminal-dir: string,
     hide-after: int,
     theme: string,
     has-background: bool,
@@ -1771,6 +1773,20 @@ export component SettingsWindow inherits Window {
                 }
                 if root.page == "accounts" : HorizontalLayout { padding-left: 6px; padding-top: 4px; Text { text: "Edit a name and press Enter or click elsewhere: it saves at once."; color: K.hint; font-size: 12px; wrap: word-wrap; } }
                 if root.page == "accounts" && root.account-note != "" : HorizontalLayout { padding-left: 6px; Text { text: root.account-note; color: #ff9f0a; font-size: 12.5px; wrap: word-wrap; } }
+                if root.page == "accounts" : Heading { text: "TERMINAL"; }
+                if root.page == "accounts" : Card {
+                    SettingRow {
+                        title: "Terminal folder";
+                        hint: root.s.terminal-dir == "" ? "Sign in and Terminal open in your user folder." : root.s.terminal-dir;
+                        last: true;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: end;
+                            if root.s.terminal-dir != "" : SmallButton { label: "Reset"; clicked => { root.action("terminal.reset"); } }
+                            SmallButton { label: "Choose folder…"; primary: true; clicked => { root.action("terminal.pick"); } }
+                        }
+                    }
+                }
                 if root.page == "accounts" : Heading { text: "CLAUDE DESKTOP"; }
                 if root.page == "accounts" : AccountsCard {
                     service: "desktop";
