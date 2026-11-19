@@ -1529,7 +1529,7 @@ fn refresh(ui: &Island) {
         }
         ui.set_held(state.held);
         // Line shows the lyric on the capsule only when switched on (the owner,
-        // 19 Nov 2026: not by itself while a song plays, as Kanmuri / Mini Island
+        // 19 Nov 2026: not by itself while a song plays, as Mini Island
         // did; untouched, the capsule goes back to quiet). It stays switched on,
         // but shows only while there is music (a browser's session drops out for
         // a moment between songs). A question from Claude Code takes the capsule

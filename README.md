@@ -68,10 +68,6 @@ Needs Rust (stable) and the MSVC Build Tools ("Desktop development with C++"). U
 
 Checks without a screen: `FUBUNOTCH_V2_SNAPSHOT=out.png` draws the island into a PNG and exits (see `CLAUDE.md` for the switches that go with it).
 
-## Credits
-
-The look of this version started from **Kanmuri**, a colleague's fork of FubuNotch v2, which in turn adapted the looks of Mini Island for Windows and the Poni notch app (their numbers, not their code).
-
 ## License
 
 The code is MIT, see [LICENSE](LICENSE). The typefaces are [Allo](app/assets/fonts/OFL-Allo.txt) by Josh Puckett and [Space Mono](https://github.com/googlefonts/spacemono), both under the SIL Open Font License 1.1 ([app/assets/fonts/OFL.txt](app/assets/fonts/OFL.txt)). Icons are Windows' own Segoe Fluent Icons.
