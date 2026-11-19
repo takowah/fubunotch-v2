@@ -3872,7 +3872,8 @@ fn load_chats(win: &SettingsWindow, id: String) {
         let _ = slint::invoke_from_event_loop(move || {
             with_state(|s| {
                 s.chats_loading = false;
-                if s.chats_from == id {
+                // Settings closed meanwhile: nothing to keep it for.
+                if s.chats_from == id && s.settings_window.is_some() {
                     s.chats_list = Some((id.clone(), folders));
                 }
             });
@@ -4324,8 +4325,41 @@ fn open_settings(ui: &Island) {
             });
         }
     });
+    // Closed = gone: the window, its pixels and what only it shows (the
+    // chats list, the background preview) are let go, not kept hidden, so
+    // the island goes back to its idle RAM once Settings is shut.
+    win.window().on_close_requested(|| {
+        Timer::single_shot(std::time::Duration::from_millis(50), release_settings);
+        slint::CloseRequestResponse::HideWindow
+    });
     with_state(|state| state.settings_window = Some(win));
     update_background(ui);
+}
+
+/// Drops the closed Settings window and its caches, then hands the freed
+/// pages back to Windows (Task Manager's figure drops at once).
+fn release_settings() {
+    let win = with_state(|s| {
+        s.chats_list = None;
+        s.chats_open.clear();
+        s.chats_loading = false;
+        s.bg_preview = None;
+        s.bg_key.clear();
+        s.settings_window.take()
+    })
+    .flatten();
+    drop(win);
+    store::log("settings: closed, let go");
+    trim_memory();
+}
+
+/// Asks Windows to page out what the island isn't using right now; it comes
+/// back from RAM's standby list on its own if needed.
+fn trim_memory() {
+    use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
+    unsafe {
+        let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+    }
 }
 
 /// Shows what connecting (or disconnecting) Claude Code changes, and does it
